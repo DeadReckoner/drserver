@@ -2,10 +2,12 @@ package main
 
 import (
 	"dr/server/api"
-	"log"
+	"dr/server/database"
 )
 
-func main() {	
-	log.Println("boiler plate server code")
-    api.Server()
+func main() {
+
+	database.Database()
+	api.Server()
+
 }

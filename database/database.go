@@ -3,17 +3,27 @@ package database
 import (
 	"database/sql"
 	"fmt"
+  "os"
 	"math/rand"
 	"strconv"
-
+  "github.com/go-sql-driver/mysql"
 	"dr/server/types"
+  "log"
 )
 
 var db *sql.DB
 
 func Database() *sql.DB{
-	var err error
-	db, err = sql.Open("mysql", "root:password@/dr_users")
+	
+  cfg := mysql.Config{
+    User: os.Getenv("DBUSER"),
+    Passwd: os.Getenv("DBPASS"),
+    Net: "tcp",
+    Addr: "localhost:3306",
+    DBName: "deadreckoner_db",
+  }
+
+  db, err := sql.Open("mysql", cfg.FormatDSN())
 
 	if err != nil {
 		panic(err)
@@ -23,7 +33,10 @@ func Database() *sql.DB{
 	if err != nil {
 		panic(err)
 	}
-    return db
+
+  log.Println("Started DB")
+
+  return db
 }
 
 func GetUser(id string) string {
