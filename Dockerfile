@@ -1,20 +1,22 @@
-# Specifies a parent image
-FROM golang:1.23.5-bullseye
- 
-# Creates an app directory to hold your app’s source code
+# Start from a lightweight base image
+FROM golang:1.23-alpine
+
+# Set the working directory
 WORKDIR /app
- 
-# Copies everything from your root directory into /app
-COPY main.go .
- 
-# Installs Go dependencies
+
+# Copy your Go module files to download dependencies
+COPY go.mod go.sum ./
+
 RUN go mod download
- 
-# Builds your app with optional configuration
-RUN go build -o /drserver
- 
-# Tells Docker which network port your container listens on
+
+# Copy the rest of your source code
+COPY . .
+
+# Build the application
+RUN go build -o main .
+
+# Expose the port your server listens on
 EXPOSE 8080
- 
-# Specifies the executable command that runs when the container starts
-CMD [ “/drserver” ]
+
+# Start the server
+CMD ["./main"]

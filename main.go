@@ -2,12 +2,12 @@ package main
 
 import (
 	"dr/server/api"
-	"dr/server/database"
+	// "dr/server/database"
 )
 
 func main() {
 
-	database.Database()
+    // database.Database()
 	api.Server()
 
 }
