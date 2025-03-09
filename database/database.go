@@ -1,43 +1,38 @@
 package database
 
 import (
+	"context"
 	"database/sql"
-	"fmt"
-  "os"
-	"math/rand"
-	"strconv"
-  "github.com/go-sql-driver/mysql"
 	"dr/server/types"
-  "log"
+	"fmt"
+	"log"
+	"math/rand"
+	"os"
+	"strconv"
+
+	"github.com/jackc/pgx/v5"
 )
 
 var db *sql.DB
 
-func Database() *sql.DB{
-	
-  cfg := mysql.Config{
-    User: os.Getenv("DBUSER"),
-    Passwd: os.Getenv("DBPASS"),
-    Net: "tcp",
-    Addr: "localhost:3306",
-    DBName: "deadreckoner_db",
-  }
 
-  db, err := sql.Open("mysql", cfg.FormatDSN())
-
+func Database() {
+	conn, err := pgx.Connect(context.Background(), os.Getenv("DATABASE_URL"))
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to connect to the database: %v", err)
 	}
-	err = db.Ping()
+	defer conn.Close(context.Background())
 
-	if err != nil {
-		panic(err)
+	// Example query to test connection
+	var version string
+	if err := conn.QueryRow(context.Background(), "SELECT version()").Scan(&version); err != nil {
+		log.Fatalf("Query failed: %v", err)
 	}
 
-  log.Println("Started DB")
+	log.Println("Connected to:", version)
 
-  return db
 }
+
 
 func GetUser(id string) string {
 	return getUser(db, id)
