@@ -1,7 +1,10 @@
 package api
 
 import (
+	"dr/server/database"
+	"dr/server/types"
 	"log"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,19 +19,28 @@ func Server(){
 	router.DELETE("/user/:id", deleteUser)
   
 
-  router.POST("/task", createTask)
-  router.GET("/tasks/:userid", getTasks)
-  router.GET("/task/:taskid", todo)
-  router.PATCH("/task/:taskid", todo)
-  router.DELETE("/task/:taskid", todo)
+    
+	router.POST("/task", createTask)
+	router.GET("/tasks/:userid", getTasks)
+ 	router.GET("/task/:taskid", todo)
+  	router.PATCH("/task/:taskid", todo)
+  	router.DELETE("/task/:taskid", todo)
+
+
 
 	router.Run("localhost:8080")
 }
 
 func createUser(c *gin.Context){
-	// user := database.GetUser(c.Param("id"))
 
-	// c.IndentedJSON(http.StatusOK, user)
+	var newUser types.User
+
+    if err := c.BindJSON(&newUser); err != nil {
+        return
+    }
+	user := database.CreateUser(newUser)
+
+	c.IndentedJSON(http.StatusOK, user)
 	log.Println("Create")
 }
 func updateUser(c *gin.Context){
@@ -38,6 +50,7 @@ func updateUser(c *gin.Context){
 
 func getUser(c *gin.Context){
 
+	database.GetUser("Michael Bollinger")
 	log.Println("Get")
 }
 

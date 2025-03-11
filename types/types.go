@@ -2,13 +2,9 @@ package types
 
 type User struct {
 	ID int `json:"user_id"`
-	User string `json:"user_name"`
 	First string `json:"first_name"`
 	Last string `json:"last_name"`
 	Email string `json:"email"`
-	Friends []User `json:"friends"`
-	Tasks []Task `json:"tasks"`
-	Roadmaps []Roadmap `json:"road_maps"`
 }
 
 type Task struct{
