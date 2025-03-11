@@ -16,9 +16,9 @@ var db *gorm.DB
 
 type User struct{
 	gorm.Model
-	first_name string
-	last_name string
-	email string
+    FirstName string `gorm:"column:first_name" json:"first_name"`
+    LastName  string `gorm:"column:last_name" json:"last_name"`
+    Email     string `gorm:"column:email" json:"email"`
 }
 
 func Database() {
@@ -41,25 +41,17 @@ func Database() {
 	}
 
 	log.Println("Successfully connected to Supabase PostgreSQL")
-	// conn, err := pgx.Connect(context.Background(), os.Getenv("DATABASE_URL"))
-	// if err != nil {
-	// 	log.Fatalf("Failed to connect to the database: %v", err)
-	// }
-	// defer conn.Close(context.Background())
-
-	// // Example query to test connection
-	// var version string
-	// if err := conn.QueryRow(context.Background(), "SELECT version()").Scan(&version); err != nil {
-	// 	log.Fatalf("Query failed: %v", err)
-	// }
-
-	// log.Println("Connected to:", version
-
 }
 
 func CreateUser(user types.User) *gorm.DB{
-	tx := db.Create(&User{first_name: user.First, last_name: user.Last, email: user.Email})
 
+	newUser := User{
+		FirstName: user.First,
+		LastName: user.Last,
+		Email: user.Email,
+	}
+
+	tx := db.Create(&newUser)
 	return tx
 }
 

@@ -3,6 +3,7 @@ package api
 import (
 	"dr/server/database"
 	"dr/server/types"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -36,12 +37,19 @@ func createUser(c *gin.Context){
 	var newUser types.User
 
     if err := c.BindJSON(&newUser); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
         return
     }
-	user := database.CreateUser(newUser)
+	fmt.Printf("User received: %+v\n", newUser)
 
-	c.IndentedJSON(http.StatusOK, user)
-	log.Println("Create")
+	tx := database.CreateUser(newUser)
+	if tx.Error != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+        return
+    }
+
+	c.JSON(http.StatusOK, gin.H{"message": "User created successfully"})
+    log.Println("User created")
 }
 func updateUser(c *gin.Context){
 
