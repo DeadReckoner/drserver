@@ -1,9 +1,9 @@
 package database
 
 import (
-	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"dr/server/types"
 
@@ -55,8 +55,14 @@ func CreateUser(user types.User) *gorm.DB{
 	return tx
 }
 
-func GetUser(userid string){
+func GetUser(user_id string) User{
+	var user User
+	id, _ := strconv.Atoi(user_id)
+	log.Printf("Fetching User: %s\n", user_id)
+	db.First(&user, id)
 
-	fmt.Println("get user {}", userid)
+	log.Println(user)
+
+	return user
 } 
 

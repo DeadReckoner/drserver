@@ -51,15 +51,18 @@ func createUser(c *gin.Context){
 	c.JSON(http.StatusOK, gin.H{"message": "User created successfully"})
     log.Println("User created")
 }
+
+
 func updateUser(c *gin.Context){
 
 	log.Println("Update")
 }
 
 func getUser(c *gin.Context){
-
-	database.GetUser("Michael Bollinger")
-	log.Println("Get")
+    user_id := c.Param("id")
+	user := database.GetUser(user_id)
+	
+	c.IndentedJSON(http.StatusOK, user)
 }
 
 func deleteUser(c *gin.Context){
