@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"dr/server/types"
 
@@ -15,10 +16,13 @@ import (
 var db *gorm.DB
 
 type User struct{
-	gorm.Model
+	UserID    uint   `gorm:"primaryKey;column:user_id" json:"user_id"`
     FirstName string `gorm:"column:first_name" json:"first_name"`
     LastName  string `gorm:"column:last_name" json:"last_name"`
     Email     string `gorm:"column:email" json:"email"`
+	CreatedAt time.Time
+    UpdatedAt time.Time
+    DeletedAt gorm.DeletedAt `gorm:"index"`
 }
 
 func Database() {

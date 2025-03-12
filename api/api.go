@@ -60,6 +60,7 @@ func updateUser(c *gin.Context){
 
 func getUser(c *gin.Context){
     user_id := c.Param("id")
+	
 	user := database.GetUser(user_id)
 	
 	c.IndentedJSON(http.StatusOK, user)
