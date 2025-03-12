@@ -25,6 +25,19 @@ type User struct{
     DeletedAt gorm.DeletedAt `gorm:"index"`
 }
 
+type Task struct{
+	TaskID    uint   `gorm:"primaryKey;column:task_id" json:"task_id"`
+	UserID    uint   `gorm:"index" json:"user_id"`
+    Title string `gorm:"column:title" json:"title"`
+    Description  string `gorm:"column:description" json:"description"`
+    Level     string `gorm:"column:level" json:"level"`
+	Completed bool `gorm:"column:completed" json:"complete"`
+	StartDate string `gorm:"column:start_date" json:"start_date"`
+	EndDate string `gorm:"column:end_date" json:"end_date"`
+	CreatedAt time.Time
+	ParentTaskID    *uint   `gorm:"index" json:"parent_task_id"`
+}
+
 func Database() {
 	err := godotenv.Load()
 	if err != nil {
@@ -69,4 +82,19 @@ func GetUser(user_id string) User{
 
 	return user
 } 
+
+func GetTasks(id string) []Task{
+	var tasks []Task
+	id_val, _ := strconv.Atoi(id)
+
+	result := db.Debug().Where("user_id = ?", id_val).Find(&tasks)
+
+	if result.Error != nil {
+		log.Println("Error:", result.Error)
+	} else {
+		log.Printf("Found %d tasks\n", len(tasks))
+	}
+
+	return tasks
+}
 

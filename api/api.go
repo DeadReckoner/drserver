@@ -76,9 +76,11 @@ func createTask(c *gin.Context){
 }
 
 func getTasks(c *gin.Context){
-  userid := c.Param("id")
-
-  log.Println("Get tasks for user", userid)
+    task_id := c.Param("userid")
+	
+	tasks := database.GetTasks(task_id)
+	
+	c.IndentedJSON(http.StatusOK, tasks)
 }
 
 
