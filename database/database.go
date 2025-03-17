@@ -15,35 +15,35 @@ import (
 
 var db *gorm.DB
 
-type User struct{
+type User struct {
 	UserID    uint   `gorm:"primaryKey;column:user_id" json:"user_id"`
-    FirstName string `gorm:"column:first_name" json:"first_name"`
-    LastName  string `gorm:"column:last_name" json:"last_name"`
-    Email     string `gorm:"column:email" json:"email"`
+	FirstName string `gorm:"column:first_name" json:"first_name"`
+	LastName  string `gorm:"column:last_name" json:"last_name"`
+	Email     string `gorm:"column:email" json:"email"`
 	CreatedAt time.Time
-    UpdatedAt time.Time
-    DeletedAt gorm.DeletedAt `gorm:"index"`
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
 
-type Task struct{
-	TaskID    uint   `gorm:"primaryKey;column:task_id" json:"task_id"`
-	UserID    uint   `gorm:"index" json:"user_id"`
-    Title string `gorm:"column:title" json:"title"`
-    Description  string `gorm:"column:description" json:"description"`
-    Level     string `gorm:"column:level" json:"level"`
-	Completed bool `gorm:"column:completed" json:"complete"`
-	StartDate string `gorm:"column:start_date" json:"start_date"`
-	EndDate string `gorm:"column:end_date" json:"end_date"`
-	CreatedAt time.Time
-	ParentTaskID    *uint   `gorm:"index" json:"parent_task_id"`
+type Task struct {
+	TaskID       uint   `gorm:"primaryKey;column:task_id" json:"task_id"`
+	UserID       uint   `gorm:"index" json:"user_id"`
+	Title        string `gorm:"column:title" json:"title"`
+	Description  string `gorm:"column:description" json:"description"`
+	Level        string `gorm:"column:level" json:"level"`
+	Completed    bool   `gorm:"column:completed" json:"complete"`
+	StartDate    string `gorm:"column:start_date" json:"start_date"`
+	EndDate      string `gorm:"column:end_date" json:"end_date"`
+	CreatedAt    time.Time
+	ParentTaskID *uint `gorm:"index" json:"parent_task_id"`
 }
 
+// Database init.
 func Database() {
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("No .env file found, using environment variables")
 	}
-
 
 	dsn := os.Getenv("DATABASE_URL")
 	log.Println("DB: ", dsn)
@@ -60,19 +60,21 @@ func Database() {
 	log.Println("Successfully connected to Supabase PostgreSQL")
 }
 
-func CreateUser(user types.User) *gorm.DB{
+// Create user in Database
+func CreateUser(user types.User) *gorm.DB {
 
 	newUser := User{
 		FirstName: user.First,
-		LastName: user.Last,
-		Email: user.Email,
+		LastName:  user.Last,
+		Email:     user.Email,
 	}
 
 	tx := db.Create(&newUser)
 	return tx
 }
 
-func GetUser(user_id string) User{
+// GetUser from Database
+func GetUser(user_id string) User {
 	var user User
 	id, _ := strconv.Atoi(user_id)
 	log.Printf("Fetching User: %s\n", user_id)
@@ -81,9 +83,10 @@ func GetUser(user_id string) User{
 	log.Println(user)
 
 	return user
-} 
+}
 
-func GetTasks(id string) []Task{
+// GetTasks by id
+func GetTasks(id string) []Task {
 	var tasks []Task
 	id_val, _ := strconv.Atoi(id)
 
@@ -98,3 +101,22 @@ func GetTasks(id string) []Task{
 	return tasks
 }
 
+func CreateTask(task types.Task) *gorm.DB {
+
+	var task_id uint = 345
+
+	newTask := Task{
+		TaskID: task_id,
+		UserID: 6,
+		Title:       task.Title,
+		Description: task.Description,
+		Level:       task.Level,
+		StartDate:   task.StartDate,
+		EndDate:     task.EndDate,
+		Completed:   task.Completed,
+		ParentTaskID: &task_id,
+	}
+
+	tx := db.Create(&newTask)
+	return tx
+}

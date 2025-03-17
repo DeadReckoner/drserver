@@ -7,7 +7,7 @@ import (
 
 func main() {
 
-    database.Database()
+	database.Database()
 	api.Server()
 
 }
