@@ -48,8 +48,12 @@ func createUser(c *gin.Context) {
 }
 
 func updateUser(c *gin.Context) {
+	user_id := c.Param("id")
+
+	user := database.UpdateUser(user_id)
 
 	log.Println("Update")
+	c.IndentedJSON((http.StatusAccepted), user)
 }
 
 func getUser(c *gin.Context) {

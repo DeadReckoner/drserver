@@ -85,6 +85,18 @@ func GetUser(user_id string) User {
 	return user
 }
 
+func UpdateUser(user_id string) User {
+	var user User
+	id, _ := strconv.Atoi(user_id)
+
+	log.Printf("Fetching User: %s\n", user_id)
+	db.First(&user, id)
+
+	log.Println(user)
+
+	return user
+}
+
 // GetTasks by id
 func GetTasks(id string) []Task {
 	var tasks []Task
