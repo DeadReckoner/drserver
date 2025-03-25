@@ -8,6 +8,7 @@ import (
 
 	"dr/server/types"
 
+	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -16,13 +17,11 @@ import (
 var db *gorm.DB
 
 type User struct {
-	UserID    uint   `gorm:"primaryKey;column:user_id" json:"user_id"`
+	UserID    string `gorm:"type:uuid;primaryKey;column:user_id" json:"user_id"`
 	FirstName string `gorm:"column:first_name" json:"first_name"`
 	LastName  string `gorm:"column:last_name" json:"last_name"`
 	Email     string `gorm:"column:email" json:"email"`
 	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index"`
 }
 
 type Task struct {
@@ -45,7 +44,7 @@ func Database() {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	dsn := os.Getenv("DATABASE_URL")
+	dsn := os.Getenv("DB_URL")
 	log.Println("DB: ", dsn)
 	if dsn == "" {
 		log.Fatal("DATABASE_URL is not set")
@@ -61,9 +60,13 @@ func Database() {
 }
 
 // Create user in Database
-func CreateUser(user types.User) *gorm.DB {
+func CreateUser(c *gin.Context, user types.User) *gorm.DB {
+	// Handle error later
+	user_id, _ := c.Get("user_id")
+	
 
 	newUser := User{
+		UserID: user_id.(string),
 		FirstName: user.First,
 		LastName:  user.Last,
 		Email:     user.Email,

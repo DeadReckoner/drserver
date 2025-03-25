@@ -7,11 +7,15 @@ import (
 	"log"
 	"net/http"
 
+	"dr/server/middleware"
+
 	"github.com/gin-gonic/gin"
 )
 
 func Server() {
 	router := gin.Default()
+
+	router.Use(middleware.AuthMiddleware())
 
 	router.POST("/user", createUser)
 	router.GET("/user/:id", getUser)
@@ -37,7 +41,7 @@ func createUser(c *gin.Context) {
 	}
 	fmt.Printf("User received: %+v\n", newUser)
 
-	tx := database.CreateUser(newUser)
+	tx := database.CreateUser(c, newUser)
 	if tx.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
 		return
