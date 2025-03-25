@@ -11,10 +11,14 @@ type User struct {
 }
 
 type Task struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Level       string `json:level`
-	StartDate   string `json:"start_date"`
-	EndDate     string `json:"end_date"`
-	Completed   bool   `json:"completed"`
+	TaskID       uint   `gorm:"primaryKey;column:task_id" json:"task_id"`
+	UserID       uint   `gorm:"index" json:"user_id"`
+	Title        string `gorm:"column:title" json:"title"`
+	Description  string `gorm:"column:description" json:"description"`
+	Level        string `gorm:"column:level" json:"level"`
+	Completed    bool   `gorm:"column:completed" json:"complete"`
+	StartDate    string `gorm:"column:start_date" json:"start_date"`
+	EndDate      string `gorm:"column:end_date" json:"end_date"`
+	CreatedAt    time.Time
+	ParentTaskID *uint `gorm:"index" json:"parent_task_id"`
 }

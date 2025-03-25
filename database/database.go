@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"time"
 
 	"dr/server/types"
 
@@ -18,18 +17,7 @@ var db *gorm.DB
 
 
 
-type Task struct {
-	TaskID       uint   `gorm:"primaryKey;column:task_id" json:"task_id"`
-	UserID       uint   `gorm:"index" json:"user_id"`
-	Title        string `gorm:"column:title" json:"title"`
-	Description  string `gorm:"column:description" json:"description"`
-	Level        string `gorm:"column:level" json:"level"`
-	Completed    bool   `gorm:"column:completed" json:"complete"`
-	StartDate    string `gorm:"column:start_date" json:"start_date"`
-	EndDate      string `gorm:"column:end_date" json:"end_date"`
-	CreatedAt    time.Time
-	ParentTaskID *uint `gorm:"index" json:"parent_task_id"`
-}
+
 
 // Database init.
 func Database() {
@@ -91,8 +79,8 @@ func UpdateUser(user_id string) types.User {
 }
 
 // GetTasks by id
-func GetTasks(id string) []Task {
-	var tasks []Task
+func GetTasks(id string) []types.Task {
+	var tasks []types.Task
 	id_val, _ := strconv.Atoi(id)
 
 	result := db.Debug().Where("user_id = ?", id_val).Find(&tasks)
@@ -110,7 +98,7 @@ func CreateTask(task types.Task) *gorm.DB {
 
 	var task_id uint = 345
 
-	newTask := Task{
+	newTask := types.Task{
 		TaskID: task_id,
 		UserID: 6,
 		Title:       task.Title,
