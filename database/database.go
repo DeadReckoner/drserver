@@ -16,13 +16,7 @@ import (
 
 var db *gorm.DB
 
-type User struct {
-	UserID    string `gorm:"type:uuid;primaryKey;column:user_id" json:"user_id"`
-	FirstName string `gorm:"column:first_name" json:"first_name"`
-	LastName  string `gorm:"column:last_name" json:"last_name"`
-	Email     string `gorm:"column:email" json:"email"`
-	CreatedAt time.Time
-}
+
 
 type Task struct {
 	TaskID       uint   `gorm:"primaryKey;column:task_id" json:"task_id"`
@@ -64,32 +58,28 @@ func CreateUser(c *gin.Context, user types.User) *gorm.DB {
 	// Handle error later
 	user_id, _ := c.Get("user_id")
 	
+	user.UserID = user_id.(string)
 
-	newUser := User{
-		UserID: user_id.(string),
-		FirstName: user.First,
-		LastName:  user.Last,
-		Email:     user.Email,
-	}
 
-	tx := db.Create(&newUser)
+	tx := db.Create(&user)
 	return tx
 }
 
 // GetUser from Database
-func GetUser(user_id string) User {
-	var user User
-	id, _ := strconv.Atoi(user_id)
-	log.Printf("Fetching User: %s\n", user_id)
-	db.First(&user, id)
+func GetUser(c *gin.Context) types.User {
+	
+	var user types.User
+	user_id, _ := c.Get("user_id")
+	
+	db.Where("user_id = ?", user_id).First(&user)
 
 	log.Println(user)
 
 	return user
 }
 
-func UpdateUser(user_id string) User {
-	var user User
+func UpdateUser(user_id string) types.User {
+	var user types.User
 	id, _ := strconv.Atoi(user_id)
 
 	log.Printf("Fetching User: %s\n", user_id)

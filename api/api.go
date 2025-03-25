@@ -18,7 +18,7 @@ func Server() {
 	router.Use(middleware.AuthMiddleware())
 
 	router.POST("/user", createUser)
-	router.GET("/user/:id", getUser)
+	router.GET("/user", getUser)
 	router.PATCH("/user/:id", updateUser)
 	router.DELETE("/user/:id", deleteUser)
 
@@ -61,9 +61,8 @@ func updateUser(c *gin.Context) {
 }
 
 func getUser(c *gin.Context) {
-	user_id := c.Param("id")
 
-	user := database.GetUser(user_id)
+	user := database.GetUser(c)
 
 	c.IndentedJSON(http.StatusOK, user)
 }

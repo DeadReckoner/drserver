@@ -63,14 +63,10 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-
 		accessToken := strings.TrimPrefix(authHeader, "Bearer ")
-
-
 		user_id := parseToken(accessToken)
 
 		c.Set("user_id", user_id)
-
 		c.Next()
 	}
 
