@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"dr/server/types"
 
@@ -47,6 +48,7 @@ func CreateUser(c *gin.Context, user types.User) *gorm.DB {
 	user_id, _ := c.Get("user_id")
 	
 	user.UserID = user_id.(string)
+	user.CreatedAt = time.Now()	
 
 
 	tx := db.Create(&user)
