@@ -34,9 +34,16 @@ func Database() {
 	}
 
 	// Connect to the database using GORM
-	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	for attempts := 1; attempts <= 5; attempts++ {
+		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		if err == nil {
+			break
+		}
+		log.Printf("DB connection failed (attempt %d): %v", attempts, err)
+		time.Sleep(time.Duration(attempts) * time.Second)
+	}
 	if err != nil {
-		log.Fatalf("Failed to connect to the database: %v", err)
+		log.Fatalf("Failed to connect to the database after retries: %v", err)
 	}
 
 	log.Println("Successfully connected to Supabase PostgreSQL")
