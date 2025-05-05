@@ -27,7 +27,7 @@ func Database() {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	dsn := os.Getenv("DB_URL")
+	dsn := os.Getenv("DATABASE_URL")
 	log.Println("DB: ", dsn)
 	if dsn == "" {
 		log.Fatal("DATABASE_URL is not set")
