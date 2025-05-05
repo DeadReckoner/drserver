@@ -20,3 +20,10 @@ primary_region = 'ewr'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
+
+
+[env]
+  LOG_LEVEL = "debug"
+  API_URL = "https://bbghphhkbqxbjgwqmlhd.supabase.co"
+  DB_URL="postgresql://postgres:%21QAZ1qaz%24RFV4rfv@db.bbghphhkbqxbjgwqmlhd.supabase.co:5432/postgres"
+
