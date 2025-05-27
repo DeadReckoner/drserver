@@ -1,6 +1,7 @@
 package api
 
 import (
+	"dr/server/agent"
 	"dr/server/database"
 	"dr/server/types"
 	"fmt"
@@ -27,6 +28,8 @@ func NewRouter() *gin.Engine {
     router.GET("/task/:taskid", todo)
     router.PATCH("/task/:taskid", todo)
     router.DELETE("/task/:taskid", todo)
+
+	router.POST("/agent/generate", agentGen)
 
     // Health check endpoint
     router.GET("/healthz", func(c *gin.Context) {
@@ -105,4 +108,28 @@ func getTasks(c *gin.Context) {
 
 func todo(c *gin.Context) {
 	log.Println("ToDo")
+}
+
+func agentGen(c *gin.Context) {
+
+	var prompt types.Prompt
+	if err := c.BindJSON(&prompt); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	fmt.Printf("Prompt received: %+v\n", prompt)
+
+	resp, err := agent.GenerateGoalBlueprint(prompt.UserPrompt)
+	if err != nil {
+		log.Println("Failed to generate roadmap", err)
+	}
+
+
+	roadmap, err := agent.ParseRoadmap(resp)
+	if err != nil{
+		log.Fatal("Failed to parse roadmap", err)
+	}
+
+	fmt.Println("Roadmap:", roadmap)
+	
 }

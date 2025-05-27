@@ -22,3 +22,37 @@ type Task struct {
 	CreatedAt    time.Time
 	ParentTaskID *uint `gorm:"index" json:"parent_task_id"`
 }
+
+type Prompt struct{
+	UserPrompt string `json:"user_prompt"`
+}
+
+type OpenAIContent struct {
+	Type        string `json:"type"`
+	Annotations []any  `json:"annotations"`
+	Text        string `json:"text"` // this is a JSON string
+}
+
+type OpenAIMessage struct {
+	ID     string           `json:"id"`
+	Type   string           `json:"type"`
+	Status string           `json:"status"`
+	Content []OpenAIContent `json:"content"`
+}
+
+type OpenAIResponse struct {
+	ID     string           `json:"id"`
+	Output []OpenAIMessage  `json:"output"`
+}
+
+
+type GoalRoadmap struct {
+	Message     string        `json:"message"`
+	Title       string        `json:"title"`
+	Description string        `json:"description"`
+	Level       string        `json:"level"`
+	StartTime   string        `json:"start_time"`
+	EndTime     string        `json:"end_time"`
+	Completed   bool          `json:"completed"`
+	Subtasks    []GoalRoadmap `json:"subtasks"`
+}
