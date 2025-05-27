@@ -12,23 +12,28 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Server() {
-	router := gin.Default()
+func NewRouter() *gin.Engine {
+    router := gin.Default()
 
-	router.Use(middleware.AuthMiddleware())
+    router.Use(middleware.AuthMiddleware())
 
-	router.POST("/user", createUser)
-	router.GET("/user", getUser)
-	router.PATCH("/user/:id", updateUser)
-	router.DELETE("/user/:id", deleteUser)
+    router.POST("/user", createUser)
+    router.GET("/user", getUser)
+    router.PATCH("/user/:id", updateUser)
+    router.DELETE("/user/:id", deleteUser)
 
-	router.POST("/task", createTask)
-	router.GET("/tasks/:userid", getTasks)
-	router.GET("/task/:taskid", todo)
-	router.PATCH("/task/:taskid", todo)
-	router.DELETE("/task/:taskid", todo)
+    router.POST("/task", createTask)
+    router.GET("/tasks/:userid", getTasks)
+    router.GET("/task/:taskid", todo)
+    router.PATCH("/task/:taskid", todo)
+    router.DELETE("/task/:taskid", todo)
 
-	router.Run("localhost:8080")
+    // Health check endpoint
+    router.GET("/healthz", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{"status": "ok"})
+    })
+
+    return router
 }
 
 func createUser(c *gin.Context) {
