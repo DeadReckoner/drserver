@@ -81,9 +81,10 @@ func parseToken(accessToken string) string {
     godotenv.Load(".env")
 	// supabaseURL := os.Getenv("API_URL")
 	supabaseKey := os.Getenv("anon_key")
+	supabaseApi := os.Getenv("API_URL")
 
 
-	req, err := http.NewRequest("GET", "http://127.0.0.1:54321/auth/v1/user", nil)
+	req, err := http.NewRequest("GET", supabaseApi + "/auth/v1/user", nil)
 	if err != nil {
 		fmt.Println("Error creating request:", err)
 		return ""
