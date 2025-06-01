@@ -36,7 +36,12 @@ func Database() {
 
 	// Connect to the database using GORM
 	for attempts := 1; attempts <= 5; attempts++ {
-		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+		db, err = gorm.Open(postgres.New(postgres.Config{
+    
+			DSN:                  dsn,
+			PreferSimpleProtocol: true, // disables statement preparation
+		}), &gorm.Config{})
+		
 		if err == nil {
 			break
 		}
