@@ -86,7 +86,7 @@ func createTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	fmt.Printf("Task received: %+v\n", newTask)
+	fmt.Printf("New task received: %+v\n", newTask)
 
 	tx := database.CreateTask(newTask)
 	if tx.Error != nil {
