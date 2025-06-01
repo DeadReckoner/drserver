@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"log"
 	"os"
 	"strconv"
@@ -52,7 +53,10 @@ func Database() {
 // Create user in Database
 func CreateUser(c *gin.Context, user types.User) *gorm.DB {
 	// Handle error later
-	user_id, _ := c.Get("user_id")
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return &gorm.DB{Error: errors.New("missing or invalid user_id")}
+	}
 	
 	user.UserID = user_id.(string)
 	user.CreatedAt = time.Now()	

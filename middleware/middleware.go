@@ -66,6 +66,12 @@ func AuthMiddleware() gin.HandlerFunc {
 		accessToken := strings.TrimPrefix(authHeader, "Bearer ")
 		user_id := parseToken(accessToken)
 
+		if user_id == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token or user ID not found"})
+			c.Abort()
+			return
+		}
+
 		c.Set("user_id", user_id)
 		c.Next()
 	}
