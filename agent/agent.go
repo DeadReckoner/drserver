@@ -64,7 +64,7 @@ func GenerateGoalBlueprint(userPrompt string) ([]byte, error) {
 		Input: []Message{
 			{
 				Role:    "system",
-				Content: "You are an AI assistant that helps users build structured achievement pathways. You must only respond with a JSON object that follows the provided schema. Add a 'message' field with a short friendly intro like 'Here's what I made for you!'. Only include the necessary levels (YEAR, QUARTER, MONTH, WEEK, DAY) based on the goal’s scope.",
+				Content: "You are an AI assistant that helps users build structured achievement pathways. You must only respond with a JSON object that follows the provided schema. Add a 'message' field with a short friendly intro like 'Here's what I made for you!'. Only include the necessary levels (YEAR, QUARTER, MONTH, WEEK, DAY) based on the goal’s scope. However, the roadmap should be as detailed as possible at the lowest level. The daily tasks should have detailed actionable steps. You should ask between 3-5 clarifying questions before generating the schema, things like the users experience with the task, or what their current proficency to make this roadmap as personalized as possible.",
 			},
 			{
 				Role:    "user",
