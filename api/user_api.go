@@ -49,5 +49,12 @@ func getUser(c *gin.Context) {
 }
 
 func deleteUser(c *gin.Context) {
+
+	user_id := c.Param("id")
+
+	fmt.Printf("Deleting User: %s", user_id)
+
+
+
 	log.Println("Delete")
 }

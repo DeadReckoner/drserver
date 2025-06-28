@@ -96,6 +96,15 @@ func UpdateUser(user_id string) types.User {
 	return user
 }
 
+func DeleteUser(c *gin.Context) error {
+
+	user_id, _ := c.Get("user_id")
+
+	db.Delete(user_id)
+
+	return nil
+}
+
 // GetTasks by id
 func GetTasks(id string) []types.Task {
 	var tasks []types.Task
