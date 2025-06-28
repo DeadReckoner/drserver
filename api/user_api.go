@@ -49,12 +49,17 @@ func getUser(c *gin.Context) {
 }
 
 func deleteUser(c *gin.Context) {
-
-	user_id := c.Param("id")
-
-	fmt.Printf("Deleting User: %s", user_id)
+    user_id := c.Param("id")
+    fmt.Printf("Deleting User: %s\n", user_id)
 
 
+    err := database.DeleteUser(c)
 
-	log.Println("Delete")
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
+    log.Println("Delete")
 }

@@ -97,12 +97,16 @@ func UpdateUser(user_id string) types.User {
 }
 
 func DeleteUser(c *gin.Context) error {
+    user_id, exists := c.Get("user_id")
+    if !exists || user_id == "" {
+        return errors.New("missing or invalid user_id")
+    }
 
-	user_id, _ := c.Get("user_id")
-
-	db.Delete(user_id)
-
-	return nil
+    result := db.Where("user_id = ?", user_id).Delete(&types.User{})
+    if result.Error != nil {
+        return result.Error
+    }
+    return nil
 }
 
 // GetTasks by id
