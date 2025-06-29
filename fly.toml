@@ -25,6 +25,6 @@ primary_region = 'ewr'
 [env]
   LOG_LEVEL = "debug"
   API_URL = "https://bbghphhkbqxbjgwqmlhd.supabase.co"
-  DATABASE_URL="postgresql://postgres.bbghphhkbqxbjgwqmlhd:quvs6Nse5CmGS9jZ@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
+  DATABASE_URL="postgresql://postgres.bbghphhkbqxbjgwqmlhd:W07nO7QKpVpp2K9e@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
   anon_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJiZ2hwaGhrYnF4Ympnd3FtbGhkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE1NTMzNTAsImV4cCI6MjA1NzEyOTM1MH0.5F59qXfUP2-kq8VtpT0-iur8MP7qoWhIvvMAYz4WE8A"
 
