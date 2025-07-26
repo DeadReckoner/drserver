@@ -37,6 +37,10 @@ func NewRouter() *gin.Engine {
     router.PATCH("/task/:taskid", updateTask)
     router.DELETE("/task/:taskid", todo)
 
+
+    router.POST("/roadmap", createRoadmap)
+
+
 	router.POST("/agent/generate", agentGen)
 
     // Health check endpoint

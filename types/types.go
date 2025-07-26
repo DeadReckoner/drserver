@@ -34,20 +34,7 @@ type OpenAIResponse struct {
 }
 
 
-type GoalRoadmap struct {
-	Message     string        `json:"message"`
-	Title       string        `json:"title"`
-	Completed   bool          `json:"completed"`
-	Subtasks    []Task 		  `json:"subtasks"`
-}
 
-
-type FullRoadmap struct {
-	Roadmap		Roadmap		`json:"roadmap"`
-	Milestones	[]Milestone `json:"milestones"`
-	Tasks		[]Task		`json:"tasks"`
-	Steps		[]Step		`json:"steps"`
-}
 
 
 type Roadmap struct {

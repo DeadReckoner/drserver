@@ -144,3 +144,18 @@ func GetTasks(id string) []types.Task {
 // 	tx := db.Create(&newTask)
 // 	return tx
 // }
+
+
+func CreateRoadmap(c *gin.Context, rm types.Roadmap) *gorm.DB{
+	// Handle error later
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return &gorm.DB{Error: errors.New("missing or invalid user_id")}
+	}
+	
+	rm.UserID = user_id.(string)
+
+
+	tx := db.Create(&rm)
+	return tx
+}
