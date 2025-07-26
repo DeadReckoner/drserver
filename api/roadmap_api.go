@@ -36,3 +36,12 @@ func createRoadmap(c *gin.Context){
 	log.Println("Roadmap created")
 
 }
+
+
+func getRoadmapsByUser(c *gin.Context){
+
+	roadmaps := database.GetRoadmapsByUser(c)
+
+	c.IndentedJSON(http.StatusOK, roadmaps)
+
+}

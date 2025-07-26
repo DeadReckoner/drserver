@@ -39,6 +39,7 @@ func NewRouter() *gin.Engine {
 
 
     router.POST("/roadmap", createRoadmap)
+    router.GET("/roadmaps/:userid", getRoadmapsByUser)
 
 
 	router.POST("/agent/generate", agentGen)

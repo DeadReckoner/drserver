@@ -111,7 +111,7 @@ func GenerateGoalBlueprint(userPrompt string) ([]byte, error) {
 }
 
 
-func ParseRoadmap(raw []byte) (*types.GoalRoadmap, error) {
+func ParseRoadmap(raw []byte) (*types.Roadmap, error) {
 	var apiResp types.OpenAIResponse
 	if err := json.Unmarshal(raw, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse OpenAI response: %w", err)
@@ -124,7 +124,7 @@ func ParseRoadmap(raw []byte) (*types.GoalRoadmap, error) {
 	// Extract the JSON string from inside the OpenAI response
 	rawJSON := apiResp.Output[0].Content[0].Text
 
-	var roadmap types.GoalRoadmap
+	var roadmap types.Roadmap
 	if err := json.Unmarshal([]byte(rawJSON), &roadmap); err != nil {
 		return nil, fmt.Errorf("failed to parse embedded goal roadmap JSON: %w", err)
 	}

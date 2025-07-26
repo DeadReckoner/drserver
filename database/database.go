@@ -159,3 +159,21 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) *gorm.DB{
 	tx := db.Create(&rm)
 	return tx
 }
+
+
+func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
+    var roadmaps []types.Roadmap
+    user_id, exists := c.Get("user_id")
+    if !exists || user_id == "" {
+        log.Println("missing or invalid user_id")
+        return roadmaps
+    }
+
+    // Query the roadmap table for all roadmaps with this user_id
+    result := db.Where("user_id = ?", user_id).Preload("Milestones.Tasks.Steps").Find(&roadmaps)
+    if result.Error != nil {
+        log.Println("Error fetching roadmaps:", result.Error)
+    }
+
+    return roadmaps
+}
