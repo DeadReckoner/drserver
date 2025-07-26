@@ -2,32 +2,30 @@ package api
 
 import (
 	"dr/server/database"
-	"dr/server/types"
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-func createTask(c *gin.Context) {
-	var newTask types.Task
+// func createTask(c *gin.Context) {
+// 	var newTask types.Task
 
-	if err := c.BindJSON(&newTask); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	fmt.Printf("New task received: %+v\n", newTask)
+// 	if err := c.BindJSON(&newTask); err != nil {
+// 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+// 		return
+// 	}
+// 	fmt.Printf("New task received: %+v\n", newTask)
 
-	tx := database.CreateTask(newTask)
-	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
-		return
-	}
+// 	tx := database.CreateTask(newTask)
+// 	if tx.Error != nil {
+// 		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+// 		return
+// 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Task created successfully"})
-	log.Println("Task created")
-}
+// 	c.JSON(http.StatusOK, gin.H{"message": "Task created successfully"})
+// 	log.Println("Task created")
+// }
 
 func getTasks(c *gin.Context) {
 	task_id := c.Param("userid")
@@ -35,4 +33,13 @@ func getTasks(c *gin.Context) {
 	tasks := database.GetTasks(task_id)
 
 	c.IndentedJSON(http.StatusOK, tasks)
+}
+
+func updateTask(c *gin.Context) {
+	task_id := c.Param("taskid")
+
+	fmt.Println("Task ID", task_id)
+
+	c.JSON(http.StatusAccepted, gin.H{"message": "Task update successful"})
+
 }

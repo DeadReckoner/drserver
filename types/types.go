@@ -10,18 +10,6 @@ type User struct {
 	CreatedAt time.Time
 }
 
-type Task struct {
-	TaskID       uint   `gorm:"primaryKey;column:task_id" json:"task_id"`
-	UserID       uint   `gorm:"index" json:"user_id"`
-	Title        string `gorm:"column:title" json:"title"`
-	Description  string `gorm:"column:description" json:"description"`
-	Level        string `gorm:"column:level" json:"level"`
-	Completed    bool   `gorm:"column:completed" json:"complete"`
-	StartDate    string `gorm:"column:start_date" json:"start_date"`
-	EndDate      string `gorm:"column:end_date" json:"end_date"`
-	CreatedAt    time.Time
-	ParentTaskID *uint `gorm:"index" json:"parent_task_id"`
-}
 
 type Prompt struct{
 	UserPrompt string `json:"user_prompt"`
@@ -49,10 +37,54 @@ type OpenAIResponse struct {
 type GoalRoadmap struct {
 	Message     string        `json:"message"`
 	Title       string        `json:"title"`
-	Description string        `json:"description"`
-	Level       string        `json:"level"`
-	StartTime   string        `json:"start_time"`
-	EndTime     string        `json:"end_time"`
 	Completed   bool          `json:"completed"`
-	Subtasks    []GoalRoadmap `json:"subtasks"`
+	Subtasks    []Task 		  `json:"subtasks"`
+}
+
+
+type FullRoadmap struct {
+	Roadmap		Roadmap		`json:"roadmap"`
+	Milestones	[]Milestone `json:"milestones"`
+	Tasks		[]Task		`json:"tasks"`
+	Steps		[]Step		`json:"steps"`
+}
+
+
+type Roadmap struct {
+    RoadmapID  string      `gorm:"type:uuid;primaryKey" json:"roadmap_id"`
+    UserID     string      `gorm:"type:uuid" json:"user_id"`
+    Goal       string      `json:"goal"`
+    Description string     `json:"description"`
+    Days       int         `json:"days"`
+    Completed  bool        `json:"completed"`
+    StartDate  time.Time   `json:"start_date"`
+    Milestones []Milestone `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"milestones"`
+}
+
+type Milestone struct {
+    MilestoneID string    `gorm:"type:uuid;primaryKey" json:"milestone_id"`
+    RoadmapID   string    `gorm:"type:uuid" json:"roadmap_id"`
+    SubGoal     string    `json:"sub_goal"`
+    Description string    `json:"description"`
+    Days        int       `json:"days"`
+    Reached     bool      `json:"reached"`
+    Tasks       []Task    `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"tasks"`
+}
+
+type Task struct {
+    TaskID      string   `gorm:"type:uuid;primaryKey" json:"task_id"`
+    MilestoneID string   `gorm:"type:uuid" json:"milestone_id"`
+    Title       string   `json:"title"`
+    Description string   `json:"description"`
+    Day         int      `json:"day"`
+    Completed   bool     `json:"completed"`
+    Steps       []Step   `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps"`
+}
+
+type Step struct {
+    StepID      string   `gorm:"type:uuid;primaryKey" json:"step_id"`
+    TaskID      string   `gorm:"type:uuid" json:"task_id"`
+    Description string   `json:"description"`
+    Completed   bool     `json:"completed"`
+    Number      int      `json:"number"`
 }

@@ -125,22 +125,22 @@ func GetTasks(id string) []types.Task {
 	return tasks
 }
 
-func CreateTask(task types.Task) *gorm.DB {
+// func CreateTask(task types.Task) *gorm.DB {
 
-	var task_id uint = 345
+// 	var task_id uint = 345
 
-	newTask := types.Task{
-		TaskID: task_id,
-		UserID: 6,
-		Title:       task.Title,
-		Description: task.Description,
-		Level:       task.Level,
-		StartDate:   task.StartDate,
-		EndDate:     task.EndDate,
-		Completed:   task.Completed,
-		ParentTaskID: &task_id,
-	}
+// 	newTask := types.Task{
+// 		TaskID: task_id,
+// 		UserID: 6,
+// 		Title:       task.Title,
+// 		Description: task.Description,
+// 		Level:       task.Level,
+// 		StartDate:   task.StartDate,
+// 		EndDate:     task.EndDate,
+// 		Completed:   task.Completed,
+// 		ParentTaskID: &task_id,
+// 	}
 
-	tx := db.Create(&newTask)
-	return tx
-}
+// 	tx := db.Create(&newTask)
+// 	return tx
+// }

@@ -31,10 +31,10 @@ func NewRouter() *gin.Engine {
     router.PATCH("/user/:id", updateUser)
     router.DELETE("/user/:id", deleteUser)
 
-    router.POST("/task", createTask)
+    router.POST("/task", todo)
     router.GET("/tasks/:userid", getTasks)
     router.GET("/task/:taskid", todo)
-    router.PATCH("/task/:taskid", todo)
+    router.PATCH("/task/:taskid", updateTask)
     router.DELETE("/task/:taskid", todo)
 
 	router.POST("/agent/generate", agentGen)
