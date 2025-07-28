@@ -154,6 +154,14 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) *gorm.DB{
 	}
 	
 	rm.UserID = user_id.(string)
+	for i := range rm.Milestones {
+        rm.Milestones[i].UserID = rm.UserID
+		for j := range rm.Milestones[i].Tasks {
+
+			rm.Milestones[i].Tasks[j].UserID = rm.UserID
+
+		}
+    }
 
 
 	tx := db.Create(&rm)

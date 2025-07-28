@@ -38,19 +38,20 @@ type OpenAIResponse struct {
 
 
 type Roadmap struct {
-    RoadmapID  string      `gorm:"type:uuid;primaryKey" json:"roadmap_id"`
+    RoadmapID  string      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"roadmap_id"`
     UserID     string      `gorm:"type:uuid" json:"user_id"`
     Goal       string      `json:"goal"`
     Description string     `json:"description"`
     Days       int         `json:"days"`
     Completed  bool        `json:"completed"`
-    StartDate  time.Time   `json:"start_date"`
+    StartDate  time.Time   `json:"start_date,omitempty"`
     Milestones []Milestone `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"milestones"`
 }
 
 type Milestone struct {
-    MilestoneID string    `gorm:"type:uuid;primaryKey" json:"milestone_id"`
-    RoadmapID   string    `gorm:"type:uuid" json:"roadmap_id"`
+    MilestoneID string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"milestone_id"`
+    RoadmapID   string     `gorm:"type:uuid" json:"roadmap_id"`
+    UserID     string      `gorm:"type:uuid" json:"user_id"`
     SubGoal     string    `json:"sub_goal"`
     Description string    `json:"description"`
     Day        int       `json:"day"`
@@ -59,8 +60,9 @@ type Milestone struct {
 }
 
 type Task struct {
-    TaskID      string   `gorm:"type:uuid;primaryKey" json:"task_id"`
-    MilestoneID string   `gorm:"type:uuid" json:"milestone_id"`
+    TaskID      string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"task_id"`
+    MilestoneID string     `gorm:"type:uuid" json:"milestone_id"`
+    UserID     string      `gorm:"type:uuid" json:"user_id"`
     Title       string   `json:"title"`
     Description string   `json:"description"`
     Day         int      `json:"day"`
@@ -69,8 +71,8 @@ type Task struct {
 }
 
 type Step struct {
-    StepID      string   `gorm:"type:uuid;primaryKey" json:"step_id"`
-    TaskID      string   `gorm:"type:uuid" json:"task_id"`
+    StepID      string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"step_id"`
+    TaskID      string     `gorm:"type:uuid" json:"task_id"`
     Description string   `json:"description"`
     Completed   bool     `json:"completed"`
     Number      int      `json:"number"`
