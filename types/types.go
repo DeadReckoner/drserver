@@ -53,7 +53,7 @@ type Milestone struct {
     RoadmapID   string    `gorm:"type:uuid" json:"roadmap_id"`
     SubGoal     string    `json:"sub_goal"`
     Description string    `json:"description"`
-    Days        int       `json:"days"`
+    Day        int       `json:"day"`
     Reached     bool      `json:"reached"`
     Tasks       []Task    `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"tasks"`
 }
