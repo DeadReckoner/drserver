@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const openAIURL = "https://api.openai.com/v1/responses"
@@ -17,6 +19,16 @@ const openAIURL = "https://api.openai.com/v1/responses"
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+type AISession struct {
+    SessionID uuid.UUID      `json:"session_id"`
+    UserID    string         `json:"user_id"`
+    Status    string         `json:"status"` // "collecting" or "complete"
+    Context   []Message      `json:"context"` // chat history
+    Roadmap   *types.Roadmap `json:"roadmap,omitempty"`
+    CreatedAt time.Time      `json:"created_at"`
+    UpdatedAt time.Time      `json:"updated_at"`
 }
 
 type AIRequest struct {
