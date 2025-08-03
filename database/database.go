@@ -185,3 +185,73 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 
     return roadmaps
 }
+
+func GetRoadmap(c *gin.Context, roadmapID string) types.Roadmap {
+    var roadmap types.Roadmap
+    user_id, exists := c.Get("user_id")
+    if !exists || user_id == "" {
+        log.Println("missing or invalid user_id")
+        return roadmap
+    }
+
+    // Query the roadmap table for all roadmaps with this user_id
+    result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").Find(&roadmap)
+    if result.Error != nil {
+        log.Println("Error fetching roadmaps:", result.Error)
+    }
+
+    return roadmap
+}
+
+
+func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roadmap {
+	var roadmap types.Roadmap
+    user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+        log.Println("missing or invalid user_id")
+        return roadmap
+    }
+
+	// Fetch the existing roadmap
+    result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").First(&roadmap)
+    if result.Error != nil {
+        log.Println("Error fetching roadmap:", result.Error)
+        return roadmap
+    }
+
+    // Update fields (example: update goal, description, days, completed, start_date)
+    roadmap.Goal = rm.Goal
+    roadmap.Description = rm.Description
+    roadmap.Days = rm.Days
+    roadmap.Completed = rm.Completed
+    roadmap.StartDate = rm.StartDate
+
+    // If you want to update milestones/tasks/steps, handle them here as well
+
+    // Save the updated roadmap
+    saveResult := db.Save(&roadmap)
+    if saveResult.Error != nil {
+        log.Println("Error updating roadmap:", saveResult.Error)
+    }
+
+	return roadmap
+}
+
+
+
+func DeleteRoadmap(c *gin.Context, roadmapID string) error {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return errors.New("missing or invalid user_id")
+	}
+
+	// Delete the roadmap for this user and roadmapID
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Delete(&types.Roadmap{})
+	if result.Error != nil {
+		log.Println("Error deleting roadmap:", result.Error)
+		return result.Error
+	}
+
+	return nil
+}
+

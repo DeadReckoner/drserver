@@ -45,3 +45,45 @@ func getRoadmapsByUser(c *gin.Context){
 	c.IndentedJSON(http.StatusOK, roadmaps)
 
 }
+
+
+func getRoadmap(c *gin.Context){
+	roadmap_id := c.Param("roadmapID")
+
+
+	roadmap := database.GetRoadmap(c, roadmap_id)
+
+	c.IndentedJSON(http.StatusOK, roadmap)
+}
+
+
+func updateRoadmap(c *gin.Context){
+
+	roadmap_id := c.Param("roadmapID")
+
+	var updatedRoadmap types.Roadmap
+
+
+	if err := c.BindJSON(&updatedRoadmap); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	fmt.Printf("Roadmap received: %+v\n", updatedRoadmap)
+
+	roadmap := database.UpdateRoadmap(c, roadmap_id, updatedRoadmap)
+
+
+	c.IndentedJSON(http.StatusOK, roadmap)
+}
+
+func deleteRoadmap(c *gin.Context){
+	roadmap_id := c.Param("roadmapID")
+
+	err := database.DeleteRoadmap(c, roadmap_id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Roadmap deleted successfully"})
+    log.Println("Delete")
+}

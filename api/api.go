@@ -41,7 +41,11 @@ func NewRouter() *gin.Engine {
 
 
     router.POST("/roadmap", createRoadmap)
-    router.GET("/roadmaps/:userid", getRoadmapsByUser)
+    router.GET("/roadmap/:roadmapID", getRoadmap)
+    router.PATCH("/roadmap/:roadmapID", updateRoadmap)
+    router.DELETE("/roadmap/:roadmapID", deleteRoadmap)
+    router.GET("/roadmaps", getRoadmapsByUser)
+
 
 
 	router.POST("/agent/generate", agentGen)
