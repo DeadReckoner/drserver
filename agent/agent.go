@@ -143,3 +143,38 @@ func ParseRoadmap(raw []byte) (*types.Roadmap, error) {
 
 	return &roadmap, nil
 }
+
+
+func ContinueAISession(messages []Message) (reply string, isComplete bool, roadmap *types.Roadmap, err error) {
+    // Compose prompt as in your plan
+    // Call OpenAI with full context
+    // Parse response: if it's a question, return it; if it's a roadmap, return it and set isComplete=true
+    // (You can use a special field in the AI response to distinguish)
+    // For now, pseudo-code:
+    // - If response contains "roadmap": isComplete = true, roadmap = parsed roadmap
+    // - Else: isComplete = false, reply = next question
+    return
+}
+
+
+func UpdateAISessionContext(sessionID uuid.UUID, message []Message){
+
+}
+
+
+func UpdateAISession(sessionID *AISession){
+
+}
+
+
+func SaveAISession(sessionID *AISession){
+
+}
+
+func LoadAISession(sessionID string)(AISession, error){
+
+	var session AISession
+
+
+	return session, nil
+}
