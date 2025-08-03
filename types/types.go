@@ -34,9 +34,6 @@ type OpenAIResponse struct {
 }
 
 
-
-
-
 type Roadmap struct {
     RoadmapID  string      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"roadmap_id"`
     UserID     string      `gorm:"type:uuid" json:"user_id"`
