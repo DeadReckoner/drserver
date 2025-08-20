@@ -26,13 +26,13 @@ func createRoadmap(c *gin.Context){
 	}
 	fmt.Printf("Roadmap received: %+v\n", newRoadmap)
 
-	tx := database.CreateRoadmap(c, newRoadmap)
-	if tx.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+	createdRoadmap, err := database.CreateRoadmap(c, newRoadmap)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Roadmap created successfully"})
+	c.IndentedJSON(http.StatusCreated, createdRoadmap)
 	log.Println("Roadmap created")
 
 }

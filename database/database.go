@@ -146,11 +146,11 @@ func GetTasks(id string) []types.Task {
 // }
 
 
-func CreateRoadmap(c *gin.Context, rm types.Roadmap) *gorm.DB{
+func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 	// Handle error later
 	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {
-		return &gorm.DB{Error: errors.New("missing or invalid user_id")}
+		return types.Roadmap{}, errors.New("missing or invalid user_id")
 	}
 	
 	rm.UserID = user_id.(string)
@@ -163,9 +163,17 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) *gorm.DB{
 		}
     }
 
-
 	tx := db.Create(&rm)
-	return tx
+	if tx.Error != nil {
+		return types.Roadmap{}, tx.Error
+	}
+
+	var createdRoadmap types.Roadmap
+	if err := db.Where("roadmap_id = ?", rm.RoadmapID).Preload("Milestones.Tasks.Steps").First(&createdRoadmap).Error; err != nil {
+		return types.Roadmap{}, err
+	}
+
+	return createdRoadmap, nil
 }
 
 
