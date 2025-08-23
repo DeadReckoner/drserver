@@ -17,10 +17,6 @@ import (
 
 var db *gorm.DB
 
-
-
-
-
 // Database init.
 func Database() {
 	err := godotenv.Load()
@@ -37,11 +33,11 @@ func Database() {
 	// Connect to the database using GORM
 	for attempts := 1; attempts <= 5; attempts++ {
 		db, err = gorm.Open(postgres.New(postgres.Config{
-    
+
 			DSN:                  dsn,
 			PreferSimpleProtocol: true, // disables statement preparation
 		}), &gorm.Config{})
-		
+
 		if err == nil {
 			break
 		}
@@ -62,10 +58,9 @@ func CreateUser(c *gin.Context, user types.User) *gorm.DB {
 	if !exists || user_id == "" {
 		return &gorm.DB{Error: errors.New("missing or invalid user_id")}
 	}
-	
-	user.UserID = user_id.(string)
-	user.CreatedAt = time.Now()	
 
+	user.UserID = user_id.(string)
+	user.CreatedAt = time.Now()
 
 	tx := db.Create(&user)
 	return tx
@@ -73,10 +68,10 @@ func CreateUser(c *gin.Context, user types.User) *gorm.DB {
 
 // GetUser from Database
 func GetUser(c *gin.Context) types.User {
-	
+
 	var user types.User
 	user_id, _ := c.Get("user_id")
-	
+
 	db.Where("user_id = ?", user_id).First(&user)
 
 	log.Println(user)
@@ -97,16 +92,16 @@ func UpdateUser(user_id string) types.User {
 }
 
 func DeleteUser(c *gin.Context) error {
-    user_id, exists := c.Get("user_id")
-    if !exists || user_id == "" {
-        return errors.New("missing or invalid user_id")
-    }
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return errors.New("missing or invalid user_id")
+	}
 
-    result := db.Where("user_id = ?", user_id).Delete(&types.User{})
-    if result.Error != nil {
-        return result.Error
-    }
-    return nil
+	result := db.Where("user_id = ?", user_id).Delete(&types.User{})
+	if result.Error != nil {
+		return result.Error
+	}
+	return nil
 }
 
 // GetTasks by id
@@ -145,23 +140,22 @@ func GetTasks(id string) []types.Task {
 // 	return tx
 // }
 
-
 func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 	// Handle error later
 	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {
 		return types.Roadmap{}, errors.New("missing or invalid user_id")
 	}
-	
+
 	rm.UserID = user_id.(string)
 	for i := range rm.Milestones {
-        rm.Milestones[i].UserID = rm.UserID
+		rm.Milestones[i].UserID = rm.UserID
 		for j := range rm.Milestones[i].Tasks {
 
 			rm.Milestones[i].Tasks[j].UserID = rm.UserID
 
 		}
-    }
+	}
 
 	tx := db.Create(&rm)
 	if tx.Error != nil {
@@ -176,76 +170,72 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 	return createdRoadmap, nil
 }
 
-
 func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
-    var roadmaps []types.Roadmap
-    user_id, exists := c.Get("user_id")
-    if !exists || user_id == "" {
-        log.Println("missing or invalid user_id")
-        return roadmaps
-    }
+	var roadmaps []types.Roadmap
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		log.Println("missing or invalid user_id")
+		return roadmaps
+	}
 
-    // Query the roadmap table for all roadmaps with this user_id
-    result := db.Where("user_id = ?", user_id).Preload("Milestones.Tasks.Steps").Find(&roadmaps)
-    if result.Error != nil {
-        log.Println("Error fetching roadmaps:", result.Error)
-    }
+	// Query the roadmap table for all roadmaps with this user_id
+	result := db.Where("user_id = ?", user_id).Preload("Milestones.Tasks.Steps").Find(&roadmaps)
+	if result.Error != nil {
+		log.Println("Error fetching roadmaps:", result.Error)
+	}
 
-    return roadmaps
+	return roadmaps
 }
 
 func GetRoadmap(c *gin.Context, roadmapID string) types.Roadmap {
-    var roadmap types.Roadmap
-    user_id, exists := c.Get("user_id")
-    if !exists || user_id == "" {
-        log.Println("missing or invalid user_id")
-        return roadmap
-    }
-
-    // Query the roadmap table for all roadmaps with this user_id
-    result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").Find(&roadmap)
-    if result.Error != nil {
-        log.Println("Error fetching roadmaps:", result.Error)
-    }
-
-    return roadmap
-}
-
-
-func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roadmap {
 	var roadmap types.Roadmap
-    user_id, exists := c.Get("user_id")
+	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {
-        log.Println("missing or invalid user_id")
-        return roadmap
-    }
+		log.Println("missing or invalid user_id")
+		return roadmap
+	}
 
-	// Fetch the existing roadmap
-    result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").First(&roadmap)
-    if result.Error != nil {
-        log.Println("Error fetching roadmap:", result.Error)
-        return roadmap
-    }
-
-    // Update fields (example: update goal, description, days, completed, start_date)
-    roadmap.Goal = rm.Goal
-    roadmap.Description = rm.Description
-    roadmap.Days = rm.Days
-    roadmap.Completed = rm.Completed
-    roadmap.StartDate = rm.StartDate
-
-    // If you want to update milestones/tasks/steps, handle them here as well
-
-    // Save the updated roadmap
-    saveResult := db.Save(&roadmap)
-    if saveResult.Error != nil {
-        log.Println("Error updating roadmap:", saveResult.Error)
-    }
+	// Query the roadmap table for all roadmaps with this user_id
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").Find(&roadmap)
+	if result.Error != nil {
+		log.Println("Error fetching roadmaps:", result.Error)
+	}
 
 	return roadmap
 }
 
+func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roadmap {
+	var roadmap types.Roadmap
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		log.Println("missing or invalid user_id")
+		return roadmap
+	}
 
+	// Fetch the existing roadmap
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").First(&roadmap)
+	if result.Error != nil {
+		log.Println("Error fetching roadmap:", result.Error)
+		return roadmap
+	}
+
+	// Update fields (example: update goal, description, days, completed, start_date)
+	roadmap.Goal = rm.Goal
+	roadmap.Description = rm.Description
+	roadmap.Days = rm.Days
+	roadmap.Completed = rm.Completed
+	roadmap.StartDate = rm.StartDate
+
+	// If you want to update milestones/tasks/steps, handle them here as well
+
+	// Save the updated roadmap
+	saveResult := db.Save(&roadmap)
+	if saveResult.Error != nil {
+		log.Println("Error updating roadmap:", saveResult.Error)
+	}
+
+	return roadmap
+}
 
 func DeleteRoadmap(c *gin.Context, roadmapID string) error {
 	user_id, exists := c.Get("user_id")
@@ -263,3 +253,61 @@ func DeleteRoadmap(c *gin.Context, roadmapID string) error {
 	return nil
 }
 
+func GetMilestonesByRoadmap(c *gin.Context, roadmapID string) []types.Milestone {
+	var milestones []types.Milestone
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return []types.Milestone{}
+	}
+
+	results := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Tasks.Steps").Find(&milestones)
+
+	if results.Error != nil {
+		log.Println("Error fetching milestones:", results.Error)
+	}
+
+	return milestones
+}
+
+func GetMilestone(c *gin.Context, milestoneID string) types.Milestone {
+	var milestone types.Milestone
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return types.Milestone{}
+	}
+
+	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Preload("Tasks.Steps").First(&milestone)
+
+	if result.Error != nil {
+		log.Println("Error fetching milestone:", result.Error)
+	}
+
+	return milestone
+}
+
+func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.Milestone) types.Milestone {
+	var milestone types.Milestone
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return types.Milestone{}
+	}
+
+	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).First(&milestone)
+
+	if result.Error != nil {
+		log.Println("Error fetching milestone:", result.Error)
+		return types.Milestone{}
+	}
+
+	milestone.SubGoal = updatedMilestone.SubGoal
+	milestone.Description = updatedMilestone.Description
+	milestone.Day = updatedMilestone.Day
+	milestone.Reached = updatedMilestone.Reached
+
+	saveResult := db.Save(&milestone)
+	if saveResult.Error != nil {
+		log.Println("Error updating milestone:", saveResult.Error)
+	}
+
+	return milestone
+}
