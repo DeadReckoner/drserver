@@ -28,8 +28,10 @@ func createUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "User created successfully"})
-	log.Println("User created")
+	// Get the user data to return (either newly created or existing)
+	user := database.GetUser(c)
+	c.JSON(http.StatusOK, user)
+	log.Println("User upserted successfully")
 }
 
 func updateUser(c *gin.Context) {

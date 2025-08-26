@@ -51,7 +51,7 @@ func Database() {
 	log.Println("Successfully connected to Supabase PostgreSQL")
 }
 
-// Create user in Database
+// Create user in Database (upsert: create if not exists, return if exists)
 func CreateUser(c *gin.Context, user types.User) *gorm.DB {
 	// Handle error later
 	user_id, exists := c.Get("user_id")
@@ -60,8 +60,23 @@ func CreateUser(c *gin.Context, user types.User) *gorm.DB {
 	}
 
 	user.UserID = user_id.(string)
+	
+	// Check if user already exists
+	var existingUser types.User
+	result := db.Where("user_id = ?", user.UserID).First(&existingUser)
+	
+	if result.Error == nil {
+		// User exists, return success without error
+		return &gorm.DB{Error: nil}
+	}
+	
+	if result.Error != gorm.ErrRecordNotFound {
+		// Some other error occurred
+		return &gorm.DB{Error: result.Error}
+	}
+	
+	// User doesn't exist, create new user
 	user.CreatedAt = time.Now()
-
 	tx := db.Create(&user)
 	return tx
 }
@@ -147,7 +162,25 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 		return types.Roadmap{}, errors.New("missing or invalid user_id")
 	}
 
-	rm.UserID = user_id.(string)
+	userIDStr := user_id.(string)
+	
+	// Ensure user exists in database before creating roadmap
+	var existingUser types.User
+	userResult := db.Where("user_id = ?", userIDStr).First(&existingUser)
+	if userResult.Error == gorm.ErrRecordNotFound {
+		// User doesn't exist, create a minimal user record
+		user := types.User{
+			UserID:    userIDStr,
+			CreatedAt: time.Now(),
+		}
+		if err := db.Create(&user).Error; err != nil {
+			return types.Roadmap{}, errors.New("failed to create user: " + err.Error())
+		}
+	} else if userResult.Error != nil {
+		return types.Roadmap{}, errors.New("failed to check user existence: " + userResult.Error.Error())
+	}
+
+	rm.UserID = userIDStr
 	for i := range rm.Milestones {
 		rm.Milestones[i].UserID = rm.UserID
 		for j := range rm.Milestones[i].Tasks {
