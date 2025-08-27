@@ -116,3 +116,75 @@ func updateMilestone(c *gin.Context) {
 
 	c.IndentedJSON(http.StatusOK, milestone)
 }
+
+func createTask(c *gin.Context) {
+	var newTask types.Task
+
+	if err := c.BindJSON(&newTask); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	fmt.Printf("Task received: %+v\n", newTask)
+
+	createdTask, err := database.CreateTask(c, newTask)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.IndentedJSON(http.StatusCreated, createdTask)
+	log.Println("Task created")
+}
+
+func getTasksByMilestone(c *gin.Context) {
+	milestone_id := c.Param("milestoneid")
+
+	if _, err := uuid.Parse(milestone_id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid milestoneid"})
+		return
+	}
+
+	tasks := database.GetTasksByMilestone(c, milestone_id)
+
+	c.IndentedJSON(http.StatusOK, tasks)
+}
+
+func getTask(c *gin.Context) {
+	task_id := c.Param("taskid")
+	if _, err := uuid.Parse(task_id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid taskid"})
+		return
+	}
+
+	task := database.GetTask(c, task_id)
+
+	c.IndentedJSON(http.StatusOK, task)
+}
+
+func updateTask(c *gin.Context) {
+	task_id := c.Param("taskid")
+
+	var updatedTask types.Task
+
+	if err := c.BindJSON(&updatedTask); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	task := database.UpdateTask(c, task_id, updatedTask)
+
+	c.IndentedJSON(http.StatusOK, task)
+}
+
+func deleteTask(c *gin.Context) {
+	task_id := c.Param("taskid")
+
+	err := database.DeleteTask(c, task_id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Task deleted successfully"})
+	log.Println("Task deleted")
+}

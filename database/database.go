@@ -344,3 +344,102 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 
 	return milestone
 }
+
+func CreateTask(c *gin.Context, task types.Task) (types.Task, error) {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return types.Task{}, errors.New("missing or invalid user_id")
+	}
+
+	task.UserID = user_id.(string)
+
+	for i := range task.Steps {
+		task.Steps[i].TaskID = task.TaskID
+	}
+
+	tx := db.Create(&task)
+	if tx.Error != nil {
+		return types.Task{}, tx.Error
+	}
+
+	var createdTask types.Task
+	if err := db.Where("task_id = ?", task.TaskID).Preload("Steps").First(&createdTask).Error; err != nil {
+		return types.Task{}, err
+	}
+
+	return createdTask, nil
+}
+
+func GetTasksByMilestone(c *gin.Context, milestoneID string) []types.Task {
+	var tasks []types.Task
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return []types.Task{}
+	}
+
+	results := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Preload("Steps").Find(&tasks)
+
+	if results.Error != nil {
+		log.Println("Error fetching tasks:", results.Error)
+	}
+
+	return tasks
+}
+
+func GetTask(c *gin.Context, taskID string) types.Task {
+	var task types.Task
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return types.Task{}
+	}
+
+	result := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).Preload("Steps").First(&task)
+
+	if result.Error != nil {
+		log.Println("Error fetching task:", result.Error)
+	}
+
+	return task
+}
+
+func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Task {
+	var task types.Task
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return types.Task{}
+	}
+
+	result := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).First(&task)
+
+	if result.Error != nil {
+		log.Println("Error fetching task:", result.Error)
+		return types.Task{}
+	}
+
+	task.Title = updatedTask.Title
+	task.Description = updatedTask.Description
+	task.Day = updatedTask.Day
+	task.Completed = updatedTask.Completed
+
+	saveResult := db.Save(&task)
+	if saveResult.Error != nil {
+		log.Println("Error updating task:", saveResult.Error)
+	}
+
+	return task
+}
+
+func DeleteTask(c *gin.Context, taskID string) error {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return errors.New("missing or invalid user_id")
+	}
+
+	result := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).Delete(&types.Task{})
+	if result.Error != nil {
+		log.Println("Error deleting task:", result.Error)
+		return result.Error
+	}
+
+	return nil
+}

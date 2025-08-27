@@ -2,7 +2,6 @@ package api
 
 import (
 	"dr/server/database"
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -35,11 +34,3 @@ func getTasks(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, tasks)
 }
 
-func updateTask(c *gin.Context) {
-	task_id := c.Param("taskid")
-
-	fmt.Println("Task ID", task_id)
-
-	c.JSON(http.StatusAccepted, gin.H{"message": "Task update successful"})
-
-}

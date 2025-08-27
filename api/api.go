@@ -49,6 +49,12 @@ func NewRouter() *gin.Engine {
 	router.DELETE("/roadmap/milestone/:milestoneid", todo)
 	router.GET("/roadmap/milestone/:milestoneid", getMilestone)
 
+	router.POST("/milestone/task", createTask)
+	router.GET("/milestone/tasks/:milestoneid", getTasksByMilestone)
+	router.GET("/milestone/task/:taskid", getTask)
+	router.PATCH("/milestone/task/:taskid", updateTask)
+	router.DELETE("/milestone/task/:taskid", deleteTask)
+
 	router.POST("/agent/generate", agentGen)
 	// ...existing code...
 	router.POST("/agent/session/start", startAISession)
