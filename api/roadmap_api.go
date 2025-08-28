@@ -68,9 +68,15 @@ func updateRoadmap(c *gin.Context) {
 func deleteRoadmap(c *gin.Context) {
 	roadmap_id := c.Param("roadmapID")
 
+	if _, err := uuid.Parse(roadmap_id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid roadmap ID"})
+		return
+	}
+
 	err := database.DeleteRoadmap(c, roadmap_id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Roadmap deleted successfully"})
