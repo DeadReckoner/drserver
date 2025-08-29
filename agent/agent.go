@@ -45,28 +45,98 @@ type AIRequest struct {
 }
 
 func GenerateGoalBlueprint(userPrompt string) ([]byte, error) {
-	// Schema for Dead Reckoner goal blueprint (with "message" added)
+	// Schema for Dead Reckoner roadmap matching the Roadmap type
 	schema := map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
 			"message": map[string]interface{}{
 				"type": "string",
 			},
-			"title":       map[string]interface{}{"type": "string"},
-			"description": map[string]interface{}{"type": "string"},
-			"level": map[string]interface{}{
+			"goal": map[string]interface{}{
 				"type": "string",
-				"enum": []string{"YEAR", "QUARTER", "MONTH", "WEEK", "DAY"},
 			},
-			"start_time": map[string]interface{}{"type": "string", "format": "date"},
-			"end_time":   map[string]interface{}{"type": "string", "format": "date"},
-			"completed":  map[string]interface{}{"type": "boolean"},
-			"subtasks": map[string]interface{}{
-				"type":  "array",
-				"items": map[string]interface{}{"$ref": "#"},
+			"description": map[string]interface{}{
+				"type": "string",
+			},
+			"days": map[string]interface{}{
+				"type": "integer",
+			},
+			"completed": map[string]interface{}{
+				"type": "boolean",
+			},
+			"start_date": map[string]interface{}{
+				"type": "string",
+				"format": "date-time",
+			},
+			"milestones": map[string]interface{}{
+				"type": "array",
+				"minItems": 1,
+				"maxItems": 1,
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"sub_goal": map[string]interface{}{
+							"type": "string",
+						},
+						"description": map[string]interface{}{
+							"type": "string",
+						},
+						"day": map[string]interface{}{
+							"type": "integer",
+						},
+						"reached": map[string]interface{}{
+							"type": "boolean",
+						},
+						"tasks": map[string]interface{}{
+							"type": "array",
+							"minItems": 10,
+							"maxItems": 14,
+							"items": map[string]interface{}{
+								"type": "object",
+								"properties": map[string]interface{}{
+									"title": map[string]interface{}{
+										"type": "string",
+									},
+									"description": map[string]interface{}{
+										"type": "string",
+									},
+									"day": map[string]interface{}{
+										"type": "integer",
+									},
+									"completed": map[string]interface{}{
+										"type": "boolean",
+									},
+									"steps": map[string]interface{}{
+										"type": "array",
+										"items": map[string]interface{}{
+											"type": "object",
+											"properties": map[string]interface{}{
+												"description": map[string]interface{}{
+													"type": "string",
+												},
+												"completed": map[string]interface{}{
+													"type": "boolean",
+												},
+												"number": map[string]interface{}{
+													"type": "integer",
+												},
+											},
+											"required": []string{"description", "completed", "number"},
+											"additionalProperties": false,
+										},
+									},
+								},
+								"required": []string{"title", "description", "day", "completed", "steps"},
+								"additionalProperties": false,
+							},
+						},
+					},
+					"required": []string{"sub_goal", "description", "day", "reached", "tasks"},
+					"additionalProperties": false,
+				},
 			},
 		},
-		"required":             []string{"message", "title", "description", "level", "start_time", "end_time", "completed", "subtasks"},
+		"required": []string{"message", "goal", "description", "days", "completed", "start_date", "milestones"},
 		"additionalProperties": false,
 	}
 
@@ -76,7 +146,7 @@ func GenerateGoalBlueprint(userPrompt string) ([]byte, error) {
 		Input: []Message{
 			{
 				Role:    "system",
-				Content: "You are an AI assistant that helps users build structured achievement pathways. You must only respond with a JSON object that follows the provided schema. Add a 'message' field with a short friendly intro like 'Here's what I made for you!'. Only include the necessary levels (YEAR, QUARTER, MONTH, WEEK, DAY) based on the goal’s scope. However, the roadmap should be as detailed as possible at the lowest level. The daily tasks should have detailed actionable steps. You should ask between 3-5 clarifying questions before generating the schema, things like the users experience with the task, or what their current proficency to make this roadmap as personalized as possible.",
+				Content: "You are an AI assistant that helps users build structured achievement pathways in incremental steps. You must only respond with a JSON object that follows the provided schema. Generate EXACTLY 1 milestone that represents the first phase of their goal (typically 1-2 weeks). This milestone must contain between 10-14 tasks that are actionable and specific. Each task should have 2-4 detailed steps. Add a 'message' field with a short friendly intro like 'Here's your first milestone!'. Focus on creating a solid foundation that can be built upon in subsequent phases. Set all 'completed' and 'reached' fields to false by default. Ensure day numbers are sequential starting from day 1.",
 			},
 			{
 				Role:    "user",
