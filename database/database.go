@@ -443,3 +443,18 @@ func DeleteTask(c *gin.Context, taskID string) error {
 
 	return nil
 }
+
+func DeleteMilestone(c *gin.Context, milestoneID string) error {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return errors.New("missing or invalid user_id")
+	}
+
+	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Delete(&types.Milestone{})
+	if result.Error != nil {
+		log.Println("Error deleting milestone:", result.Error)
+		return result.Error
+	}
+
+	return nil
+}
