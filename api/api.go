@@ -46,7 +46,7 @@ func NewRouter() *gin.Engine {
 
 	router.GET("/roadmap/milestones/:roadmapid", getMilestonesByRoadmap)
 	router.PATCH("/roadmap/milestone/:milestoneid", updateMilestone)
-	router.DELETE("/roadmap/milestone/:milestoneid", todo)
+	router.DELETE("/roadmap/milestone/:milestoneid", deleteMilestone)
 	router.GET("/roadmap/milestone/:milestoneid", getMilestone)
 
 	router.POST("/milestone/task", createTask)

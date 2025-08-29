@@ -345,6 +345,34 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 	return milestone
 }
 
+
+func DeleteMilestone(c *gin.Context, milestoneID string) error {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return errors.New("missing or invalid user_id")
+	}
+
+	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).First(&types.Milestone{})
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return errors.New("milestone not found")
+		}
+		return result.Error
+	}
+
+	deleteResult := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Delete(&types.Milestone{})
+	if deleteResult.Error != nil {
+		return deleteResult.Error
+	}
+
+	if deleteResult.RowsAffected == 0 {
+		return errors.New("milestone not found")
+	}
+
+	return nil
+}
+
+
 func CreateTask(c *gin.Context, task types.Task) (types.Task, error) {
 	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {

@@ -123,6 +123,23 @@ func updateMilestone(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, milestone)
 }
 
+func deleteMilestone(c *gin.Context) {
+	milestone_id := c.Param("milestoneid")
+	
+	if _, err := uuid.Parse(milestone_id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid milestoneid"})
+		return
+	}
+
+	err := database.DeleteMilestone(c, milestone_id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Milestone deleted successfully"})
+}
+
 func createTask(c *gin.Context) {
 	var newTask types.Task
 
