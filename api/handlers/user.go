@@ -18,7 +18,7 @@ func CreateUser(c *gin.Context) {
 	if !utils.BindJSONOrAbort(c, &newUser) {
 		return
 	}
-	
+
 	fmt.Printf("User received: %+v\n", newUser)
 
 	tx := database.CreateUser(c, newUser)
@@ -43,14 +43,15 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 
-	user := database.UpdateUser(userID)
-	if user.UserID == "" {
-		utils.NotFoundResponse(c, "User")
+	tx := database.UpdateUser(userID, updatedUser)
+	if tx.Error != nil {
+		utils.InternalErrorResponse(c, tx.Error)
 		return
 	}
 
-	log.Println("User updated successfully")
+	user := database.GetUser(c)
 	utils.DataResponse(c, http.StatusOK, user)
+	log.Println("User updated successfully")
 }
 
 func GetUser(c *gin.Context) {
@@ -68,7 +69,7 @@ func DeleteUser(c *gin.Context) {
 	if !ok {
 		return
 	}
-	
+
 	fmt.Printf("Deleting User: %s\n", userID)
 
 	err := database.DeleteUser(c)

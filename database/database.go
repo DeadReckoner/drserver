@@ -60,21 +60,21 @@ func CreateUser(c *gin.Context, user types.User) *gorm.DB {
 	}
 
 	user.UserID = user_id.(string)
-	
+
 	// Check if user already exists
 	var existingUser types.User
 	result := db.Where("user_id = ?", user.UserID).First(&existingUser)
-	
+
 	if result.Error == nil {
 		// User exists, return success without error
 		return &gorm.DB{Error: nil}
 	}
-	
+
 	if result.Error != gorm.ErrRecordNotFound {
 		// Some other error occurred
 		return &gorm.DB{Error: result.Error}
 	}
-	
+
 	// User doesn't exist, create new user
 	user.CreatedAt = time.Now()
 	tx := db.Create(&user)
@@ -94,16 +94,18 @@ func GetUser(c *gin.Context) types.User {
 	return user
 }
 
-func UpdateUser(user_id string) types.User {
-	var user types.User
-	id, _ := strconv.Atoi(user_id)
+func UpdateUser(user_id string, user types.User) *gorm.DB {
+	var existingUser types.User
+	result := db.Where("user_id = ?", user_id).First(&existingUser)
 
-	log.Printf("Fetching User: %s\n", user_id)
-	db.First(&user, id)
-
-	log.Println(user)
-
-	return user
+	if result.Error == nil {
+		// User exists, return success without error
+		tx := db.Model(&existingUser).Updates(user)
+		return tx
+	} else {
+		// Some error occurred
+		return &gorm.DB{Error: result.Error}
+	}
 }
 
 func DeleteUser(c *gin.Context) error {
@@ -163,7 +165,7 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 	}
 
 	userIDStr := user_id.(string)
-	
+
 	// Ensure user exists in database before creating roadmap
 	var existingUser types.User
 	userResult := db.Where("user_id = ?", userIDStr).First(&existingUser)
