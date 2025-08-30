@@ -6,29 +6,21 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 
 	"dr/server/api/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 )
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
 
 func AgentGenerate(c *gin.Context) {
 	var prompt types.Prompt
-	
+
 	if !utils.BindJSONOrAbort(c, &prompt) {
 		return
 	}
-	
+
 	fmt.Printf("Prompt received: %+v\n", prompt)
 
 	resp, err := agent.GenerateGoalBlueprint(prompt.UserPrompt)
@@ -64,7 +56,7 @@ func StartAISession(c *gin.Context) {
 
 	firstQ := agent.Message{Role: "assistant", Content: "What kind of goal would you like to achieve?"}
 	session.Context = append(session.Context, firstQ)
-	
+
 	agent.UpdateAISessionContext(session.SessionID, session.Context)
 
 	utils.DataResponse(c, http.StatusOK, gin.H{
@@ -78,7 +70,7 @@ func ReplyAISession(c *gin.Context) {
 	var req struct {
 		Message string `json:"message"`
 	}
-	
+
 	if !utils.BindJSONOrAbort(c, &req) {
 		return
 	}
@@ -96,7 +88,7 @@ func ReplyAISession(c *gin.Context) {
 		utils.InternalErrorResponse(c, err)
 		return
 	}
-	
+
 	session.Context = append(session.Context, agent.Message{Role: "assistant", Content: reply})
 	if isComplete {
 		session.Status = "complete"
@@ -121,46 +113,4 @@ func GetAISession(c *gin.Context) {
 		return
 	}
 	utils.DataResponse(c, http.StatusOK, session)
-}
-
-func WSHandler(c *gin.Context) {
-	threadID := c.Param("threadid")
-	userID := c.GetString("user_id")
-	log.Printf("WebSocket connect thread=%s user=%s\n", threadID, userID)
-
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		log.Printf("WebSocket upgrade error: %v\n", err)
-		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to upgrade to WebSocket")
-		return
-	}
-	defer conn.Close()
-
-	conn.SetReadLimit(1024 * 64)
-	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetPongHandler(func(appData string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
-
-	var writeMu sync.Mutex
-
-	for {
-		mt, message, err := conn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket read error: %v\n", err)
-			}
-			break
-		}
-		log.Printf("Received (thread=%s user=%s): %s\n", threadID, userID, message)
-
-		writeMu.Lock()
-		err = conn.WriteMessage(mt, message)
-		writeMu.Unlock()
-		if err != nil {
-			log.Printf("WebSocket write error: %v\n", err)
-			break
-		}
-	}
 }
