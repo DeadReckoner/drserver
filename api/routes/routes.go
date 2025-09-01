@@ -22,7 +22,7 @@ func SetupRoutes() *gin.Engine {
 func setupV1Routes(router *gin.Engine) {
 	v1 := router.Group("/api/v1")
 	v1.Use(middleware.AuthMiddleware())
-	
+
 	setupUserRoutes(v1)
 	setupRoadmapRoutes(v1)
 	setupTaskRoutes(v1)
@@ -49,8 +49,8 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		roadmaps.PATCH("/:roadmapid", utils.ValidateUUID("roadmapid"), handlers.UpdateRoadmap)
 		roadmaps.DELETE("/:roadmapid", utils.ValidateUUID("roadmapid"), handlers.DeleteRoadmap)
 
-		roadmaps.GET("/:roadmapid/milestones", 
-			utils.ValidateUUID("roadmapid"), 
+		roadmaps.GET("/:roadmapid/milestones",
+			utils.ValidateUUID("roadmapid"),
 			handlers.GetMilestonesByRoadmap)
 	}
 
@@ -60,8 +60,8 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		milestones.PATCH("/:milestoneid", utils.ValidateUUID("milestoneid"), handlers.UpdateMilestone)
 		milestones.DELETE("/:milestoneid", utils.ValidateUUID("milestoneid"), handlers.DeleteMilestone)
 
-		milestones.GET("/:milestoneid/tasks", 
-			utils.ValidateUUID("milestoneid"), 
+		milestones.GET("/:milestoneid/tasks",
+			utils.ValidateUUID("milestoneid"),
 			handlers.GetTasksByMilestone)
 	}
 }
@@ -81,7 +81,7 @@ func setupAgentRoutes(rg *gin.RouterGroup) {
 	agent := rg.Group("/agent")
 	{
 		agent.POST("/generate", handlers.AgentGenerate)
-		
+
 		sessions := agent.Group("/sessions")
 		{
 			sessions.POST("", handlers.StartAISession)
@@ -94,6 +94,7 @@ func setupAgentRoutes(rg *gin.RouterGroup) {
 func setupWebSocketRoutes(rg *gin.RouterGroup) {
 	ws := rg.Group("/ws")
 	{
+		ws.GET("/messages", handlers.WSHandler)
 		ws.GET("/messages/:threadid", utils.ValidateUUID("threadid"), handlers.WSHandler)
 	}
 }
@@ -102,7 +103,7 @@ func setupHealthRoutes(router *gin.Engine) {
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "dr-server"})
 	})
-	
+
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
