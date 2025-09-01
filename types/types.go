@@ -15,6 +15,17 @@ type Prompt struct{
 	UserPrompt string `json:"user_prompt"`
 }
 
+type GoalRequest struct {
+	GoalName             string `json:"goalName"`
+	GoalDescription      string `json:"goalDescription"`
+	GoalImportance       string `json:"goalImportance"`
+	TargetCompletionDate string `json:"targetCompletionDate"`
+	WeeklyTimeCommitment string `json:"weeklyTimeCommitment"`
+	WorkFrequency        string `json:"workFrequency"`
+	Constraints          string `json:"constraints"`
+	CurrentSkillLevel    string `json:"currentSkillLevel"`
+}
+
 type OpenAIContent struct {
 	Type        string `json:"type"`
 	Annotations []any  `json:"annotations"`

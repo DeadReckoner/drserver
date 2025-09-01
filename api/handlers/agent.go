@@ -15,15 +15,15 @@ import (
 )
 
 func AgentGenerate(c *gin.Context) {
-	var prompt types.Prompt
+	var goalReq types.GoalRequest
 
-	if !utils.BindJSONOrAbort(c, &prompt) {
+	if !utils.BindJSONOrAbort(c, &goalReq) {
 		return
 	}
 
-	fmt.Printf("Prompt received: %+v\n", prompt)
+	fmt.Printf("Goal request received: %+v\n", goalReq)
 
-	resp, err := agent.GenerateGoalBlueprint(prompt.UserPrompt)
+	resp, err := agent.GenerateGoalFromStructure(goalReq)
 	if err != nil {
 		log.Printf("Failed to generate roadmap: %v", err)
 		utils.InternalErrorResponse(c, err)

@@ -44,7 +44,33 @@ type AIRequest struct {
 	} `json:"text"`
 }
 
+func GenerateGoalFromStructure(goalReq types.GoalRequest) ([]byte, error) {
+	// Create a detailed prompt from the structured data
+	prompt := fmt.Sprintf(`
+Based on the following goal information, create a detailed roadmap:
+
+Goal: %s
+Description: %s
+Importance: %s
+Target Completion: %s
+Weekly Time Commitment: %s
+Work Frequency: %s
+Constraints: %s
+Current Skill Level: %s
+
+Please create a comprehensive roadmap with milestones, tasks, and actionable steps that takes into account the user's skill level, time commitment, and constraints.
+`, goalReq.GoalName, goalReq.GoalDescription, goalReq.GoalImportance, 
+   goalReq.TargetCompletionDate, goalReq.WeeklyTimeCommitment, 
+   goalReq.WorkFrequency, goalReq.Constraints, goalReq.CurrentSkillLevel)
+
+	return generateRoadmapFromPrompt(prompt)
+}
+
 func GenerateGoalBlueprint(userPrompt string) ([]byte, error) {
+	return generateRoadmapFromPrompt(userPrompt)
+}
+
+func generateRoadmapFromPrompt(userPrompt string) ([]byte, error) {
 	// Schema for Dead Reckoner roadmap matching the Roadmap type
 	schema := map[string]interface{}{
 		"type": "object",
