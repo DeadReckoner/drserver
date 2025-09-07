@@ -22,13 +22,13 @@ type Message struct {
 }
 
 type AISession struct {
-    SessionID uuid.UUID      `json:"session_id"`
-    UserID    string         `json:"user_id"`
-    Status    string         `json:"status"` // "collecting" or "complete"
-    Context   []Message      `json:"context"` // chat history
-    Roadmap   *types.Roadmap `json:"roadmap,omitempty"`
-    CreatedAt time.Time      `json:"created_at"`
-    UpdatedAt time.Time      `json:"updated_at"`
+	SessionID uuid.UUID      `json:"session_id"`
+	UserID    string         `json:"user_id"`
+	Status    string         `json:"status"`  // "collecting" or "complete"
+	Context   []Message      `json:"context"` // chat history
+	Roadmap   *types.Roadmap `json:"roadmap,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 type AIRequest struct {
@@ -59,9 +59,9 @@ Constraints: %s
 Current Skill Level: %s
 
 Please create a comprehensive roadmap with milestones, tasks, and actionable steps that takes into account the user's skill level, time commitment, and constraints.
-`, goalReq.GoalName, goalReq.GoalDescription, goalReq.GoalImportance, 
-   goalReq.TargetCompletionDate, goalReq.WeeklyTimeCommitment, 
-   goalReq.WorkFrequency, goalReq.Constraints, goalReq.CurrentSkillLevel)
+`, goalReq.GoalName, goalReq.GoalDescription, goalReq.GoalImportance,
+		goalReq.TargetCompletionDate, goalReq.WeeklyTimeCommitment,
+		goalReq.WorkFrequency, goalReq.Constraints, goalReq.CurrentSkillLevel)
 
 	return generateRoadmapFromPrompt(prompt)
 }
@@ -91,11 +91,11 @@ func generateRoadmapFromPrompt(userPrompt string) ([]byte, error) {
 				"type": "boolean",
 			},
 			"start_date": map[string]interface{}{
-				"type": "string",
+				"type":   "string",
 				"format": "date-time",
 			},
 			"milestones": map[string]interface{}{
-				"type": "array",
+				"type":     "array",
 				"minItems": 1,
 				"maxItems": 1,
 				"items": map[string]interface{}{
@@ -114,7 +114,7 @@ func generateRoadmapFromPrompt(userPrompt string) ([]byte, error) {
 							"type": "boolean",
 						},
 						"tasks": map[string]interface{}{
-							"type": "array",
+							"type":     "array",
 							"minItems": 10,
 							"maxItems": 14,
 							"items": map[string]interface{}{
@@ -147,22 +147,22 @@ func generateRoadmapFromPrompt(userPrompt string) ([]byte, error) {
 													"type": "integer",
 												},
 											},
-											"required": []string{"description", "completed", "number"},
+											"required":             []string{"description", "completed", "number"},
 											"additionalProperties": false,
 										},
 									},
 								},
-								"required": []string{"title", "description", "day", "completed", "steps"},
+								"required":             []string{"title", "description", "day", "completed", "steps"},
 								"additionalProperties": false,
 							},
 						},
 					},
-					"required": []string{"sub_goal", "description", "day", "reached", "tasks"},
+					"required":             []string{"sub_goal", "description", "day", "reached", "tasks"},
 					"additionalProperties": false,
 				},
 			},
 		},
-		"required": []string{"message", "goal", "description", "days", "completed", "start_date", "milestones"},
+		"required":             []string{"message", "goal", "description", "days", "completed", "start_date", "milestones"},
 		"additionalProperties": false,
 	}
 
@@ -199,7 +199,7 @@ func generateRoadmapFromPrompt(userPrompt string) ([]byte, error) {
 	req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 180 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI request failed: %w", err)
@@ -217,7 +217,6 @@ func generateRoadmapFromPrompt(userPrompt string) ([]byte, error) {
 
 	return respBytes, nil
 }
-
 
 func ParseRoadmap(raw []byte) (*types.Roadmap, error) {
 	var apiResp types.OpenAIResponse
@@ -240,37 +239,32 @@ func ParseRoadmap(raw []byte) (*types.Roadmap, error) {
 	return &roadmap, nil
 }
 
-
 func ContinueAISession(messages []Message) (reply string, isComplete bool, roadmap *types.Roadmap, err error) {
-    // Compose prompt as in your plan
-    // Call OpenAI with full context
-    // Parse response: if it's a question, return it; if it's a roadmap, return it and set isComplete=true
-    // (You can use a special field in the AI response to distinguish)
-    // For now, pseudo-code:
-    // - If response contains "roadmap": isComplete = true, roadmap = parsed roadmap
-    // - Else: isComplete = false, reply = next question
-    return
+	// Compose prompt as in your plan
+	// Call OpenAI with full context
+	// Parse response: if it's a question, return it; if it's a roadmap, return it and set isComplete=true
+	// (You can use a special field in the AI response to distinguish)
+	// For now, pseudo-code:
+	// - If response contains "roadmap": isComplete = true, roadmap = parsed roadmap
+	// - Else: isComplete = false, reply = next question
+	return
 }
 
-
-func UpdateAISessionContext(sessionID uuid.UUID, message []Message){
-
-}
-
-
-func UpdateAISession(sessionID *AISession){
+func UpdateAISessionContext(sessionID uuid.UUID, message []Message) {
 
 }
 
-
-func SaveAISession(sessionID *AISession){
+func UpdateAISession(sessionID *AISession) {
 
 }
 
-func LoadAISession(sessionID string)(AISession, error){
+func SaveAISession(sessionID *AISession) {
+
+}
+
+func LoadAISession(sessionID string) (AISession, error) {
 
 	var session AISession
-
 
 	return session, nil
 }
