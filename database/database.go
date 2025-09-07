@@ -137,26 +137,6 @@ func GetTasks(id string) []types.Task {
 	return tasks
 }
 
-// func CreateTask(task types.Task) *gorm.DB {
-
-// 	var task_id uint = 345
-
-// 	newTask := types.Task{
-// 		TaskID: task_id,
-// 		UserID: 6,
-// 		Title:       task.Title,
-// 		Description: task.Description,
-// 		Level:       task.Level,
-// 		StartDate:   task.StartDate,
-// 		EndDate:     task.EndDate,
-// 		Completed:   task.Completed,
-// 		ParentTaskID: &task_id,
-// 	}
-
-// 	tx := db.Create(&newTask)
-// 	return tx
-// }
-
 func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 	// Handle error later
 	user_id, exists := c.Get("user_id")
@@ -446,6 +426,36 @@ func DeleteTask(c *gin.Context, taskID string) error {
 	return nil
 }
 
+func CreateMilestone(c *gin.Context, roadmapID string, milestone types.Milestone) (types.Milestone, error) {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return types.Milestone{}, errors.New("missing or invalid user_id")
+	}
+
+	milestone.UserID = user_id.(string)
+	milestone.RoadmapID = roadmapID
+
+	for i := range milestone.Tasks {
+		milestone.Tasks[i].UserID = milestone.UserID
+		milestone.Tasks[i].MilestoneID = milestone.MilestoneID
+		for j := range milestone.Tasks[i].Steps {
+			milestone.Tasks[i].Steps[j].TaskID = milestone.Tasks[i].TaskID
+		}
+	}
+
+	tx := db.Create(&milestone)
+	if tx.Error != nil {
+		return types.Milestone{}, tx.Error
+	}
+
+	var createdMilestone types.Milestone
+	if err := db.Where("milestone_id = ?", milestone.MilestoneID).Preload("Tasks.Steps").First(&createdMilestone).Error; err != nil {
+		return types.Milestone{}, err
+	}
+
+	return createdMilestone, nil
+}
+
 func DeleteMilestone(c *gin.Context, milestoneID string) error {
 	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {
@@ -455,6 +465,86 @@ func DeleteMilestone(c *gin.Context, milestoneID string) error {
 	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Delete(&types.Milestone{})
 	if result.Error != nil {
 		log.Println("Error deleting milestone:", result.Error)
+		return result.Error
+	}
+
+	return nil
+}
+
+func CreateStep(c *gin.Context, taskID string, step types.Step) (types.Step, error) {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return types.Step{}, errors.New("missing or invalid user_id")
+	}
+
+	var task types.Task
+	result := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).First(&task)
+	if result.Error != nil {
+		return types.Step{}, errors.New("task not found or access denied")
+	}
+
+	step.TaskID = taskID
+
+	tx := db.Create(&step)
+	if tx.Error != nil {
+		return types.Step{}, tx.Error
+	}
+
+	var createdStep types.Step
+	if err := db.Where("step_id = ?", step.StepID).First(&createdStep).Error; err != nil {
+		return types.Step{}, err
+	}
+
+	return createdStep, nil
+}
+
+func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.Step) types.Step {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return types.Step{}
+	}
+
+	var task types.Task
+	taskResult := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).First(&task)
+	if taskResult.Error != nil {
+		return types.Step{}
+	}
+
+	var step types.Step
+	result := db.Where("task_id = ?", taskID).Where("step_id = ?", stepID).First(&step)
+
+	if result.Error != nil {
+		log.Println("Error fetching step:", result.Error)
+		return types.Step{}
+	}
+
+	step.Description = updatedStep.Description
+	step.Completed = updatedStep.Completed
+	step.Number = updatedStep.Number
+
+	saveResult := db.Save(&step)
+	if saveResult.Error != nil {
+		log.Println("Error updating step:", saveResult.Error)
+	}
+
+	return step
+}
+
+func DeleteStep(c *gin.Context, taskID string, stepID string) error {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return errors.New("missing or invalid user_id")
+	}
+
+	var task types.Task
+	taskResult := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).First(&task)
+	if taskResult.Error != nil {
+		return errors.New("task not found or access denied")
+	}
+
+	result := db.Where("task_id = ?", taskID).Where("step_id = ?", stepID).Delete(&types.Step{})
+	if result.Error != nil {
+		log.Println("Error deleting step:", result.Error)
 		return result.Error
 	}
 

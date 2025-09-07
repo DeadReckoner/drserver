@@ -1,0 +1,1274 @@
+openapi: 3.0.3
+info:
+  title: DR Server API
+  description: Goal tracking and roadmap management API with AI assistance
+  version: 1.0.0
+  contact:
+    name: DR Server
+    url: https://github.com/your-org/drserver
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://api.drserver.com
+    description: Production server
+
+security:
+  - BearerAuth: []
+
+paths:
+  # Health Check
+  /health:
+    get:
+      summary: Health check endpoint
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: dr-server
+
+  /healthz:
+    get:
+      summary: Kubernetes health check
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  # User Management
+  /api/v1/users:
+    post:
+      summary: Create or update user (upsert)
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserInput'
+      responses:
+        '200':
+          description: User created or updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    get:
+      summary: Get current user
+      tags: [Users]
+      responses:
+        '200':
+          description: User retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/users/{id}:
+    patch:
+      summary: Update user by ID
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: User ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserInput'
+      responses:
+        '200':
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      summary: Delete user by ID
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: User ID
+      responses:
+        '200':
+          description: User deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # Roadmap Management
+  /api/v1/roadmaps:
+    post:
+      summary: Create a new roadmap
+      tags: [Roadmaps]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoadmapInput'
+      responses:
+        '201':
+          description: Roadmap created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Roadmap'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    get:
+      summary: Get all roadmaps for current user
+      tags: [Roadmaps]
+      responses:
+        '200':
+          description: Roadmaps retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Roadmap'
+
+  /api/v1/roadmaps/{roadmapid}:
+    get:
+      summary: Get specific roadmap
+      tags: [Roadmaps]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      responses:
+        '200':
+          description: Roadmap retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Roadmap'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update roadmap
+      tags: [Roadmaps]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoadmapInput'
+      responses:
+        '200':
+          description: Roadmap updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Roadmap'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      summary: Delete roadmap
+      tags: [Roadmaps]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      responses:
+        '200':
+          description: Roadmap deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/roadmaps/{roadmapid}/milestones:
+    get:
+      summary: Get milestones for a roadmap
+      tags: [Roadmaps, Milestones]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      responses:
+        '200':
+          description: Milestones retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Milestone'
+
+    post:
+      summary: Create milestone in roadmap
+      tags: [Roadmaps, Milestones]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MilestoneInput'
+      responses:
+        '201':
+          description: Milestone created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Milestone'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # Milestone Management
+  /api/v1/milestones/{milestoneid}:
+    get:
+      summary: Get specific milestone
+      tags: [Milestones]
+      parameters:
+        - name: milestoneid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Milestone ID
+      responses:
+        '200':
+          description: Milestone retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Milestone'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update milestone
+      tags: [Milestones]
+      parameters:
+        - name: milestoneid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Milestone ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MilestoneInput'
+      responses:
+        '200':
+          description: Milestone updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Milestone'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      summary: Delete milestone
+      tags: [Milestones]
+      parameters:
+        - name: milestoneid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Milestone ID
+      responses:
+        '200':
+          description: Milestone deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/milestones/{milestoneid}/tasks:
+    get:
+      summary: Get tasks for a milestone
+      tags: [Milestones, Tasks]
+      parameters:
+        - name: milestoneid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Milestone ID
+      responses:
+        '200':
+          description: Tasks retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Task'
+
+  # Task Management
+  /api/v1/tasks:
+    post:
+      summary: Create a new task
+      tags: [Tasks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskInput'
+      responses:
+        '201':
+          description: Task created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/tasks/user/{userid}:
+    get:
+      summary: Get tasks for a user
+      tags: [Tasks]
+      parameters:
+        - name: userid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: User ID
+      responses:
+        '200':
+          description: Tasks retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Task'
+
+  /api/v1/tasks/{taskid}:
+    get:
+      summary: Get specific task
+      tags: [Tasks]
+      parameters:
+        - name: taskid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task ID
+      responses:
+        '200':
+          description: Task retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Task'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update task
+      tags: [Tasks]
+      parameters:
+        - name: taskid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskInput'
+      responses:
+        '200':
+          description: Task updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Task'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      summary: Delete task
+      tags: [Tasks]
+      parameters:
+        - name: taskid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task ID
+      responses:
+        '200':
+          description: Task deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # Step Management
+  /api/v1/tasks/{taskid}/steps:
+    post:
+      summary: Create step in task
+      tags: [Tasks, Steps]
+      parameters:
+        - name: taskid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StepInput'
+      responses:
+        '201':
+          description: Step created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Step'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/tasks/{taskid}/steps/{stepid}:
+    patch:
+      summary: Update step
+      tags: [Tasks, Steps]
+      parameters:
+        - name: taskid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task ID
+        - name: stepid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Step ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StepInput'
+      responses:
+        '200':
+          description: Step updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Step'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      summary: Delete step
+      tags: [Tasks, Steps]
+      parameters:
+        - name: taskid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task ID
+        - name: stepid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Step ID
+      responses:
+        '200':
+          description: Step deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # AI Agent
+  /api/v1/agent/generate:
+    post:
+      summary: Generate roadmap from goal request
+      tags: [AI Agent]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoalRequest'
+      responses:
+        '200':
+          description: Roadmap generated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Roadmap'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/agent/sessions:
+    post:
+      summary: Start new AI conversation session
+      tags: [AI Agent]
+      responses:
+        '200':
+          description: AI session started successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          session_id:
+                            type: string
+                            format: uuid
+                          message:
+                            type: string
+                            example: "What kind of goal would you like to achieve?"
+
+  /api/v1/agent/sessions/{id}:
+    get:
+      summary: Get AI session details
+      tags: [AI Agent]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Session ID
+      responses:
+        '200':
+          description: AI session retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AISession'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/agent/sessions/{id}/reply:
+    post:
+      summary: Reply to AI session
+      tags: [AI Agent]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Session ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+                  description: User's reply message
+                  example: "I want to learn web development"
+      responses:
+        '200':
+          description: Reply processed successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          message:
+                            type: string
+                            description: AI's response
+                          complete:
+                            type: boolean
+                            description: Whether the session is complete
+                          roadmap:
+                            $ref: '#/components/schemas/Roadmap'
+                            description: Generated roadmap (only when complete=true)
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # WebSocket
+  /api/v1/ws/messages:
+    get:
+      summary: WebSocket endpoint for real-time messages
+      tags: [WebSocket]
+      description: Upgrade to WebSocket connection for real-time communication
+      responses:
+        '101':
+          description: WebSocket connection established
+        '400':
+          description: Failed to upgrade to WebSocket
+
+  /api/v1/ws/messages/{threadid}:
+    get:
+      summary: WebSocket endpoint for thread-specific messages
+      tags: [WebSocket]
+      parameters:
+        - name: threadid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Thread ID
+      description: Upgrade to WebSocket connection for thread-specific real-time communication
+      responses:
+        '101':
+          description: WebSocket connection established
+        '400':
+          description: Failed to upgrade to WebSocket
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token for authentication
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid input
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Invalid request format"
+            status: 400
+
+    Unauthorized:
+      description: Unauthorized - authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Authentication required"
+            status: 401
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Resource not found"
+            status: 404
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Internal server error"
+            status: 500
+
+  schemas:
+    # Base Response Types
+    ApiResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 200
+        data:
+          type: object
+          description: Response data
+
+    MessageResponse:
+      type: object
+      properties:
+        status:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: "Operation completed successfully"
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+        status:
+          type: integer
+          description: HTTP status code
+
+    # User Management
+    User:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        first_name:
+          type: string
+          example: "John"
+        last_name:
+          type: string
+          example: "Doe"
+        email:
+          type: string
+          format: email
+          example: "john.doe@example.com"
+        CreatedAt:
+          type: string
+          format: date-time
+
+    UserInput:
+      type: object
+      properties:
+        first_name:
+          type: string
+          example: "John"
+        last_name:
+          type: string
+          example: "Doe"
+        email:
+          type: string
+          format: email
+          example: "john.doe@example.com"
+
+    # Roadmap Management
+    Roadmap:
+      type: object
+      properties:
+        roadmap_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        goal:
+          type: string
+          example: "Learn Full Stack Web Development"
+        description:
+          type: string
+          example: "Comprehensive roadmap to become a full-stack developer"
+        days:
+          type: integer
+          example: 180
+        completed:
+          type: boolean
+          example: false
+        start_date:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00Z"
+        milestones:
+          type: array
+          items:
+            $ref: '#/components/schemas/Milestone'
+
+    RoadmapInput:
+      type: object
+      properties:
+        goal:
+          type: string
+          example: "Learn Full Stack Web Development"
+        description:
+          type: string
+          example: "Comprehensive roadmap to become a full-stack developer"
+        days:
+          type: integer
+          example: 180
+        completed:
+          type: boolean
+          example: false
+        start_date:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00Z"
+        milestones:
+          type: array
+          items:
+            $ref: '#/components/schemas/MilestoneInput'
+
+    # Milestone Management
+    Milestone:
+      type: object
+      properties:
+        milestone_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        roadmap_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        sub_goal:
+          type: string
+          example: "Learn Frontend Basics"
+        description:
+          type: string
+          example: "Master HTML, CSS, and basic JavaScript"
+        day:
+          type: integer
+          example: 30
+        reached:
+          type: boolean
+          example: false
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+
+    MilestoneInput:
+      type: object
+      properties:
+        sub_goal:
+          type: string
+          example: "Learn Frontend Basics"
+        description:
+          type: string
+          example: "Master HTML, CSS, and basic JavaScript"
+        day:
+          type: integer
+          example: 30
+        reached:
+          type: boolean
+          example: false
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskInput'
+
+    # Task Management
+    Task:
+      type: object
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        milestone_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        title:
+          type: string
+          example: "Learn HTML Fundamentals"
+        description:
+          type: string
+          example: "Master HTML tags, attributes, and semantic markup"
+        day:
+          type: integer
+          example: 7
+        completed:
+          type: boolean
+          example: false
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/Step'
+
+    TaskInput:
+      type: object
+      properties:
+        milestone_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        title:
+          type: string
+          example: "Learn HTML Fundamentals"
+        description:
+          type: string
+          example: "Master HTML tags, attributes, and semantic markup"
+        day:
+          type: integer
+          example: 7
+        completed:
+          type: boolean
+          example: false
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/StepInput'
+
+    # Step Management
+    Step:
+      type: object
+      properties:
+        step_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        task_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        description:
+          type: string
+          example: "Read HTML tutorial on MDN"
+        completed:
+          type: boolean
+          example: false
+        number:
+          type: integer
+          example: 1
+
+    StepInput:
+      type: object
+      properties:
+        description:
+          type: string
+          example: "Read HTML tutorial on MDN"
+        completed:
+          type: boolean
+          example: false
+        number:
+          type: integer
+          example: 1
+
+    # AI Agent
+    GoalRequest:
+      type: object
+      required:
+        - goalName
+        - goalDescription
+      properties:
+        goalName:
+          type: string
+          example: "Learn Full Stack Web Development"
+        goalDescription:
+          type: string
+          example: "I want to become a full-stack developer capable of building modern web applications"
+        goalImportance:
+          type: string
+          example: "Career advancement"
+        targetCompletionDate:
+          type: string
+          example: "6 months"
+        weeklyTimeCommitment:
+          type: string
+          example: "10 hours"
+        workFrequency:
+          type: string
+          example: "Daily"
+        constraints:
+          type: string
+          example: "Limited budget for courses"
+        currentSkillLevel:
+          type: string
+          example: "Beginner"
+
+    AISession:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          example: "user123"
+        status:
+          type: string
+          enum: [collecting, complete]
+          example: "collecting"
+        context:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        roadmap:
+          $ref: '#/components/schemas/Roadmap'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+          example: "assistant"
+        content:
+          type: string
+          example: "What kind of goal would you like to achieve?"
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Users
+    description: User management operations
+  - name: Roadmaps
+    description: Roadmap management operations
+  - name: Milestones
+    description: Milestone management operations
+  - name: Tasks
+    description: Task management operations
+  - name: Steps
+    description: Step management operations
+  - name: AI Agent
+    description: AI-powered goal and roadmap generation
+  - name: WebSocket
+    description: Real-time communication endpoints

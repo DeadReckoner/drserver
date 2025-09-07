@@ -85,3 +85,56 @@ func DeleteTask(c *gin.Context) {
 	utils.MessageResponse(c, http.StatusOK, "Task deleted successfully")
 	log.Println("Task deleted successfully")
 }
+
+func CreateStep(c *gin.Context) {
+	taskID := c.Param("taskid")
+	var newStep types.Step
+
+	if !utils.BindJSONOrAbort(c, &newStep) {
+		return
+	}
+	
+	fmt.Printf("Step received: %+v\n", newStep)
+
+	createdStep, err := database.CreateStep(c, taskID, newStep)
+	if err != nil {
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusCreated, createdStep)
+	log.Println("Step created successfully")
+}
+
+func UpdateStep(c *gin.Context) {
+	taskID := c.Param("taskid")
+	stepID := c.Param("stepid")
+	var updatedStep types.Step
+
+	if !utils.BindJSONOrAbort(c, &updatedStep) {
+		return
+	}
+
+	step := database.UpdateStep(c, taskID, stepID, updatedStep)
+	if step.StepID == "" {
+		utils.NotFoundResponse(c, "Step")
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, step)
+	log.Println("Step updated successfully")
+}
+
+func DeleteStep(c *gin.Context) {
+	taskID := c.Param("taskid")
+	stepID := c.Param("stepid")
+
+	err := database.DeleteStep(c, taskID, stepID)
+	if err != nil {
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.MessageResponse(c, http.StatusOK, "Step deleted successfully")
+	log.Println("Step deleted successfully")
+}

@@ -52,6 +52,9 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		roadmaps.GET("/:roadmapid/milestones",
 			utils.ValidateUUID("roadmapid"),
 			handlers.GetMilestonesByRoadmap)
+		roadmaps.POST("/:roadmapid/milestones",
+			utils.ValidateUUID("roadmapid"),
+			handlers.CreateMilestone)
 	}
 
 	milestones := rg.Group("/milestones")
@@ -74,6 +77,10 @@ func setupTaskRoutes(rg *gin.RouterGroup) {
 		tasks.GET("/:taskid", utils.ValidateUUID("taskid"), handlers.GetTask)
 		tasks.PATCH("/:taskid", utils.ValidateUUID("taskid"), handlers.UpdateTask)
 		tasks.DELETE("/:taskid", utils.ValidateUUID("taskid"), handlers.DeleteTask)
+
+		tasks.POST("/:taskid/steps", utils.ValidateUUID("taskid"), handlers.CreateStep)
+		tasks.PATCH("/:taskid/steps/:stepid", utils.ValidateUUID("taskid"), utils.ValidateUUID("stepid"), handlers.UpdateStep)
+		tasks.DELETE("/:taskid/steps/:stepid", utils.ValidateUUID("taskid"), utils.ValidateUUID("stepid"), handlers.DeleteStep)
 	}
 }
 

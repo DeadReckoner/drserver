@@ -117,6 +117,26 @@ func UpdateMilestone(c *gin.Context) {
 	log.Println("Milestone updated successfully")
 }
 
+func CreateMilestone(c *gin.Context) {
+	roadmapID := c.Param("roadmapid")
+	var newMilestone types.Milestone
+
+	if !utils.BindJSONOrAbort(c, &newMilestone) {
+		return
+	}
+	
+	fmt.Printf("Milestone received: %+v\n", newMilestone)
+
+	createdMilestone, err := database.CreateMilestone(c, roadmapID, newMilestone)
+	if err != nil {
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusCreated, createdMilestone)
+	log.Println("Milestone created successfully")
+}
+
 func DeleteMilestone(c *gin.Context) {
 	milestoneID := c.Param("milestoneid")
 	
