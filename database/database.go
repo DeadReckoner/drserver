@@ -234,20 +234,56 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 		return roadmap
 	}
 
-	// Update fields (example: update goal, description, days, completed, start_date)
-	roadmap.Goal = rm.Goal
-	roadmap.Description = rm.Description
-	roadmap.Days = rm.Days
-	roadmap.Completed = rm.Completed
-	roadmap.StartDate = rm.StartDate
-
-	// If you want to update milestones/tasks/steps, handle them here as well
-
-	// Save the updated roadmap
-	saveResult := db.Save(&roadmap)
-	if saveResult.Error != nil {
-		log.Println("Error updating roadmap:", saveResult.Error)
+	// Use GORM's Updates method to only update non-zero fields
+	updateMap := make(map[string]interface{})
+	if rm.Goal != "" {
+		updateMap["goal"] = rm.Goal
 	}
+	if rm.Description != "" {
+		updateMap["description"] = rm.Description
+	}
+	if rm.Days != 0 {
+		updateMap["days"] = rm.Days
+	}
+	// Handle boolean field explicitly since Updates ignores zero values
+	if rm.Completed != roadmap.Completed {
+		updateMap["completed"] = rm.Completed
+	}
+	if !rm.StartDate.IsZero() {
+		updateMap["start_date"] = rm.StartDate
+	}
+
+	if len(updateMap) > 0 {
+		updateResult := db.Model(&roadmap).Updates(updateMap)
+		if updateResult.Error != nil {
+			log.Println("Error updating roadmap:", updateResult.Error)
+			return roadmap
+		}
+		// Update the roadmap struct with the new values
+		for key, value := range updateMap {
+			switch key {
+			case "goal":
+				roadmap.Goal = value.(string)
+			case "description":
+				roadmap.Description = value.(string)
+			case "days":
+				roadmap.Days = value.(int)
+			case "completed":
+				roadmap.Completed = value.(bool)
+			case "start_date":
+				roadmap.StartDate = value.(time.Time)
+			}
+		}
+	}
+
+	// Check if all milestones are completed to auto-complete roadmap
+	if shouldCompleteRoadmap(roadmap.RoadmapID) {
+		db.Model(&roadmap).Update("completed", true)
+		roadmap.Completed = true
+	}
+
+	// Fetch updated roadmap with associations
+	db.Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").First(&roadmap)
 
 	return roadmap
 }
@@ -307,22 +343,63 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 		return types.Milestone{}
 	}
 
-	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).First(&milestone)
+	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Preload("Tasks.Steps").First(&milestone)
 
 	if result.Error != nil {
 		log.Println("Error fetching milestone:", result.Error)
 		return types.Milestone{}
 	}
 
-	milestone.SubGoal = updatedMilestone.SubGoal
-	milestone.Description = updatedMilestone.Description
-	milestone.Day = updatedMilestone.Day
-	milestone.Reached = updatedMilestone.Reached
-
-	saveResult := db.Save(&milestone)
-	if saveResult.Error != nil {
-		log.Println("Error updating milestone:", saveResult.Error)
+	// Use GORM's Updates method to only update non-zero fields
+	updateMap := make(map[string]interface{})
+	if updatedMilestone.SubGoal != "" {
+		updateMap["sub_goal"] = updatedMilestone.SubGoal
 	}
+	if updatedMilestone.Description != "" {
+		updateMap["description"] = updatedMilestone.Description
+	}
+	if updatedMilestone.Day != 0 {
+		updateMap["day"] = updatedMilestone.Day
+	}
+	// Handle boolean field explicitly since Updates ignores zero values
+	if updatedMilestone.Reached != milestone.Reached {
+		updateMap["reached"] = updatedMilestone.Reached
+	}
+
+	if len(updateMap) > 0 {
+		updateResult := db.Model(&milestone).Updates(updateMap)
+		if updateResult.Error != nil {
+			log.Println("Error updating milestone:", updateResult.Error)
+			return types.Milestone{}
+		}
+		// Update the milestone struct with the new values
+		for key, value := range updateMap {
+			switch key {
+			case "sub_goal":
+				milestone.SubGoal = value.(string)
+			case "description":
+				milestone.Description = value.(string)
+			case "day":
+				milestone.Day = value.(int)
+			case "reached":
+				milestone.Reached = value.(bool)
+			}
+		}
+	}
+
+	// Check if all tasks are completed to auto-complete milestone
+	if shouldCompleteMilestone(milestone.MilestoneID) {
+		db.Model(&milestone).Update("reached", true)
+		milestone.Reached = true
+		
+		// Check if this completion should trigger roadmap completion
+		if shouldCompleteRoadmap(milestone.RoadmapID) {
+			db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
+		}
+	}
+
+	// Fetch updated milestone with associations
+	db.Where("milestone_id = ?", milestoneID).Preload("Tasks.Steps").First(&milestone)
 
 	return milestone
 }
@@ -391,22 +468,70 @@ func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Tas
 		return types.Task{}
 	}
 
-	result := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).First(&task)
+	result := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).Preload("Steps").First(&task)
 
 	if result.Error != nil {
 		log.Println("Error fetching task:", result.Error)
 		return types.Task{}
 	}
 
-	task.Title = updatedTask.Title
-	task.Description = updatedTask.Description
-	task.Day = updatedTask.Day
-	task.Completed = updatedTask.Completed
-
-	saveResult := db.Save(&task)
-	if saveResult.Error != nil {
-		log.Println("Error updating task:", saveResult.Error)
+	// Use GORM's Updates method to only update non-zero fields
+	updateMap := make(map[string]interface{})
+	if updatedTask.Title != "" {
+		updateMap["title"] = updatedTask.Title
 	}
+	if updatedTask.Description != "" {
+		updateMap["description"] = updatedTask.Description
+	}
+	if updatedTask.Day != 0 {
+		updateMap["day"] = updatedTask.Day
+	}
+	// Handle boolean field explicitly since Updates ignores zero values
+	if updatedTask.Completed != task.Completed {
+		updateMap["completed"] = updatedTask.Completed
+	}
+
+	if len(updateMap) > 0 {
+		updateResult := db.Model(&task).Updates(updateMap)
+		if updateResult.Error != nil {
+			log.Println("Error updating task:", updateResult.Error)
+			return types.Task{}
+		}
+		// Update the task struct with the new values
+		for key, value := range updateMap {
+			switch key {
+			case "title":
+				task.Title = value.(string)
+			case "description":
+				task.Description = value.(string)
+			case "day":
+				task.Day = value.(int)
+			case "completed":
+				task.Completed = value.(bool)
+			}
+		}
+	}
+
+	// Check if all steps are completed to auto-complete task
+	if shouldCompleteTask(task.TaskID) {
+		db.Model(&task).Update("completed", true)
+		task.Completed = true
+		
+		// Check if this completion should trigger milestone completion
+		if shouldCompleteMilestone(task.MilestoneID) {
+			db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
+			
+			// Check if this completion should trigger roadmap completion
+			var milestone types.Milestone
+			db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
+			if shouldCompleteRoadmap(milestone.RoadmapID) {
+				db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
+			}
+		}
+	}
+
+	// Fetch updated task with associations
+	db.Where("task_id = ?", taskID).Preload("Steps").First(&task)
 
 	return task
 }
@@ -518,13 +643,56 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 		return types.Step{}
 	}
 
-	step.Description = updatedStep.Description
-	step.Completed = updatedStep.Completed
-	step.Number = updatedStep.Number
+	// Use GORM's Updates method to only update non-zero fields
+	updateMap := make(map[string]interface{})
+	if updatedStep.Description != "" {
+		updateMap["description"] = updatedStep.Description
+	}
+	if updatedStep.Number != 0 {
+		updateMap["number"] = updatedStep.Number
+	}
+	// Handle boolean field explicitly since Updates ignores zero values
+	if updatedStep.Completed != step.Completed {
+		updateMap["completed"] = updatedStep.Completed
+	}
 
-	saveResult := db.Save(&step)
-	if saveResult.Error != nil {
-		log.Println("Error updating step:", saveResult.Error)
+	if len(updateMap) > 0 {
+		updateResult := db.Model(&step).Updates(updateMap)
+		if updateResult.Error != nil {
+			log.Println("Error updating step:", updateResult.Error)
+			return types.Step{}
+		}
+		// Update the step struct with the new values
+		for key, value := range updateMap {
+			switch key {
+			case "description":
+				step.Description = value.(string)
+			case "number":
+				step.Number = value.(int)
+			case "completed":
+				step.Completed = value.(bool)
+			}
+		}
+	}
+
+	// If step was completed, check cascade completion
+	if updatedStep.Completed {
+		// Check if all steps are completed to auto-complete task
+		if shouldCompleteTask(taskID) {
+			db.Model(&types.Task{}).Where("task_id = ?", taskID).Update("completed", true)
+			
+			// Check if this completion should trigger milestone completion
+			if shouldCompleteMilestone(task.MilestoneID) {
+				db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
+				
+				// Check if this completion should trigger roadmap completion
+				var milestone types.Milestone
+				db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
+				if shouldCompleteRoadmap(milestone.RoadmapID) {
+					db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
+				}
+			}
+		}
 	}
 
 	return step
@@ -549,4 +717,27 @@ func DeleteStep(c *gin.Context, taskID string, stepID string) error {
 	}
 
 	return nil
+}
+
+// Helper functions for checking completion status
+
+// shouldCompleteTask checks if all steps in a task are completed
+func shouldCompleteTask(taskID string) bool {
+	var incompleteSteps int64
+	db.Model(&types.Step{}).Where("task_id = ? AND completed = ?", taskID, false).Count(&incompleteSteps)
+	return incompleteSteps == 0
+}
+
+// shouldCompleteMilestone checks if all tasks in a milestone are completed
+func shouldCompleteMilestone(milestoneID string) bool {
+	var incompleteTasks int64
+	db.Model(&types.Task{}).Where("milestone_id = ? AND completed = ?", milestoneID, false).Count(&incompleteTasks)
+	return incompleteTasks == 0
+}
+
+// shouldCompleteRoadmap checks if all milestones in a roadmap are completed
+func shouldCompleteRoadmap(roadmapID string) bool {
+	var incompleteMilestones int64
+	db.Model(&types.Milestone{}).Where("roadmap_id = ? AND reached = ?", roadmapID, false).Count(&incompleteMilestones)
+	return incompleteMilestones == 0
 }
