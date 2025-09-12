@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	"dr/server/types"
@@ -124,9 +123,8 @@ func DeleteUser(c *gin.Context) error {
 // GetTasks by id
 func GetTasks(id string) []types.Task {
 	var tasks []types.Task
-	id_val, _ := strconv.Atoi(id)
 
-	result := db.Debug().Where("user_id = ?", id_val).Find(&tasks)
+	result := db.Debug().Where("user_id = ?", id).Order("day ASC").Find(&tasks)
 
 	if result.Error != nil {
 		log.Println("Error:", result.Error)
@@ -194,7 +192,13 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 	}
 
 	// Query the roadmap table for all roadmaps with this user_id
-	result := db.Where("user_id = ?", user_id).Preload("Milestones.Tasks.Steps").Find(&roadmaps)
+	result := db.Where("user_id = ?", user_id).Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day ASC")
+	}).Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day ASC")
+	}).Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).Find(&roadmaps)
 	if result.Error != nil {
 		log.Println("Error fetching roadmaps:", result.Error)
 	}
@@ -211,7 +215,13 @@ func GetRoadmap(c *gin.Context, roadmapID string) types.Roadmap {
 	}
 
 	// Query the roadmap table for all roadmaps with this user_id
-	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").Find(&roadmap)
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day ASC")
+	}).Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day ASC")
+	}).Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).Find(&roadmap)
 	if result.Error != nil {
 		log.Println("Error fetching roadmaps:", result.Error)
 	}
@@ -283,7 +293,13 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 	}
 
 	// Fetch updated roadmap with associations
-	db.Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").First(&roadmap)
+	db.Where("roadmap_id = ?", roadmapID).Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day ASC")
+	}).Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day ASC")
+	}).Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).First(&roadmap)
 
 	return roadmap
 }
@@ -311,7 +327,11 @@ func GetMilestonesByRoadmap(c *gin.Context, roadmapID string) []types.Milestone 
 		return []types.Milestone{}
 	}
 
-	results := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Tasks.Steps").Find(&milestones)
+	results := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Order("day ASC").Preload("Tasks", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day ASC")
+	}).Preload("Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).Find(&milestones)
 
 	if results.Error != nil {
 		log.Println("Error fetching milestones:", results.Error)
@@ -327,7 +347,11 @@ func GetMilestone(c *gin.Context, milestoneID string) types.Milestone {
 		return types.Milestone{}
 	}
 
-	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Preload("Tasks.Steps").First(&milestone)
+	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Preload("Tasks", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day ASC")
+	}).Preload("Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).First(&milestone)
 
 	if result.Error != nil {
 		log.Println("Error fetching milestone:", result.Error)
@@ -343,7 +367,11 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 		return types.Milestone{}
 	}
 
-	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Preload("Tasks.Steps").First(&milestone)
+	result := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Preload("Tasks", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day ASC")
+	}).Preload("Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).First(&milestone)
 
 	if result.Error != nil {
 		log.Println("Error fetching milestone:", result.Error)
@@ -399,7 +427,11 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 	}
 
 	// Fetch updated milestone with associations
-	db.Where("milestone_id = ?", milestoneID).Preload("Tasks.Steps").First(&milestone)
+	db.Where("milestone_id = ?", milestoneID).Preload("Tasks", func(db *gorm.DB) *gorm.DB {
+		return db.Order("day ASC")
+	}).Preload("Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).First(&milestone)
 
 	return milestone
 }
@@ -436,7 +468,9 @@ func GetTasksByMilestone(c *gin.Context, milestoneID string) []types.Task {
 		return []types.Task{}
 	}
 
-	results := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Preload("Steps").Find(&tasks)
+	results := db.Where("user_id = ?", user_id).Where("milestone_id = ?", milestoneID).Order("day ASC").Preload("Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).Find(&tasks)
 
 	if results.Error != nil {
 		log.Println("Error fetching tasks:", results.Error)
@@ -452,7 +486,9 @@ func GetTask(c *gin.Context, taskID string) types.Task {
 		return types.Task{}
 	}
 
-	result := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).Preload("Steps").First(&task)
+	result := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).Preload("Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).First(&task)
 
 	if result.Error != nil {
 		log.Println("Error fetching task:", result.Error)
@@ -468,7 +504,9 @@ func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Tas
 		return types.Task{}
 	}
 
-	result := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).Preload("Steps").First(&task)
+	result := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).Preload("Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).First(&task)
 
 	if result.Error != nil {
 		log.Println("Error fetching task:", result.Error)
@@ -531,7 +569,9 @@ func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Tas
 	}
 
 	// Fetch updated task with associations
-	db.Where("task_id = ?", taskID).Preload("Steps").First(&task)
+	db.Where("task_id = ?", taskID).Preload("Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).First(&task)
 
 	return task
 }
