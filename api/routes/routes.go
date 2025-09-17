@@ -98,6 +98,13 @@ func setupAgentRoutes(rg *gin.RouterGroup) {
 	}
 }
 
+func setupMessageThreadRoutes(rg *gin.RouterGroup) {
+	message := rg.Group("/thread")
+	{
+		message.POST("", handlers.CreateThread)
+	}
+}
+
 func setupWebSocketRoutes(rg *gin.RouterGroup) {
 	ws := rg.Group("/ws")
 	{

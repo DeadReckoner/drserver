@@ -1,9 +1,10 @@
 package handlers
 
 import (
+	"dr/server/types"
 	"fmt"
 	"net/http"
-	"time"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -15,47 +16,9 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// func WSHandler(c *gin.Context) {
-// 	threadID := c.Param("threadid")
-// 	userID := c.GetString("user_id")
-// 	log.Printf("WebSocket connect thread=%s user=%s\n", threadID, userID)
-
-// 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-// 	if err != nil {
-// 		log.Printf("WebSocket upgrade error: %v\n", err)
-// 		utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to upgrade to WebSocket")
-// 		return
-// 	}
-// 	defer conn.Close()
-
-// 	conn.SetReadLimit(1024 * 64)
-// 	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-// 	conn.SetPongHandler(func(appData string) error {
-// 		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-// 		return nil
-// 	})
-
-// 	var writeMu sync.Mutex
-
-// 	for {
-// 		mt, message, err := conn.ReadMessage()
-// 		if err != nil {
-// 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-// 				log.Printf("WebSocket read error: %v\n", err)
-// 			}
-// 			break
-// 		}
-// 		log.Printf("Received (thread=%s user=%s): %s\n", threadID, userID, message)
-
-// 		writeMu.Lock()
-// 		err = conn.WriteMessage(mt, message)
-// 		writeMu.Unlock()
-// 		if err != nil {
-// 			log.Printf("WebSocket write error: %v\n", err)
-// 			break
-// 		}
-// 	}
-// }
+var clients = make(map[*websocket.Conn]bool) //Connected clients
+var broadcast = make(chan []byte)
+var mutex = &sync.Mutex{}
 
 func WSHandler(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -63,10 +26,63 @@ func WSHandler(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
-	i := 0
+
+	go handleMessage()
+
+	mutex.Lock()
+	clients[conn] = true
+	mutex.Unlock()
+
 	for {
-		i++
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Hello, WebSocket! %d", i)))
-		time.Sleep(time.Second)
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			mutex.Lock()
+			delete(clients, conn)
+			mutex.Unlock()
+			break
+		}
+		broadcast <- message
 	}
+
+}
+
+func handleMessage() {
+	for {
+		message := <-broadcast
+
+		mutex.Lock()
+		for client := range clients {
+			err := client.WriteMessage(websocket.TextMessage, message)
+			if err != nil {
+				client.Close()
+				delete(clients, client)
+			}
+		}
+		mutex.Unlock()
+	}
+}
+
+func handleConnection(conn *websocket.Conn) {
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			fmt.Println("Error reading message:", err)
+			break
+		}
+		fmt.Printf("recieved: %s\n", message)
+
+		if err = conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			fmt.Println("error writing message:", err)
+			break
+		}
+	}
+}
+
+func CreateThread(c *gin.Context) {
+	userID := c.GetString("user_id")
+	var newThread types.Thread
+
+	fmt.Printf("Creating new thread: %+v\n", userID)
+
+	c.JSON(http.StatusCreated, newThread)
 }
