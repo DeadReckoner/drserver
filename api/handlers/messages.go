@@ -16,7 +16,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-var clients = make(map[*websocket.Conn]bool) //Connected clients
+var clients = make(map[*websocket.Conn]string) //Connected clients
 var broadcast = make(chan []byte)
 var mutex = &sync.Mutex{}
 
@@ -27,10 +27,16 @@ func WSHandler(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	go handleMessage()
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		//errors.New("missing or invalid user_id")
+		return
+	}
+
+	go handleMessage(user_id.(string))
 
 	mutex.Lock()
-	clients[conn] = true
+	clients[conn] = user_id.(string)
 	mutex.Unlock()
 
 	for {
@@ -46,16 +52,20 @@ func WSHandler(c *gin.Context) {
 
 }
 
-func handleMessage() {
+func handleMessage(user_id string) {
 	for {
 		message := <-broadcast
 
 		mutex.Lock()
-		for client := range clients {
-			err := client.WriteMessage(websocket.TextMessage, message)
-			if err != nil {
-				client.Close()
-				delete(clients, client)
+		for client, clientID := range clients {
+			if clientID == user_id {
+				continue
+			} else {
+				err := client.WriteMessage(websocket.TextMessage, message)
+				if err != nil {
+					client.Close()
+					delete(clients, client)
+				}
 			}
 		}
 		mutex.Unlock()
