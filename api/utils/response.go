@@ -57,3 +57,7 @@ func InternalErrorResponse(c *gin.Context, err error) {
 func ConflictResponse(c *gin.Context, message string) {
 	ErrorResponse(c, http.StatusConflict, message)
 }
+
+func BadRequestResponse(c *gin.Context, message string) {
+	ErrorResponse(c, http.StatusBadRequest, message)
+}

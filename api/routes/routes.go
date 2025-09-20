@@ -35,6 +35,7 @@ func setupUserRoutes(rg *gin.RouterGroup) {
 	{
 		users.POST("", handlers.CreateUser)
 		users.GET("", handlers.GetUser)
+		users.GET("/search", handlers.SearchUsers)
 		users.PATCH("/:id", utils.ValidateUUID("id"), handlers.UpdateUser)
 		users.DELETE("/:id", utils.ValidateUUID("id"), handlers.DeleteUser)
 	}
@@ -44,6 +45,7 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 	roadmaps := rg.Group("/roadmaps")
 	{
 		roadmaps.POST("", handlers.CreateRoadmap)
+		roadmaps.PUT("/:roadmapid/start", handlers.StartRoadmap)
 		roadmaps.GET("", handlers.GetRoadmapsByUser)
 		roadmaps.GET("/:roadmapid", utils.ValidateUUID("roadmapid"), handlers.GetRoadmap)
 		roadmaps.PATCH("/:roadmapid", utils.ValidateUUID("roadmapid"), handlers.UpdateRoadmap)

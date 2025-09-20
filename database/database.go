@@ -781,3 +781,19 @@ func shouldCompleteRoadmap(roadmapID string) bool {
 	db.Model(&types.Milestone{}).Where("roadmap_id = ? AND reached = ?", roadmapID, false).Count(&incompleteMilestones)
 	return incompleteMilestones == 0
 }
+
+func SearchUsersByEmail(email string) []types.User {
+	var users []types.User
+	
+	// With current RLS policy, this will only return the current user if their email matches
+	// To search other users, you need to either:
+	// 1. Add a new RLS policy allowing user search, or 
+	// 2. Use service role credentials that bypass RLS
+	result := db.Where("email ILIKE ?", "%"+email+"%").Find(&users)
+	if result.Error != nil {
+		log.Println("Error searching users by email:", result.Error)
+		return []types.User{}
+	}
+	
+	return users
+}

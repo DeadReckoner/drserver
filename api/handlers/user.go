@@ -81,3 +81,14 @@ func DeleteUser(c *gin.Context) {
 	utils.MessageResponse(c, http.StatusOK, "User deleted successfully")
 	log.Println("User deleted successfully")
 }
+
+func SearchUsers(c *gin.Context) {
+	email := c.Query("email")
+	if email == "" {
+		utils.BadRequestResponse(c, "email query parameter is required")
+		return
+	}
+
+	users := database.SearchUsersByEmail(email)
+	utils.DataResponse(c, http.StatusOK, users)
+}

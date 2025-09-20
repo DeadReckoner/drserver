@@ -18,7 +18,7 @@ func CreateRoadmap(c *gin.Context) {
 	if !utils.BindJSONOrAbort(c, &newRoadmap) {
 		return
 	}
-	
+
 	fmt.Printf("Roadmap received: %+v\n", newRoadmap)
 
 	createdRoadmap, err := database.CreateRoadmap(c, newRoadmap)
@@ -39,7 +39,7 @@ func GetRoadmapsByUser(c *gin.Context) {
 func GetRoadmap(c *gin.Context) {
 	roadmapID := c.Param("roadmapid")
 	roadmap := database.GetRoadmap(c, roadmapID)
-	
+
 	if roadmap.RoadmapID == "" {
 		utils.NotFoundResponse(c, "Roadmap")
 		return
@@ -55,7 +55,7 @@ func UpdateRoadmap(c *gin.Context) {
 	if !utils.BindJSONOrAbort(c, &updatedRoadmap) {
 		return
 	}
-	
+
 	fmt.Printf("Updated roadmap received: %+v\n", updatedRoadmap)
 
 	roadmap := database.UpdateRoadmap(c, roadmapID, updatedRoadmap)
@@ -90,7 +90,7 @@ func GetMilestonesByRoadmap(c *gin.Context) {
 func GetMilestone(c *gin.Context) {
 	milestoneID := c.Param("milestoneid")
 	milestone := database.GetMilestone(c, milestoneID)
-	
+
 	if milestone.MilestoneID == "" {
 		utils.NotFoundResponse(c, "Milestone")
 		return
@@ -124,7 +124,7 @@ func CreateMilestone(c *gin.Context) {
 	if !utils.BindJSONOrAbort(c, &newMilestone) {
 		return
 	}
-	
+
 	fmt.Printf("Milestone received: %+v\n", newMilestone)
 
 	createdMilestone, err := database.CreateMilestone(c, roadmapID, newMilestone)
@@ -139,7 +139,7 @@ func CreateMilestone(c *gin.Context) {
 
 func DeleteMilestone(c *gin.Context) {
 	milestoneID := c.Param("milestoneid")
-	
+
 	err := database.DeleteMilestone(c, milestoneID)
 	if err != nil {
 		utils.InternalErrorResponse(c, err)
@@ -148,4 +148,8 @@ func DeleteMilestone(c *gin.Context) {
 
 	utils.MessageResponse(c, http.StatusOK, "Milestone deleted successfully")
 	log.Println("Milestone deleted successfully")
+}
+
+func StartRoadmap(c *gin.Context) {
+
 }
