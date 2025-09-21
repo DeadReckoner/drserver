@@ -120,11 +120,42 @@ func DeleteUser(c *gin.Context) error {
 	return nil
 }
 
-// GetTasks by id
-func GetTasks(id string) []types.Task {
+// GetTasks by id with optional date filtering
+func GetTasks(c *gin.Context, startDate, endDate string) []types.Task {
 	var tasks []types.Task
 
-	result := db.Debug().Where("user_id = ?", id).Order("day ASC").Find(&tasks)
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		log.Println("missing or invalid user_id")
+	}
+
+	query := db.Debug().Where("user_id = ?", user_id)
+
+	// Apply date filtering if start_date is provided
+	if startDate != "" {
+		parsedStartDate, err := time.Parse("2006-01-02", startDate)
+		if err != nil {
+			log.Printf("Invalid start_date format: %s", startDate)
+		} else {
+			if endDate != "" {
+				// Date range filtering: start_date <= date <= end_date
+				parsedEndDate, err := time.Parse("2006-01-02", endDate)
+				if err != nil {
+					log.Printf("Invalid end_date format: %s", endDate)
+				} else {
+					// Add one day to end_date to include the entire end date
+					parsedEndDate = parsedEndDate.Add(24 * time.Hour)
+					query = query.Where("date >= ? AND date < ?", parsedStartDate, parsedEndDate)
+				}
+			} else {
+				// Single date filtering: date is on the specific day
+				nextDay := parsedStartDate.Add(24 * time.Hour)
+				query = query.Where("date >= ? AND date < ?", parsedStartDate, nextDay)
+			}
+		}
+	}
+
+	result := query.Order("day ASC").Find(&tasks)
 
 	if result.Error != nil {
 		log.Println("Error:", result.Error)
@@ -259,9 +290,12 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 	if rm.Completed != roadmap.Completed {
 		updateMap["completed"] = rm.Completed
 	}
-	if !rm.StartDate.IsZero() {
+	if rm.StartDate != roadmap.StartDate {
 		updateMap["start_date"] = rm.StartDate
 	}
+	// if !rm.StartDate.IsZero() {
+	// 	updateMap["start_date"] = rm.StartDate
+	// }
 
 	if len(updateMap) > 0 {
 		updateResult := db.Model(&roadmap).Updates(updateMap)
@@ -393,6 +427,9 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 	if updatedMilestone.Reached != milestone.Reached {
 		updateMap["reached"] = updatedMilestone.Reached
 	}
+	if updatedMilestone.Date != milestone.Date {
+		updateMap["date"] = updatedMilestone.Date
+	}
 
 	if len(updateMap) > 0 {
 		updateResult := db.Model(&milestone).Updates(updateMap)
@@ -419,7 +456,7 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 	if shouldCompleteMilestone(milestone.MilestoneID) {
 		db.Model(&milestone).Update("reached", true)
 		milestone.Reached = true
-		
+
 		// Check if this completion should trigger roadmap completion
 		if shouldCompleteRoadmap(milestone.RoadmapID) {
 			db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
@@ -528,6 +565,9 @@ func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Tas
 	if updatedTask.Completed != task.Completed {
 		updateMap["completed"] = updatedTask.Completed
 	}
+	if updatedTask.Date != task.Date {
+		updateMap["date"] = updatedTask.Date
+	}
 
 	if len(updateMap) > 0 {
 		updateResult := db.Model(&task).Updates(updateMap)
@@ -554,11 +594,11 @@ func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Tas
 	if shouldCompleteTask(task.TaskID) {
 		db.Model(&task).Update("completed", true)
 		task.Completed = true
-		
+
 		// Check if this completion should trigger milestone completion
 		if shouldCompleteMilestone(task.MilestoneID) {
 			db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
-			
+
 			// Check if this completion should trigger roadmap completion
 			var milestone types.Milestone
 			db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
@@ -720,11 +760,11 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 		// Check if all steps are completed to auto-complete task
 		if shouldCompleteTask(taskID) {
 			db.Model(&types.Task{}).Where("task_id = ?", taskID).Update("completed", true)
-			
+
 			// Check if this completion should trigger milestone completion
 			if shouldCompleteMilestone(task.MilestoneID) {
 				db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
-				
+
 				// Check if this completion should trigger roadmap completion
 				var milestone types.Milestone
 				db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
@@ -784,16 +824,16 @@ func shouldCompleteRoadmap(roadmapID string) bool {
 
 func SearchUsersByEmail(email string) []types.User {
 	var users []types.User
-	
+
 	// With current RLS policy, this will only return the current user if their email matches
 	// To search other users, you need to either:
-	// 1. Add a new RLS policy allowing user search, or 
+	// 1. Add a new RLS policy allowing user search, or
 	// 2. Use service role credentials that bypass RLS
 	result := db.Where("email ILIKE ?", "%"+email+"%").Find(&users)
 	if result.Error != nil {
 		log.Println("Error searching users by email:", result.Error)
 		return []types.User{}
 	}
-	
+
 	return users
 }

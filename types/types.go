@@ -57,25 +57,27 @@ type Roadmap struct {
 }
 
 type Milestone struct {
-	MilestoneID string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"milestone_id"`
-	RoadmapID   string `gorm:"type:uuid" json:"roadmap_id"`
-	UserID      string `gorm:"type:uuid" json:"user_id"`
-	SubGoal     string `json:"sub_goal"`
-	Description string `json:"description"`
-	Day         int    `json:"day"`
-	Reached     bool   `json:"reached"`
-	Tasks       []Task `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"tasks"`
+	MilestoneID string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"milestone_id"`
+	RoadmapID   string    `gorm:"type:uuid" json:"roadmap_id"`
+	UserID      string    `gorm:"type:uuid" json:"user_id"`
+	SubGoal     string    `json:"sub_goal"`
+	Description string    `json:"description"`
+	Day         int       `json:"day"`
+	Reached     bool      `json:"reached"`
+	Date        time.Time `json:"date,omitempty"`
+	Tasks       []Task    `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"tasks"`
 }
 
 type Task struct {
-	TaskID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"task_id"`
-	MilestoneID string `gorm:"type:uuid" json:"milestone_id"`
-	UserID      string `gorm:"type:uuid" json:"user_id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Day         int    `json:"day"`
-	Completed   bool   `json:"completed"`
-	Steps       []Step `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps"`
+	TaskID      string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"task_id"`
+	MilestoneID string    `gorm:"type:uuid" json:"milestone_id"`
+	UserID      string    `gorm:"type:uuid" json:"user_id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Day         int       `json:"day"`
+	Completed   bool      `json:"completed"`
+	Date        time.Time `json:"date"`
+	Steps       []Step    `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps"`
 }
 
 type Step struct {

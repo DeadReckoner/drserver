@@ -75,7 +75,7 @@ func setupTaskRoutes(rg *gin.RouterGroup) {
 	tasks := rg.Group("/tasks")
 	{
 		tasks.POST("", handlers.CreateTask)
-		tasks.GET("/user/:userid", utils.ValidateUUID("userid"), handlers.GetTasks)
+		tasks.GET("/user", handlers.GetTasks)
 		tasks.GET("/:taskid", utils.ValidateUUID("taskid"), handlers.GetTask)
 		tasks.PATCH("/:taskid", utils.ValidateUUID("taskid"), handlers.UpdateTask)
 		tasks.DELETE("/:taskid", utils.ValidateUUID("taskid"), handlers.DeleteTask)

@@ -18,7 +18,7 @@ func CreateTask(c *gin.Context) {
 	if !utils.BindJSONOrAbort(c, &newTask) {
 		return
 	}
-	
+
 	fmt.Printf("Task received: %+v\n", newTask)
 
 	createdTask, err := database.CreateTask(c, newTask)
@@ -31,9 +31,22 @@ func CreateTask(c *gin.Context) {
 	log.Println("Task created successfully")
 }
 
+type DateRange struct {
+	StartDate string `json:"start_date"`
+	EndDate   string `json:"end_date,omitempty"`
+}
+
 func GetTasks(c *gin.Context) {
-	userID := c.Param("userid")
-	tasks := database.GetTasks(userID)
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+
+	dateRange := DateRange{
+		StartDate: startDate,
+		EndDate:   endDate,
+	}
+	fmt.Println("date range: ", dateRange)
+
+	tasks := database.GetTasks(c, startDate, endDate)
 	utils.DataResponse(c, http.StatusOK, tasks)
 }
 
@@ -46,7 +59,7 @@ func GetTasksByMilestone(c *gin.Context) {
 func GetTask(c *gin.Context) {
 	taskID := c.Param("taskid")
 	task := database.GetTask(c, taskID)
-	
+
 	if task.TaskID == "" {
 		utils.NotFoundResponse(c, "Task")
 		return
@@ -93,7 +106,7 @@ func CreateStep(c *gin.Context) {
 	if !utils.BindJSONOrAbort(c, &newStep) {
 		return
 	}
-	
+
 	fmt.Printf("Step received: %+v\n", newStep)
 
 	createdStep, err := database.CreateStep(c, taskID, newStep)

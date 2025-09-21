@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"dr/server/api/utils"
 
@@ -151,5 +152,42 @@ func DeleteMilestone(c *gin.Context) {
 }
 
 func StartRoadmap(c *gin.Context) {
+	roadmapID := c.Param("roadmapid")
+	roadmap := database.GetRoadmap(c, roadmapID)
 
+	if roadmap.RoadmapID == "" {
+		utils.NotFoundResponse(c, "Roadmap")
+		return
+	}
+
+	roadmap.StartDate = time.Now()
+
+	for index, milestone := range roadmap.Milestones {
+
+		fmt.Println("starting milestone ", milestone.Day)
+		roadmap.Milestones[index] = dateMilestones(c, roadmap.StartDate, milestone)
+		for taskIndex, task := range milestone.Tasks {
+			fmt.Println("starting task ", task.Day)
+			roadmap.Milestones[index].Tasks[taskIndex] = dateTasks(c, roadmap.StartDate, task)
+		}
+	}
+
+	updatedRoadmap := database.UpdateRoadmap(c, roadmapID, roadmap)
+
+	utils.DataResponse(c, http.StatusOK, updatedRoadmap)
+	log.Println("Roadmap started successfully")
+}
+
+func dateMilestones(c *gin.Context, startDate time.Time, milestone types.Milestone) types.Milestone {
+
+	milestone.Date = startDate.AddDate(0, 0, milestone.Day)
+
+	return database.UpdateMilestone(c, milestone.MilestoneID, milestone)
+}
+
+func dateTasks(c *gin.Context, startDate time.Time, task types.Task) types.Task {
+
+	task.Date = startDate.AddDate(0, 0, task.Day)
+
+	return database.UpdateTask(c, task.TaskID, task)
 }
