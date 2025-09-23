@@ -155,7 +155,9 @@ func GetTasks(c *gin.Context, startDate, endDate string) []types.Task {
 		}
 	}
 
-	result := query.Order("day ASC").Find(&tasks)
+	result := query.Order("day ASC").Preload("Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).Find(&tasks)
 
 	if result.Error != nil {
 		log.Println("Error:", result.Error)
