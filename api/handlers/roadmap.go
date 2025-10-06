@@ -191,3 +191,93 @@ func dateTasks(c *gin.Context, startDate time.Time, task types.Task) types.Task 
 
 	return database.UpdateTask(c, task.TaskID, task)
 }
+
+// Macro Map handlers
+
+func CreateMacroMap(c *gin.Context) {
+	roadmapID := c.Param("roadmapid")
+	var newMacroMap types.MacroMap
+
+	if !utils.BindJSONOrAbort(c, &newMacroMap) {
+		return
+	}
+
+	fmt.Printf("Macro map received: %+v\n", newMacroMap)
+
+	createdMacroMap, err := database.CreateMacroMap(c, roadmapID, newMacroMap)
+	if err != nil {
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusCreated, createdMacroMap)
+	log.Println("Macro map created successfully")
+}
+
+func GetMacroMap(c *gin.Context) {
+	roadmapID := c.Param("roadmapid")
+	macroMap, err := database.GetMacroMap(c, roadmapID)
+
+	if err != nil {
+		utils.NotFoundResponse(c, "Macro Map")
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, macroMap)
+}
+
+func GetRoadmapMacroView(c *gin.Context) {
+	roadmapID := c.Param("roadmapid")
+	roadmap := database.GetRoadmapMacroMap(c, roadmapID)
+
+	if roadmap.RoadmapID == "" {
+		utils.NotFoundResponse(c, "Roadmap")
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, roadmap)
+}
+
+func GetRoadmapMilestoneView(c *gin.Context) {
+	roadmapID := c.Param("roadmapid")
+	roadmap := database.GetRoadmapMilestoneMap(c, roadmapID)
+
+	if roadmap.RoadmapID == "" {
+		utils.NotFoundResponse(c, "Roadmap")
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, roadmap)
+}
+
+func GetRoadmapFullView(c *gin.Context) {
+	roadmapID := c.Param("roadmapid")
+	roadmap := database.GetRoadmapFull(c, roadmapID)
+
+	if roadmap.RoadmapID == "" {
+		utils.NotFoundResponse(c, "Roadmap")
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, roadmap)
+}
+
+func LinkMacroMilestoneToMilestone(c *gin.Context) {
+	var linkRequest struct {
+		MacroMilestoneID string `json:"macro_milestone_id" binding:"required"`
+		MilestoneID      string `json:"milestone_id" binding:"required"`
+	}
+
+	if !utils.BindJSONOrAbort(c, &linkRequest) {
+		return
+	}
+
+	err := database.LinkMacroMilestoneToMilestone(linkRequest.MacroMilestoneID, linkRequest.MilestoneID)
+	if err != nil {
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.MessageResponse(c, http.StatusOK, "Macro milestone linked to milestone successfully")
+	log.Println("Macro milestone linked to milestone successfully")
+}

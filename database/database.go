@@ -239,6 +239,97 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 	return roadmaps
 }
 
+// GetRoadmapMacroMap loads only the Macro Map (strategic overview) for a roadmap
+func GetRoadmapMacroMap(c *gin.Context, roadmapID string) types.Roadmap {
+	var roadmap types.Roadmap
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		log.Println("missing or invalid user_id")
+		return roadmap
+	}
+
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).
+		Preload("MacroMap.Phases", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("MacroMap.Phases.MacroMilestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("MacroMap.Phases.MacroMilestones.Spikes").
+		Preload("MacroMap.Phases.MacroMilestones.Risks").
+		First(&roadmap)
+
+	if result.Error != nil {
+		log.Println("Error fetching roadmap macro map:", result.Error)
+	}
+
+	return roadmap
+}
+
+// GetRoadmapMilestoneMap loads only the Milestone Map (tactical view) for a roadmap
+func GetRoadmapMilestoneMap(c *gin.Context, roadmapID string) types.Roadmap {
+	var roadmap types.Roadmap
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		log.Println("missing or invalid user_id")
+		return roadmap
+	}
+
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).
+		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
+		First(&roadmap)
+
+	if result.Error != nil {
+		log.Println("Error fetching roadmap milestone map:", result.Error)
+	}
+
+	return roadmap
+}
+
+// GetRoadmapFull loads both Macro Map and Milestone Map (complete view)
+func GetRoadmapFull(c *gin.Context, roadmapID string) types.Roadmap {
+	var roadmap types.Roadmap
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		log.Println("missing or invalid user_id")
+		return roadmap
+	}
+
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).
+		Preload("MacroMap.Phases", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("MacroMap.Phases.MacroMilestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("MacroMap.Phases.MacroMilestones.Spikes").
+		Preload("MacroMap.Phases.MacroMilestones.Risks").
+		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
+		First(&roadmap)
+
+	if result.Error != nil {
+		log.Println("Error fetching full roadmap:", result.Error)
+	}
+
+	return roadmap
+}
+
 func GetRoadmap(c *gin.Context, roadmapID string) types.Roadmap {
 	var roadmap types.Roadmap
 	user_id, exists := c.Get("user_id")
@@ -838,4 +929,95 @@ func SearchUsersByEmail(email string) []types.User {
 	}
 
 	return users
+}
+
+// CreateMacroMap creates a macro map with all its phases, milestones, spikes, and risks
+func CreateMacroMap(c *gin.Context, roadmapID string, macroMap types.MacroMap) (types.MacroMap, error) {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return types.MacroMap{}, errors.New("missing or invalid user_id")
+	}
+
+	// Verify roadmap exists and belongs to user
+	var roadmap types.Roadmap
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).First(&roadmap)
+	if result.Error != nil {
+		return types.MacroMap{}, errors.New("roadmap not found or access denied")
+	}
+
+	macroMap.RoadmapID = roadmapID
+
+	// Create the macro map with all nested data
+	tx := db.Create(&macroMap)
+	if tx.Error != nil {
+		return types.MacroMap{}, tx.Error
+	}
+
+	// Fetch the created macro map with all associations
+	var createdMacroMap types.MacroMap
+	if err := db.Where("macro_map_id = ?", macroMap.MacroMapID).
+		Preload("Phases", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.MacroMilestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.MacroMilestones.Spikes").
+		Preload("Phases.MacroMilestones.Risks").
+		First(&createdMacroMap).Error; err != nil {
+		return types.MacroMap{}, err
+	}
+
+	return createdMacroMap, nil
+}
+
+// GetMacroMap fetches a macro map by roadmap ID
+func GetMacroMap(c *gin.Context, roadmapID string) (types.MacroMap, error) {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return types.MacroMap{}, errors.New("missing or invalid user_id")
+	}
+
+	// Verify roadmap exists and belongs to user
+	var roadmap types.Roadmap
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).First(&roadmap)
+	if result.Error != nil {
+		return types.MacroMap{}, errors.New("roadmap not found or access denied")
+	}
+
+	var macroMap types.MacroMap
+	err := db.Where("roadmap_id = ?", roadmapID).
+		Preload("Phases", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.MacroMilestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.MacroMilestones.Spikes").
+		Preload("Phases.MacroMilestones.Risks").
+		First(&macroMap).Error
+
+	if err != nil {
+		return types.MacroMap{}, err
+	}
+
+	return macroMap, nil
+}
+
+// LinkMacroMilestoneToMilestone links a macro milestone to a detailed milestone
+func LinkMacroMilestoneToMilestone(macroMilestoneID string, milestoneID string) error {
+	result := db.Model(&types.MacroMilestone{}).
+		Where("macro_milestone_id = ?", macroMilestoneID).
+		Update("detailed_milestone_id", milestoneID)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	// Also update the milestone to link back
+	result = db.Model(&types.Milestone{}).
+		Where("milestone_id = ?", milestoneID).
+		Update("macro_milestone_id", macroMilestoneID)
+
+	return result.Error
 }

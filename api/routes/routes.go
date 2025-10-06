@@ -51,6 +51,26 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		roadmaps.PATCH("/:roadmapid", utils.ValidateUUID("roadmapid"), handlers.UpdateRoadmap)
 		roadmaps.DELETE("/:roadmapid", utils.ValidateUUID("roadmapid"), handlers.DeleteRoadmap)
 
+		// Macro Map routes
+		roadmaps.POST("/:roadmapid/macro-map",
+			utils.ValidateUUID("roadmapid"),
+			handlers.CreateMacroMap)
+		roadmaps.GET("/:roadmapid/macro-map",
+			utils.ValidateUUID("roadmapid"),
+			handlers.GetMacroMap)
+
+		// View-specific routes
+		roadmaps.GET("/:roadmapid/macro-view",
+			utils.ValidateUUID("roadmapid"),
+			handlers.GetRoadmapMacroView)
+		roadmaps.GET("/:roadmapid/milestone-view",
+			utils.ValidateUUID("roadmapid"),
+			handlers.GetRoadmapMilestoneView)
+		roadmaps.GET("/:roadmapid/full-view",
+			utils.ValidateUUID("roadmapid"),
+			handlers.GetRoadmapFullView)
+
+		// Milestone routes
 		roadmaps.GET("/:roadmapid/milestones",
 			utils.ValidateUUID("roadmapid"),
 			handlers.GetMilestonesByRoadmap)
@@ -68,6 +88,9 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		milestones.GET("/:milestoneid/tasks",
 			utils.ValidateUUID("milestoneid"),
 			handlers.GetTasksByMilestone)
+
+		// Link macro milestone to detailed milestone
+		milestones.POST("/link", handlers.LinkMacroMilestoneToMilestone)
 	}
 }
 
