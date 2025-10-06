@@ -98,17 +98,17 @@ alter table "public"."risks" add constraint "risks_macro_milestone_id_fkey" FORE
 alter table "public"."risks" validate constraint "risks_macro_milestone_id_fkey";
 
 -- Add new columns to milestones table
-alter table "public"."milestones" add column "macro_milestone_id" uuid;
-alter table "public"."milestones" add column "date" timestamp with time zone;
+alter table "public"."milestones" add column if not exists "macro_milestone_id" uuid;
+alter table "public"."milestones" add column if not exists "date" timestamp with time zone;
 
 alter table "public"."milestones" add constraint "milestones_macro_milestone_id_fkey" FOREIGN KEY (macro_milestone_id) REFERENCES macro_milestones(macro_milestone_id) ON UPDATE CASCADE ON DELETE SET NULL not valid;
 alter table "public"."milestones" validate constraint "milestones_macro_milestone_id_fkey";
 
 -- Add new columns to tasks table
-alter table "public"."tasks" add column "rationale" character varying;
-alter table "public"."tasks" add column "est_minutes" integer;
-alter table "public"."tasks" add column "dependencies" jsonb;
-alter table "public"."tasks" add column "confidence" character varying;
+alter table "public"."tasks" add column if not exists "rationale" character varying;
+alter table "public"."tasks" add column if not exists "est_minutes" integer;
+alter table "public"."tasks" add column if not exists "dependencies" jsonb;
+alter table "public"."tasks" add column if not exists "confidence" character varying;
 
 -- Grant permissions for macro_maps
 grant delete on table "public"."macro_maps" to "anon";
