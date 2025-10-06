@@ -23,22 +23,21 @@ func AgentGenerate(c *gin.Context) {
 
 	fmt.Printf("Goal request received: %+v\n", goalReq)
 
-	resp, err := agent.GenerateGoalFromStructure(goalReq)
+	// Generate both macro map and milestone map
+	generated, err := agent.GenerateGoalFromStructure(goalReq)
 	if err != nil {
 		log.Printf("Failed to generate roadmap: %v", err)
 		utils.InternalErrorResponse(c, err)
 		return
 	}
 
-	roadmap, err := agent.ParseRoadmap(resp)
-	if err != nil {
-		log.Printf("Failed to parse roadmap: %v", err)
-		utils.InternalErrorResponse(c, err)
-		return
-	}
+	fmt.Printf("Generated roadmap with macro map: %+v\n", generated)
 
-	fmt.Printf("Generated roadmap: %+v\n", roadmap)
-	utils.DataResponse(c, http.StatusOK, roadmap)
+	// Return both the macro map and the roadmap
+	utils.DataResponse(c, http.StatusOK, gin.H{
+		"macro_map": generated.MacroMap,
+		"roadmap":   generated.Roadmap,
+	})
 }
 
 func StartAISession(c *gin.Context) {

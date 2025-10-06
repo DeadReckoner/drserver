@@ -44,7 +44,12 @@ type AIRequest struct {
 	} `json:"text"`
 }
 
-func GenerateGoalFromStructure(goalReq types.GoalRequest) ([]byte, error) {
+type GeneratedRoadmap struct {
+	MacroMap *types.MacroMap `json:"macro_map"`
+	Roadmap  *types.Roadmap  `json:"roadmap"`
+}
+
+func GenerateGoalFromStructure(goalReq types.GoalRequest) (*GeneratedRoadmap, error) {
 	// Create a detailed prompt from the structured data
 	prompt := fmt.Sprintf(`
 Based on the following goal information, create a detailed roadmap:
@@ -66,12 +71,161 @@ Please create a comprehensive roadmap with milestones, tasks, and actionable ste
 	return generateRoadmapFromPrompt(prompt)
 }
 
-func GenerateGoalBlueprint(userPrompt string) ([]byte, error) {
+func GenerateGoalBlueprint(userPrompt string) (*GeneratedRoadmap, error) {
 	return generateRoadmapFromPrompt(userPrompt)
 }
 
-func generateRoadmapFromPrompt(userPrompt string) ([]byte, error) {
-	// Schema for Dead Reckoner roadmap matching the Roadmap type
+func generateRoadmapFromPrompt(userPrompt string) (*GeneratedRoadmap, error) {
+	// STEP 1: Generate Macro Map (Strategic View)
+	macroMapResp, err := generateMacroMap(userPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate macro map: %w", err)
+	}
+
+	// Parse the macro map response
+	var macroMapData types.MacroMap
+	if err := parseMacroMapResponse(macroMapResp, &macroMapData); err != nil {
+		return nil, fmt.Errorf("failed to parse macro map: %w", err)
+	}
+
+	// STEP 2: Generate Milestone Map (Tactical View) based on the macro map
+	milestoneMapResp, err := generateMilestoneMap(userPrompt, &macroMapData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate milestone map: %w", err)
+	}
+
+	// Parse the milestone map response
+	roadmap, err := ParseRoadmap(milestoneMapResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse roadmap: %w", err)
+	}
+
+	// Return both the macro map and roadmap
+	return &GeneratedRoadmap{
+		MacroMap: &macroMapData,
+		Roadmap:  roadmap,
+	}, nil
+}
+
+func generateMacroMap(userPrompt string) ([]byte, error) {
+	// Schema for Macro Map
+	schema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"phases": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"name": map[string]interface{}{
+							"type": "string",
+						},
+						"description": map[string]interface{}{
+							"type": "string",
+						},
+						"order_index": map[string]interface{}{
+							"type": "integer",
+						},
+						"duration_weeks": map[string]interface{}{
+							"type": "string",
+						},
+						"macro_milestones": map[string]interface{}{
+							"type": "array",
+							"items": map[string]interface{}{
+								"type": "object",
+								"properties": map[string]interface{}{
+									"name": map[string]interface{}{
+										"type": "string",
+									},
+									"acceptance_test": map[string]interface{}{
+										"type": "string",
+									},
+									"duration_days_min": map[string]interface{}{
+										"type": "integer",
+									},
+									"duration_days_max": map[string]interface{}{
+										"type": "integer",
+									},
+									"order_index": map[string]interface{}{
+										"type": "integer",
+									},
+									"resources_forecast": map[string]interface{}{
+										"type": "string",
+									},
+									"spikes": map[string]interface{}{
+										"type": "array",
+										"items": map[string]interface{}{
+											"type": "object",
+											"properties": map[string]interface{}{
+												"description": map[string]interface{}{
+													"type": "string",
+												},
+												"timebox_days": map[string]interface{}{
+													"type": "integer",
+												},
+											},
+											"required":             []string{"description", "timebox_days"},
+											"additionalProperties": false,
+										},
+									},
+									"risks": map[string]interface{}{
+										"type": "array",
+										"items": map[string]interface{}{
+											"type": "object",
+											"properties": map[string]interface{}{
+												"description": map[string]interface{}{
+													"type": "string",
+												},
+												"severity": map[string]interface{}{
+													"type": "string",
+													"enum": []string{"low", "medium", "high"},
+												},
+											},
+											"required":             []string{"description", "severity"},
+											"additionalProperties": false,
+										},
+									},
+								},
+								"required":             []string{"name", "acceptance_test", "duration_days_min", "duration_days_max", "order_index"},
+								"additionalProperties": false,
+							},
+						},
+					},
+					"required":             []string{"name", "description", "order_index", "duration_weeks", "macro_milestones"},
+					"additionalProperties": false,
+				},
+			},
+		},
+		"required":             []string{"phases"},
+		"additionalProperties": false,
+	}
+
+	reqBody := AIRequest{
+		Model: "gpt-4o-2024-08-06",
+		Input: []Message{
+			{
+				Role:    "system",
+				Content: "You are an AI strategic planner that creates high-level roadmaps. Generate a macro map with 2-4 phases representing major stages of the goal. Each phase should have 2-5 macro milestones with acceptance tests, duration estimates (min/max days), and optional spikes (time-boxed investigations) and risks. This is a strategic overview - keep descriptions concise and focus on the big picture. Resources forecast should be a JSON string describing needed materials, tools, or prerequisites.",
+			},
+			{
+				Role:    "user",
+				Content: userPrompt,
+			},
+		},
+	}
+	reqBody.Text.Format.Type = "json_schema"
+	reqBody.Text.Format.Name = "macro_map"
+	reqBody.Text.Format.Schema = schema
+	reqBody.Text.Format.Strict = true
+
+	return makeOpenAIRequest(reqBody)
+}
+
+func generateMilestoneMap(userPrompt string, macroMap *types.MacroMap) ([]byte, error) {
+	// Extract context from macro map to guide milestone generation
+	macroContext := buildMacroContext(macroMap)
+
+	// Schema for Milestone Map (existing roadmap structure)
 	schema := map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -126,6 +280,19 @@ func generateRoadmapFromPrompt(userPrompt string) ([]byte, error) {
 									"description": map[string]interface{}{
 										"type": "string",
 									},
+									"rationale": map[string]interface{}{
+										"type": "string",
+									},
+									"est_minutes": map[string]interface{}{
+										"type": "integer",
+									},
+									"dependencies": map[string]interface{}{
+										"type": "string",
+									},
+									"confidence": map[string]interface{}{
+										"type": "string",
+										"enum": []string{"low", "medium", "high"},
+									},
 									"day": map[string]interface{}{
 										"type": "integer",
 									},
@@ -166,13 +333,26 @@ func generateRoadmapFromPrompt(userPrompt string) ([]byte, error) {
 		"additionalProperties": false,
 	}
 
-	// Build the full request
+	systemPrompt := fmt.Sprintf(`You are an AI tactical planner that creates detailed action plans based on a strategic roadmap.
+
+STRATEGIC CONTEXT:
+%s
+
+Based on this strategic plan, generate EXACTLY 1 detailed milestone that represents the FIRST actionable phase (typically 1-2 weeks). This milestone must:
+- Contain 10-14 specific, actionable tasks
+- Each task should have: title, description, rationale (why it matters), estimated minutes, optional dependencies (JSON array of task titles), and confidence level (low/medium/high)
+- Each task should have 2-4 detailed steps
+- Add a 'message' field with a friendly intro
+- Align with the first macro milestone in the strategic plan
+- Set all 'completed' and 'reached' fields to false
+- Ensure day numbers are sequential starting from day 1`, macroContext)
+
 	reqBody := AIRequest{
 		Model: "gpt-4o-2024-08-06",
 		Input: []Message{
 			{
 				Role:    "system",
-				Content: "You are an AI assistant that helps users build structured achievement pathways in incremental steps. You must only respond with a JSON object that follows the provided schema. Generate EXACTLY 1 milestone that represents the first phase of their goal (typically 1-2 weeks). This milestone must contain between 10-14 tasks that are actionable and specific. Each task should have 2-4 detailed steps. Add a 'message' field with a short friendly intro like 'Here's your first milestone!'. Focus on creating a solid foundation that can be built upon in subsequent phases. Set all 'completed' and 'reached' fields to false by default. Ensure day numbers are sequential starting from day 1.",
+				Content: systemPrompt,
 			},
 			{
 				Role:    "user",
@@ -185,12 +365,68 @@ func generateRoadmapFromPrompt(userPrompt string) ([]byte, error) {
 	reqBody.Text.Format.Schema = schema
 	reqBody.Text.Format.Strict = true
 
+	return makeOpenAIRequest(reqBody)
+}
+
+func buildMacroContext(macroMap *types.MacroMap) string {
+	if macroMap == nil || len(macroMap.Phases) == 0 {
+		return "No strategic context available"
+	}
+
+	context := ""
+	for _, phase := range macroMap.Phases {
+		context += fmt.Sprintf("\nPhase %d: %s (%s)\n", phase.OrderIndex, phase.Name, phase.DurationWeeks)
+		context += fmt.Sprintf("  Description: %s\n", phase.Description)
+
+		for _, mm := range phase.MacroMilestones {
+			context += fmt.Sprintf("  - Milestone: %s (Days: %d-%d)\n", mm.Name, mm.DurationDaysMin, mm.DurationDaysMax)
+			context += fmt.Sprintf("    Acceptance: %s\n", mm.AcceptanceTest)
+
+			if len(mm.Spikes) > 0 {
+				context += "    Spikes: "
+				for _, spike := range mm.Spikes {
+					context += fmt.Sprintf("%s (%d days); ", spike.Description, spike.TimeboxDays)
+				}
+				context += "\n"
+			}
+
+			if len(mm.Risks) > 0 {
+				context += "    Risks: "
+				for _, risk := range mm.Risks {
+					context += fmt.Sprintf("%s [%s]; ", risk.Description, risk.Severity)
+				}
+				context += "\n"
+			}
+		}
+	}
+
+	return context
+}
+
+func parseMacroMapResponse(rawResp []byte, macroMap *types.MacroMap) error {
+	var apiResp types.OpenAIResponse
+	if err := json.Unmarshal(rawResp, &apiResp); err != nil {
+		return fmt.Errorf("failed to parse OpenAI response: %w", err)
+	}
+
+	if len(apiResp.Output) == 0 || len(apiResp.Output[0].Content) == 0 {
+		return fmt.Errorf("no content found in OpenAI output")
+	}
+
+	rawJSON := apiResp.Output[0].Content[0].Text
+	if err := json.Unmarshal([]byte(rawJSON), macroMap); err != nil {
+		return fmt.Errorf("failed to parse macro map JSON: %w", err)
+	}
+
+	return nil
+}
+
+func makeOpenAIRequest(reqBody AIRequest) ([]byte, error) {
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// HTTP request
 	req, err := http.NewRequestWithContext(context.Background(), "POST", openAIURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)

@@ -704,20 +704,83 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  # AI Agent
-  /api/v1/agent/generate:
+  # Macro Map Management
+  /api/v1/roadmaps/{roadmapid}/macro-map:
     post:
-      summary: Generate roadmap from goal request
-      tags: [AI Agent]
+      summary: Create macro map for roadmap
+      tags: [Macro Map]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GoalRequest'
+              $ref: '#/components/schemas/MacroMapInput'
+      responses:
+        '201':
+          description: Macro map created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MacroMap'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    get:
+      summary: Get macro map for roadmap
+      tags: [Macro Map]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
       responses:
         '200':
-          description: Roadmap generated successfully
+          description: Macro map retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MacroMap'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/roadmaps/{roadmapid}/macro-view:
+    get:
+      summary: Get roadmap with macro map only (strategic view)
+      tags: [Macro Map, Roadmaps]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      responses:
+        '200':
+          description: Roadmap with macro map retrieved successfully
           content:
             application/json:
               schema:
@@ -727,6 +790,129 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/Roadmap'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/roadmaps/{roadmapid}/milestone-view:
+    get:
+      summary: Get roadmap with milestone map only (tactical view)
+      tags: [Roadmaps, Milestones]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      responses:
+        '200':
+          description: Roadmap with milestone map retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Roadmap'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/roadmaps/{roadmapid}/full-view:
+    get:
+      summary: Get roadmap with both macro map and milestone map
+      tags: [Roadmaps, Macro Map, Milestones]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      responses:
+        '200':
+          description: Full roadmap retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Roadmap'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/milestones/link:
+    post:
+      summary: Link macro milestone to detailed milestone
+      tags: [Macro Map, Milestones]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - macro_milestone_id
+                - milestone_id
+              properties:
+                macro_milestone_id:
+                  type: string
+                  format: uuid
+                  description: Macro milestone ID
+                milestone_id:
+                  type: string
+                  format: uuid
+                  description: Detailed milestone ID
+      responses:
+        '200':
+          description: Milestones linked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # AI Agent
+  /api/v1/agent/generate:
+    post:
+      summary: Generate roadmap with macro map from goal request (Two-step generation)
+      tags: [AI Agent]
+      description: |
+        Generates a complete roadmap in two steps:
+        1. Creates a strategic macro map with phases, macro milestones, spikes, and risks
+        2. Generates detailed milestone map with tasks aligned to the macro map
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoalRequest'
+      responses:
+        '200':
+          description: Roadmap and macro map generated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          macro_map:
+                            $ref: '#/components/schemas/MacroMap'
+                          roadmap:
+                            $ref: '#/components/schemas/Roadmap'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -1011,10 +1197,14 @@ components:
           type: string
           format: date-time
           example: "2024-01-01T00:00:00Z"
+        macro_map:
+          $ref: '#/components/schemas/MacroMap'
+          description: Strategic overview of the roadmap
         milestones:
           type: array
           items:
             $ref: '#/components/schemas/Milestone'
+          description: Detailed tactical milestones
 
     RoadmapInput:
       type: object
@@ -1068,6 +1258,14 @@ components:
         reached:
           type: boolean
           example: false
+        date:
+          type: string
+          format: date-time
+        macro_milestone_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Link to macro milestone if this is a detailed plan
         tasks:
           type: array
           items:
@@ -1088,6 +1286,11 @@ components:
         reached:
           type: boolean
           example: false
+        macro_milestone_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Link to macro milestone if this is a detailed plan
         tasks:
           type: array
           items:
@@ -1115,12 +1318,29 @@ components:
         description:
           type: string
           example: "Master HTML tags, attributes, and semantic markup"
+        rationale:
+          type: string
+          example: "HTML is the foundation of all web development"
+        est_minutes:
+          type: integer
+          example: 120
+        dependencies:
+          type: string
+          description: JSONB array of task dependencies
+          example: '["Setup development environment"]'
+        confidence:
+          type: string
+          enum: [low, medium, high]
+          example: "high"
         day:
           type: integer
           example: 7
         completed:
           type: boolean
           example: false
+        date:
+          type: string
+          format: date-time
         steps:
           type: array
           items:
@@ -1139,6 +1359,20 @@ components:
         description:
           type: string
           example: "Master HTML tags, attributes, and semantic markup"
+        rationale:
+          type: string
+          example: "HTML is the foundation of all web development"
+        est_minutes:
+          type: integer
+          example: 120
+        dependencies:
+          type: string
+          description: JSONB array of task dependencies
+          example: '["Setup development environment"]'
+        confidence:
+          type: string
+          enum: [low, medium, high]
+          example: "high"
         day:
           type: integer
           example: 7
@@ -1184,6 +1418,212 @@ components:
         number:
           type: integer
           example: 1
+
+    # Macro Map Management
+    MacroMap:
+      type: object
+      properties:
+        macro_map_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        roadmap_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        phases:
+          type: array
+          items:
+            $ref: '#/components/schemas/Phase'
+
+    MacroMapInput:
+      type: object
+      properties:
+        phases:
+          type: array
+          items:
+            $ref: '#/components/schemas/PhaseInput'
+
+    Phase:
+      type: object
+      properties:
+        phase_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        macro_map_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        name:
+          type: string
+          example: "Foundation & Setup"
+        description:
+          type: string
+          example: "Establish foundational skills and development environment"
+        order_index:
+          type: integer
+          example: 1
+        duration_weeks:
+          type: string
+          example: "2-3 weeks"
+        macro_milestones:
+          type: array
+          items:
+            $ref: '#/components/schemas/MacroMilestone'
+
+    PhaseInput:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Foundation & Setup"
+        description:
+          type: string
+          example: "Establish foundational skills and development environment"
+        order_index:
+          type: integer
+          example: 1
+        duration_weeks:
+          type: string
+          example: "2-3 weeks"
+        macro_milestones:
+          type: array
+          items:
+            $ref: '#/components/schemas/MacroMilestoneInput'
+
+    MacroMilestone:
+      type: object
+      properties:
+        macro_milestone_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        phase_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        name:
+          type: string
+          example: "Development Environment Ready"
+        acceptance_test:
+          type: string
+          example: "Can create and run a basic web application locally"
+        duration_days_min:
+          type: integer
+          example: 3
+        duration_days_max:
+          type: integer
+          example: 7
+        order_index:
+          type: integer
+          example: 1
+        resources_forecast:
+          type: string
+          description: JSONB string containing resource requirements
+          example: '{"tools": ["VS Code", "Node.js"], "courses": ["FreeCodeCamp"], "budget": "$0"}'
+        detailed_milestone_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Link to the detailed milestone (when generated)
+        spikes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Spike'
+        risks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Risk'
+
+    MacroMilestoneInput:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Development Environment Ready"
+        acceptance_test:
+          type: string
+          example: "Can create and run a basic web application locally"
+        duration_days_min:
+          type: integer
+          example: 3
+        duration_days_max:
+          type: integer
+          example: 7
+        order_index:
+          type: integer
+          example: 1
+        resources_forecast:
+          type: string
+          description: JSONB string containing resource requirements
+          example: '{"tools": ["VS Code", "Node.js"], "courses": ["FreeCodeCamp"], "budget": "$0"}'
+        spikes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpikeInput'
+        risks:
+          type: array
+          items:
+            $ref: '#/components/schemas/RiskInput'
+
+    Spike:
+      type: object
+      properties:
+        spike_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        macro_milestone_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        description:
+          type: string
+          example: "Research best JavaScript framework for project requirements"
+        timebox_days:
+          type: integer
+          example: 2
+
+    SpikeInput:
+      type: object
+      properties:
+        description:
+          type: string
+          example: "Research best JavaScript framework for project requirements"
+        timebox_days:
+          type: integer
+          example: 2
+
+    Risk:
+      type: object
+      properties:
+        risk_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        macro_milestone_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        description:
+          type: string
+          example: "Installation issues on Windows platform"
+        severity:
+          type: string
+          enum: [low, medium, high]
+          example: "medium"
+
+    RiskInput:
+      type: object
+      properties:
+        description:
+          type: string
+          example: "Installation issues on Windows platform"
+        severity:
+          type: string
+          enum: [low, medium, high]
+          example: "medium"
 
     # AI Agent
     GoalRequest:
@@ -1262,13 +1702,15 @@ tags:
     description: User management operations
   - name: Roadmaps
     description: Roadmap management operations
+  - name: Macro Map
+    description: Strategic macro map management (high-level phases and milestones)
   - name: Milestones
-    description: Milestone management operations
+    description: Milestone management operations (detailed tactical plans)
   - name: Tasks
     description: Task management operations
   - name: Steps
     description: Step management operations
   - name: AI Agent
-    description: AI-powered goal and roadmap generation
+    description: AI-powered goal and roadmap generation with two-step macro/milestone map creation
   - name: WebSocket
     description: Real-time communication endpoints
