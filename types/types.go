@@ -53,6 +53,7 @@ type Roadmap struct {
 	Days        int         `json:"days"`
 	Completed   bool        `json:"completed"`
 	StartDate   time.Time   `json:"start_date,omitempty"`
+	Type        string      `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
 
 	// Link to Macro Map (strategic overview)
 	MacroMap    *MacroMap   `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"macro_map,omitempty"`

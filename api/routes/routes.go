@@ -59,17 +59,6 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 			utils.ValidateUUID("roadmapid"),
 			handlers.GetMacroMap)
 
-		// View-specific routes
-		roadmaps.GET("/:roadmapid/macro-view",
-			utils.ValidateUUID("roadmapid"),
-			handlers.GetRoadmapMacroView)
-		roadmaps.GET("/:roadmapid/milestone-view",
-			utils.ValidateUUID("roadmapid"),
-			handlers.GetRoadmapMilestoneView)
-		roadmaps.GET("/:roadmapid/full-view",
-			utils.ValidateUUID("roadmapid"),
-			handlers.GetRoadmapFullView)
-
 		// Milestone routes
 		roadmaps.GET("/:roadmapid/milestones",
 			utils.ValidateUUID("roadmapid"),
@@ -88,9 +77,6 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		milestones.GET("/:milestoneid/tasks",
 			utils.ValidateUUID("milestoneid"),
 			handlers.GetTasksByMilestone)
-
-		// Link macro milestone to detailed milestone
-		milestones.POST("/link", handlers.LinkMacroMilestoneToMilestone)
 	}
 }
 

@@ -33,6 +33,9 @@ func AgentGenerate(c *gin.Context) {
 
 	fmt.Printf("Generated roadmap with macro map: %+v\n", generated)
 
+	// Set roadmap type to "ai_generated" since this was created by the AI
+	generated.Roadmap.Type = "ai_generated"
+
 	// Return both the macro map and the roadmap
 	utils.DataResponse(c, http.StatusOK, gin.H{
 		"macro_map": generated.MacroMap,

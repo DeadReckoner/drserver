@@ -206,7 +206,12 @@ paths:
 
   /api/v1/roadmaps/{roadmapid}:
     get:
-      summary: Get specific roadmap
+      summary: Get specific roadmap with optional view filter
+      description: |
+        Retrieve a roadmap with different levels of detail:
+        - `full` (default): Both macro map (strategic) and milestones (tactical)
+        - `macro`: Only the macro map (high-level phases and macro milestones)
+        - `milestones`: Only detailed milestones and tasks
       tags: [Roadmaps]
       parameters:
         - name: roadmapid
@@ -216,6 +221,18 @@ paths:
             type: string
             format: uuid
           description: Roadmap ID
+        - name: view
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [full, macro, milestones]
+            default: full
+          description: |
+            Which data to include in response:
+            - `full`: Both macro map and milestones (default)
+            - `macro`: Only macro map (strategic view)
+            - `milestones`: Only detailed milestones (tactical view)
       responses:
         '200':
           description: Roadmap retrieved successfully
@@ -228,6 +245,8 @@ paths:
                     properties:
                       data:
                         $ref: '#/components/schemas/Roadmap'
+        '400':
+          description: Invalid view parameter
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -766,121 +785,6 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /api/v1/roadmaps/{roadmapid}/macro-view:
-    get:
-      summary: Get roadmap with macro map only (strategic view)
-      tags: [Macro Map, Roadmaps]
-      parameters:
-        - name: roadmapid
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Roadmap ID
-      responses:
-        '200':
-          description: Roadmap with macro map retrieved successfully
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/Roadmap'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /api/v1/roadmaps/{roadmapid}/milestone-view:
-    get:
-      summary: Get roadmap with milestone map only (tactical view)
-      tags: [Roadmaps, Milestones]
-      parameters:
-        - name: roadmapid
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Roadmap ID
-      responses:
-        '200':
-          description: Roadmap with milestone map retrieved successfully
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/Roadmap'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /api/v1/roadmaps/{roadmapid}/full-view:
-    get:
-      summary: Get roadmap with both macro map and milestone map
-      tags: [Roadmaps, Macro Map, Milestones]
-      parameters:
-        - name: roadmapid
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Roadmap ID
-      responses:
-        '200':
-          description: Full roadmap retrieved successfully
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/Roadmap'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /api/v1/milestones/link:
-    post:
-      summary: Link macro milestone to detailed milestone
-      tags: [Macro Map, Milestones]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - macro_milestone_id
-                - milestone_id
-              properties:
-                macro_milestone_id:
-                  type: string
-                  format: uuid
-                  description: Macro milestone ID
-                milestone_id:
-                  type: string
-                  format: uuid
-                  description: Detailed milestone ID
-      responses:
-        '200':
-          description: Milestones linked successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/MessageResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
   # AI Agent
   /api/v1/agent/generate:
     post:
@@ -1197,9 +1101,18 @@ components:
           type: string
           format: date-time
           example: "2024-01-01T00:00:00Z"
+        type:
+          type: string
+          enum: [ai_generated, custom_made]
+          default: custom_made
+          description: |
+            Type of roadmap:
+            - `ai_generated`: Created by AI agent (always includes macro map)
+            - `custom_made`: Manually created by user
+          example: "ai_generated"
         macro_map:
           $ref: '#/components/schemas/MacroMap'
-          description: Strategic overview of the roadmap
+          description: Strategic overview of the roadmap (only present in ai_generated roadmaps)
         milestones:
           type: array
           items:
@@ -1225,6 +1138,12 @@ components:
           type: string
           format: date-time
           example: "2024-01-01T00:00:00Z"
+        type:
+          type: string
+          enum: [ai_generated, custom_made]
+          default: custom_made
+          description: Type of roadmap (defaults to custom_made if not specified)
+          example: "custom_made"
         milestones:
           type: array
           items:

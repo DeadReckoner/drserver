@@ -20,6 +20,12 @@ func CreateRoadmap(c *gin.Context) {
 		return
 	}
 
+	// Set type to "custom_made" for manually created roadmaps
+	// (AI-generated roadmaps will have type set to "ai_generated" in the agent handler)
+	if newRoadmap.Type == "" {
+		newRoadmap.Type = "custom_made"
+	}
+
 	fmt.Printf("Roadmap received: %+v\n", newRoadmap)
 
 	createdRoadmap, err := database.CreateRoadmap(c, newRoadmap)
@@ -39,7 +45,24 @@ func GetRoadmapsByUser(c *gin.Context) {
 
 func GetRoadmap(c *gin.Context) {
 	roadmapID := c.Param("roadmapid")
-	roadmap := database.GetRoadmap(c, roadmapID)
+	view := c.DefaultQuery("view", "full") // Default to full view
+
+	var roadmap types.Roadmap
+
+	switch view {
+	case "macro":
+		// Load only macro map (strategic view)
+		roadmap = database.GetRoadmapWithMacroMap(c, roadmapID)
+	case "milestones":
+		// Load only detailed milestones (tactical view)
+		roadmap = database.GetRoadmap(c, roadmapID)
+	case "full":
+		// Load both macro map and milestones
+		roadmap = database.GetRoadmapWithMacroMapAndMilestones(c, roadmapID)
+	default:
+		utils.BadRequestResponse(c, "Invalid view parameter. Use 'macro', 'milestones', or 'full'")
+		return
+	}
 
 	if roadmap.RoadmapID == "" {
 		utils.NotFoundResponse(c, "Roadmap")
@@ -226,58 +249,3 @@ func GetMacroMap(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, macroMap)
 }
 
-func GetRoadmapMacroView(c *gin.Context) {
-	roadmapID := c.Param("roadmapid")
-	roadmap := database.GetRoadmapMacroMap(c, roadmapID)
-
-	if roadmap.RoadmapID == "" {
-		utils.NotFoundResponse(c, "Roadmap")
-		return
-	}
-
-	utils.DataResponse(c, http.StatusOK, roadmap)
-}
-
-func GetRoadmapMilestoneView(c *gin.Context) {
-	roadmapID := c.Param("roadmapid")
-	roadmap := database.GetRoadmapMilestoneMap(c, roadmapID)
-
-	if roadmap.RoadmapID == "" {
-		utils.NotFoundResponse(c, "Roadmap")
-		return
-	}
-
-	utils.DataResponse(c, http.StatusOK, roadmap)
-}
-
-func GetRoadmapFullView(c *gin.Context) {
-	roadmapID := c.Param("roadmapid")
-	roadmap := database.GetRoadmapFull(c, roadmapID)
-
-	if roadmap.RoadmapID == "" {
-		utils.NotFoundResponse(c, "Roadmap")
-		return
-	}
-
-	utils.DataResponse(c, http.StatusOK, roadmap)
-}
-
-func LinkMacroMilestoneToMilestone(c *gin.Context) {
-	var linkRequest struct {
-		MacroMilestoneID string `json:"macro_milestone_id" binding:"required"`
-		MilestoneID      string `json:"milestone_id" binding:"required"`
-	}
-
-	if !utils.BindJSONOrAbort(c, &linkRequest) {
-		return
-	}
-
-	err := database.LinkMacroMilestoneToMilestone(linkRequest.MacroMilestoneID, linkRequest.MilestoneID)
-	if err != nil {
-		utils.InternalErrorResponse(c, err)
-		return
-	}
-
-	utils.MessageResponse(c, http.StatusOK, "Macro milestone linked to milestone successfully")
-	log.Println("Macro milestone linked to milestone successfully")
-}

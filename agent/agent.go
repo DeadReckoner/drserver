@@ -14,13 +14,18 @@ import (
 	"github.com/google/uuid"
 )
 
+// OpenAI API endpoint for structured output responses
 const openAIURL = "https://api.openai.com/v1/responses"
 
+// Message represents a single message in a conversation with the AI
+// Used to build up context and chat history
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string `json:"role"`    // "system", "user", or "assistant"
+	Content string `json:"content"` // The actual message content
 }
 
+// AISession represents an interactive session where the AI asks clarifying questions
+// before generating a roadmap (not currently fully implemented)
 type AISession struct {
 	SessionID uuid.UUID      `json:"session_id"`
 	UserID    string         `json:"user_id"`
@@ -31,26 +36,34 @@ type AISession struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
+// AIRequest represents the full request payload sent to OpenAI's API
+// Includes the model name, conversation messages, and strict JSON schema formatting
 type AIRequest struct {
-	Model string    `json:"model"`
-	Input []Message `json:"input"`
+	Model string    `json:"model"` // e.g., "gpt-4o-2024-08-06"
+	Input []Message `json:"input"` // Conversation messages (system + user prompts)
 	Text  struct {
 		Format struct {
-			Type   string                 `json:"type"`
-			Name   string                 `json:"name"`
-			Schema map[string]interface{} `json:"schema"`
-			Strict bool                   `json:"strict"`
+			Type   string                 `json:"type"`   // "json_schema"
+			Name   string                 `json:"name"`   // Schema name (e.g., "macro_map")
+			Schema map[string]interface{} `json:"schema"` // JSON Schema definition
+			Strict bool                   `json:"strict"` // Enforce strict validation (all properties must be required)
 		} `json:"format"`
 	} `json:"text"`
 }
 
+// GeneratedRoadmap contains both outputs from the two-step generation process:
+// 1. MacroMap: Strategic high-level view (phases, macro milestones, risks, spikes)
+// 2. Roadmap: Tactical detailed view (specific tasks and steps for the first milestone)
 type GeneratedRoadmap struct {
-	MacroMap *types.MacroMap `json:"macro_map"`
-	Roadmap  *types.Roadmap  `json:"roadmap"`
+	MacroMap *types.MacroMap `json:"macro_map"` // Strategic planning layer
+	Roadmap  *types.Roadmap  `json:"roadmap"`   // Tactical execution layer
 }
 
+// GenerateGoalFromStructure is the main entry point when the user provides structured goal data
+// (via a form with fields like goal name, time commitment, skill level, etc.)
+// It converts the structured data into a natural language prompt and calls the generation pipeline
 func GenerateGoalFromStructure(goalReq types.GoalRequest) (*GeneratedRoadmap, error) {
-	// Create a detailed prompt from the structured data
+	// Convert structured fields into a natural language prompt for the AI
 	prompt := fmt.Sprintf(`
 Based on the following goal information, create a detailed roadmap:
 
@@ -68,47 +81,74 @@ Please create a comprehensive roadmap with milestones, tasks, and actionable ste
 		goalReq.TargetCompletionDate, goalReq.WeeklyTimeCommitment,
 		goalReq.WorkFrequency, goalReq.Constraints, goalReq.CurrentSkillLevel)
 
+	// Pass the constructed prompt to the main generation pipeline
 	return generateRoadmapFromPrompt(prompt)
 }
 
+// GenerateGoalBlueprint is the entry point when the user provides a free-form text description
+// (e.g., "I want to learn web development")
+// It directly passes the user's text to the generation pipeline
 func GenerateGoalBlueprint(userPrompt string) (*GeneratedRoadmap, error) {
 	return generateRoadmapFromPrompt(userPrompt)
 }
 
+// generateRoadmapFromPrompt is the core orchestrator for the two-step generation process
+// It coordinates both strategic (macro) and tactical (milestone) planning
+//
+// FLOW:
+// 1. Generate macro map (strategic view: phases, macro milestones, risks, spikes)
+// 2. Parse the macro map response
+// 3. Generate milestone map using macro map as context (tactical view: detailed tasks)
+// 4. Parse the milestone map response
+// 5. Return both structures
 func generateRoadmapFromPrompt(userPrompt string) (*GeneratedRoadmap, error) {
 	// STEP 1: Generate Macro Map (Strategic View)
+	// This creates the high-level plan with 2-4 phases and macro milestones
 	macroMapResp, err := generateMacroMap(userPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate macro map: %w", err)
 	}
 
-	// Parse the macro map response
+	// Parse the raw JSON response from OpenAI into our MacroMap structure
 	var macroMapData types.MacroMap
 	if err := parseMacroMapResponse(macroMapResp, &macroMapData); err != nil {
 		return nil, fmt.Errorf("failed to parse macro map: %w", err)
 	}
 
 	// STEP 2: Generate Milestone Map (Tactical View) based on the macro map
+	// This creates detailed tasks aligned with the strategic plan from step 1
 	milestoneMapResp, err := generateMilestoneMap(userPrompt, &macroMapData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate milestone map: %w", err)
 	}
 
-	// Parse the milestone map response
+	// Parse the milestone map response into our Roadmap structure
 	roadmap, err := ParseRoadmap(milestoneMapResp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse roadmap: %w", err)
 	}
 
-	// Return both the macro map and roadmap
+	// Return both the strategic and tactical views together
 	return &GeneratedRoadmap{
 		MacroMap: &macroMapData,
 		Roadmap:  roadmap,
 	}, nil
 }
 
+// generateMacroMap creates the strategic high-level plan
+// Returns raw JSON response from OpenAI containing phases and macro milestones
+//
+// OUTPUT STRUCTURE:
+// - 2-4 Phases (major stages like "Foundation", "Intermediate", "Advanced")
+// - Each phase has 2-5 Macro Milestones with:
+//   - Acceptance tests (how to know it's done)
+//   - Duration estimates (min/max days)
+//   - Resources forecast (tools, materials needed)
+//   - Spikes (time-boxed investigations)
+//   - Risks (potential blockers with severity)
 func generateMacroMap(userPrompt string) ([]byte, error) {
-	// Schema for Macro Map
+	// Define the strict JSON schema that OpenAI must follow
+	// NOTE: With strict=true, ALL properties MUST be in the required array
 	schema := map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
@@ -117,64 +157,69 @@ func generateMacroMap(userPrompt string) ([]byte, error) {
 				"items": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
+						// Phase-level properties
 						"name": map[string]interface{}{
-							"type": "string",
+							"type": "string", // e.g., "Foundation Phase"
 						},
 						"description": map[string]interface{}{
-							"type": "string",
+							"type": "string", // What this phase accomplishes
 						},
 						"order_index": map[string]interface{}{
-							"type": "integer",
+							"type": "integer", // Sequential ordering (1, 2, 3...)
 						},
 						"duration_weeks": map[string]interface{}{
-							"type": "string",
+							"type": "string", // e.g., "2-3 weeks"
 						},
+						// Nested macro milestones within this phase
 						"macro_milestones": map[string]interface{}{
 							"type": "array",
 							"items": map[string]interface{}{
 								"type": "object",
 								"properties": map[string]interface{}{
+									// Macro milestone properties
 									"name": map[string]interface{}{
-										"type": "string",
+										"type": "string", // e.g., "Environment Setup Complete"
 									},
 									"acceptance_test": map[string]interface{}{
-										"type": "string",
+										"type": "string", // How to verify completion
 									},
 									"duration_days_min": map[string]interface{}{
-										"type": "integer",
+										"type": "integer", // Optimistic estimate
 									},
 									"duration_days_max": map[string]interface{}{
-										"type": "integer",
+										"type": "integer", // Pessimistic estimate
 									},
 									"order_index": map[string]interface{}{
-										"type": "integer",
+										"type": "integer", // Order within the phase
 									},
 									"resources_forecast": map[string]interface{}{
-										"type": "string",
+										"type": "string", // JSON string of needed resources
 									},
+									// Spikes: time-boxed investigations for unknowns
 									"spikes": map[string]interface{}{
 										"type": "array",
 										"items": map[string]interface{}{
 											"type": "object",
 											"properties": map[string]interface{}{
 												"description": map[string]interface{}{
-													"type": "string",
+													"type": "string", // What to investigate
 												},
 												"timebox_days": map[string]interface{}{
-													"type": "integer",
+													"type": "integer", // Max time to spend
 												},
 											},
 											"required":             []string{"description", "timebox_days"},
 											"additionalProperties": false,
 										},
 									},
+									// Risks: potential blockers or challenges
 									"risks": map[string]interface{}{
 										"type": "array",
 										"items": map[string]interface{}{
 											"type": "object",
 											"properties": map[string]interface{}{
 												"description": map[string]interface{}{
-													"type": "string",
+													"type": "string", // What could go wrong
 												},
 												"severity": map[string]interface{}{
 													"type": "string",
@@ -186,11 +231,13 @@ func generateMacroMap(userPrompt string) ([]byte, error) {
 										},
 									},
 								},
-								"required":             []string{"name", "acceptance_test", "duration_days_min", "duration_days_max", "order_index"},
+								// All macro milestone properties are required (OpenAI strict mode)
+								"required":             []string{"name", "acceptance_test", "duration_days_min", "duration_days_max", "order_index", "resources_forecast", "spikes", "risks"},
 								"additionalProperties": false,
 							},
 						},
 					},
+					// All phase properties are required
 					"required":             []string{"name", "description", "order_index", "duration_weeks", "macro_milestones"},
 					"additionalProperties": false,
 				},
@@ -200,118 +247,138 @@ func generateMacroMap(userPrompt string) ([]byte, error) {
 		"additionalProperties": false,
 	}
 
+	// Build the OpenAI request with system prompt and user prompt
 	reqBody := AIRequest{
-		Model: "gpt-4o-2024-08-06",
+		Model: "gpt-4o-2024-08-06", // Using GPT-4o for structured output
 		Input: []Message{
 			{
-				Role:    "system",
-				Content: "You are an AI strategic planner that creates high-level roadmaps. Generate a macro map with 2-4 phases representing major stages of the goal. Each phase should have 2-5 macro milestones with acceptance tests, duration estimates (min/max days), and optional spikes (time-boxed investigations) and risks. This is a strategic overview - keep descriptions concise and focus on the big picture. Resources forecast should be a JSON string describing needed materials, tools, or prerequisites.",
+				Role: "system",
+				// System message defines the AI's role and constraints
+				Content: "You are an AI strategic planner that creates high-level roadmaps. Generate a macro map with 2-4 phases representing major stages of the goal. Each phase should have 2-5 macro milestones with acceptance tests, duration estimates (min/max days), spikes (time-boxed investigations - use empty array if none), and risks (use empty array if none). This is a strategic overview - keep descriptions concise and focus on the big picture. Resources forecast should be a JSON string describing needed materials, tools, or prerequisites.",
 			},
 			{
 				Role:    "user",
-				Content: userPrompt,
+				Content: userPrompt, // The user's goal description
 			},
 		},
 	}
+	// Configure structured output with strict schema validation
 	reqBody.Text.Format.Type = "json_schema"
 	reqBody.Text.Format.Name = "macro_map"
 	reqBody.Text.Format.Schema = schema
-	reqBody.Text.Format.Strict = true
+	reqBody.Text.Format.Strict = true // Enforce ALL properties must be provided
 
+	// Make the HTTP request to OpenAI and return raw JSON response
 	return makeOpenAIRequest(reqBody)
 }
 
+// generateMilestoneMap creates the tactical detailed plan aligned with the strategic macro map
+// Takes the macro map as input and generates EXACTLY 1 milestone with 10-14 detailed tasks
+//
+// INPUT: macroMap - The strategic plan from step 1
+// OUTPUT: Raw JSON response with detailed tasks, steps, dependencies, confidence levels
+//
+// KEY DIFFERENCE FROM MACRO MAP:
+// - Macro map = "What phases and major milestones?" (weeks/months view)
+// - Milestone map = "What specific tasks this week?" (days/tasks view)
 func generateMilestoneMap(userPrompt string, macroMap *types.MacroMap) ([]byte, error) {
-	// Extract context from macro map to guide milestone generation
+	// Convert the macro map into a text summary to inject into the AI prompt
+	// This ensures the detailed tasks align with the strategic plan
 	macroContext := buildMacroContext(macroMap)
 
-	// Schema for Milestone Map (existing roadmap structure)
+	// Schema for Milestone Map - defines structure for detailed tasks
 	schema := map[string]interface{}{
 		"type": "object",
 		"properties": map[string]interface{}{
+			// Top-level roadmap properties
 			"message": map[string]interface{}{
-				"type": "string",
+				"type": "string", // Friendly intro message (e.g., "Here's your first milestone!")
 			},
 			"goal": map[string]interface{}{
-				"type": "string",
+				"type": "string", // The overall goal title
 			},
 			"description": map[string]interface{}{
-				"type": "string",
+				"type": "string", // Description of the roadmap
 			},
 			"days": map[string]interface{}{
-				"type": "integer",
+				"type": "integer", // Total estimated days
 			},
 			"completed": map[string]interface{}{
-				"type": "boolean",
+				"type": "boolean", // Always false for new roadmaps
 			},
 			"start_date": map[string]interface{}{
 				"type":   "string",
-				"format": "date-time",
+				"format": "date-time", // ISO 8601 format
 			},
+			// Array of milestones (we enforce exactly 1 milestone for the first phase)
 			"milestones": map[string]interface{}{
 				"type":     "array",
-				"minItems": 1,
-				"maxItems": 1,
+				"minItems": 1, // Must have at least 1 milestone
+				"maxItems": 1, // Generate ONLY the first milestone
 				"items": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
+						// Milestone-level properties
 						"sub_goal": map[string]interface{}{
-							"type": "string",
+							"type": "string", // Title of this milestone (e.g., "Setup Development Environment")
 						},
 						"description": map[string]interface{}{
-							"type": "string",
+							"type": "string", // What this milestone accomplishes
 						},
 						"day": map[string]interface{}{
-							"type": "integer",
+							"type": "integer", // Which day this milestone starts on
 						},
 						"reached": map[string]interface{}{
-							"type": "boolean",
+							"type": "boolean", // Always false for new milestones
 						},
+						// Array of tasks (10-14 specific actionable items)
 						"tasks": map[string]interface{}{
 							"type":     "array",
-							"minItems": 10,
-							"maxItems": 14,
+							"minItems": 10, // At least 10 tasks
+							"maxItems": 14, // At most 14 tasks
 							"items": map[string]interface{}{
 								"type": "object",
 								"properties": map[string]interface{}{
+									// Task-level properties (these are the detailed actionable items)
 									"title": map[string]interface{}{
-										"type": "string",
+										"type": "string", // Task name (e.g., "Install Node.js and npm")
 									},
 									"description": map[string]interface{}{
-										"type": "string",
+										"type": "string", // What this task involves
 									},
 									"rationale": map[string]interface{}{
-										"type": "string",
+										"type": "string", // Why this task matters (NEW field from macro map changes)
 									},
 									"est_minutes": map[string]interface{}{
-										"type": "integer",
+										"type": "integer", // Estimated time to complete (NEW field)
 									},
 									"dependencies": map[string]interface{}{
-										"type": "string",
+										"type": "string", // JSON array of task titles this depends on (NEW field)
 									},
 									"confidence": map[string]interface{}{
-										"type": "string",
+										"type": "string", // How confident the AI is in this estimate (NEW field)
 										"enum": []string{"low", "medium", "high"},
 									},
 									"day": map[string]interface{}{
-										"type": "integer",
+										"type": "integer", // Which day within the milestone
 									},
 									"completed": map[string]interface{}{
-										"type": "boolean",
+										"type": "boolean", // Always false for new tasks
 									},
+									// Steps: granular sub-actions within each task (2-4 steps per task)
 									"steps": map[string]interface{}{
 										"type": "array",
 										"items": map[string]interface{}{
 											"type": "object",
 											"properties": map[string]interface{}{
 												"description": map[string]interface{}{
-													"type": "string",
+													"type": "string", // Specific instruction
 												},
 												"completed": map[string]interface{}{
-													"type": "boolean",
+													"type": "boolean", // Track completion
 												},
 												"number": map[string]interface{}{
-													"type": "integer",
+													"type": "integer", // Step number (1, 2, 3...)
 												},
 											},
 											"required":             []string{"description", "completed", "number"},
@@ -319,7 +386,8 @@ func generateMilestoneMap(userPrompt string, macroMap *types.MacroMap) ([]byte, 
 										},
 									},
 								},
-								"required":             []string{"title", "description", "day", "completed", "steps"},
+								// All task properties must be provided (strict mode)
+								"required":             []string{"title", "description", "rationale", "est_minutes", "dependencies", "confidence", "day", "completed", "steps"},
 								"additionalProperties": false,
 							},
 						},
@@ -333,6 +401,8 @@ func generateMilestoneMap(userPrompt string, macroMap *types.MacroMap) ([]byte, 
 		"additionalProperties": false,
 	}
 
+	// Build a system prompt that includes the strategic context from the macro map
+	// This is the KEY connection between step 1 (macro) and step 2 (milestone)
 	systemPrompt := fmt.Sprintf(`You are an AI tactical planner that creates detailed action plans based on a strategic roadmap.
 
 STRATEGIC CONTEXT:
@@ -352,14 +422,15 @@ Based on this strategic plan, generate EXACTLY 1 detailed milestone that represe
 		Input: []Message{
 			{
 				Role:    "system",
-				Content: systemPrompt,
+				Content: systemPrompt, // Includes macro map context
 			},
 			{
 				Role:    "user",
-				Content: userPrompt,
+				Content: userPrompt, // Original user goal
 			},
 		},
 	}
+	// Configure structured output for milestone map
 	reqBody.Text.Format.Type = "json_schema"
 	reqBody.Text.Format.Name = "dead_reckoner_roadmap"
 	reqBody.Text.Format.Schema = schema
@@ -368,20 +439,30 @@ Based on this strategic plan, generate EXACTLY 1 detailed milestone that represe
 	return makeOpenAIRequest(reqBody)
 }
 
+// buildMacroContext converts the MacroMap structure into a human-readable text summary
+// This summary gets injected into the milestone generation prompt to provide strategic context
+//
+// WHY THIS MATTERS:
+// Without this, the AI would generate tasks blindly. With this context, the AI can align
+// detailed tasks with the high-level strategy (e.g., if macro map says "setup environment",
+// detailed tasks will include installing specific tools)
 func buildMacroContext(macroMap *types.MacroMap) string {
 	if macroMap == nil || len(macroMap.Phases) == 0 {
 		return "No strategic context available"
 	}
 
 	context := ""
+	// Iterate through each phase and format it as text
 	for _, phase := range macroMap.Phases {
 		context += fmt.Sprintf("\nPhase %d: %s (%s)\n", phase.OrderIndex, phase.Name, phase.DurationWeeks)
 		context += fmt.Sprintf("  Description: %s\n", phase.Description)
 
+		// Include all macro milestones within this phase
 		for _, mm := range phase.MacroMilestones {
 			context += fmt.Sprintf("  - Milestone: %s (Days: %d-%d)\n", mm.Name, mm.DurationDaysMin, mm.DurationDaysMax)
 			context += fmt.Sprintf("    Acceptance: %s\n", mm.AcceptanceTest)
 
+			// Include spikes if any (investigations needed)
 			if len(mm.Spikes) > 0 {
 				context += "    Spikes: "
 				for _, spike := range mm.Spikes {
@@ -390,6 +471,7 @@ func buildMacroContext(macroMap *types.MacroMap) string {
 				context += "\n"
 			}
 
+			// Include risks if any (potential blockers)
 			if len(mm.Risks) > 0 {
 				context += "    Risks: "
 				for _, risk := range mm.Risks {
@@ -403,17 +485,34 @@ func buildMacroContext(macroMap *types.MacroMap) string {
 	return context
 }
 
+// parseMacroMapResponse extracts the MacroMap from OpenAI's response wrapper
+//
+// OpenAI responses have this structure:
+// {
+//   "output": [{
+//     "content": [{
+//       "text": "{\"phases\": [...]}"  <-- Our actual macro map JSON is HERE
+//     }]
+//   }]
+// }
+//
+// This function unwraps the response and parses the inner JSON into our MacroMap type
 func parseMacroMapResponse(rawResp []byte, macroMap *types.MacroMap) error {
+	// First, parse the outer OpenAI response wrapper
 	var apiResp types.OpenAIResponse
 	if err := json.Unmarshal(rawResp, &apiResp); err != nil {
 		return fmt.Errorf("failed to parse OpenAI response: %w", err)
 	}
 
+	// Validate that we got content back
 	if len(apiResp.Output) == 0 || len(apiResp.Output[0].Content) == 0 {
 		return fmt.Errorf("no content found in OpenAI output")
 	}
 
+	// Extract the inner JSON string (the actual macro map data)
 	rawJSON := apiResp.Output[0].Content[0].Text
+
+	// Parse the macro map JSON into our Go struct
 	if err := json.Unmarshal([]byte(rawJSON), macroMap); err != nil {
 		return fmt.Errorf("failed to parse macro map JSON: %w", err)
 	}
@@ -421,20 +520,28 @@ func parseMacroMapResponse(rawResp []byte, macroMap *types.MacroMap) error {
 	return nil
 }
 
+// makeOpenAIRequest is the shared HTTP client for all OpenAI API calls
+// Handles authentication, timeouts, and error responses
+//
+// Used by both generateMacroMap and generateMilestoneMap
 func makeOpenAIRequest(reqBody AIRequest) ([]byte, error) {
+	// Serialize the request body to JSON
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	// Create HTTP POST request to OpenAI
 	req, err := http.NewRequestWithContext(context.Background(), "POST", openAIURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Set required headers (API key from environment variable)
 	req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
 	req.Header.Set("Content-Type", "application/json")
 
+	// Execute request with 3-minute timeout (AI generation can take time)
 	client := &http.Client{Timeout: 180 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -442,31 +549,41 @@ func makeOpenAIRequest(reqBody AIRequest) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
+	// Read the full response body
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// Check for HTTP errors (4xx, 5xx status codes)
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("OpenAI error: %s", string(respBytes))
 	}
 
+	// Return raw response bytes for parsing by caller
 	return respBytes, nil
 }
 
+// ParseRoadmap extracts the detailed milestone map (roadmap) from OpenAI's response
+// Similar to parseMacroMapResponse but for the tactical/detailed view
+//
+// This parses the response from generateMilestoneMap into a Roadmap structure
 func ParseRoadmap(raw []byte) (*types.Roadmap, error) {
+	// Parse outer OpenAI response wrapper
 	var apiResp types.OpenAIResponse
 	if err := json.Unmarshal(raw, &apiResp); err != nil {
 		return nil, fmt.Errorf("failed to parse OpenAI response: %w", err)
 	}
 
+	// Validate content exists
 	if len(apiResp.Output) == 0 || len(apiResp.Output[0].Content) == 0 {
 		return nil, fmt.Errorf("no content found in OpenAI output")
 	}
 
-	// Extract the JSON string from inside the OpenAI response
+	// Extract the inner JSON string (the actual roadmap data)
 	rawJSON := apiResp.Output[0].Content[0].Text
 
+	// Parse into Roadmap structure
 	var roadmap types.Roadmap
 	if err := json.Unmarshal([]byte(rawJSON), &roadmap); err != nil {
 		return nil, fmt.Errorf("failed to parse embedded goal roadmap JSON: %w", err)
@@ -475,32 +592,47 @@ func ParseRoadmap(raw []byte) (*types.Roadmap, error) {
 	return &roadmap, nil
 }
 
+// ============================================================================
+// AI SESSION FUNCTIONS (NOT YET IMPLEMENTED)
+// ============================================================================
+// These functions are placeholders for a future interactive AI session feature
+// where the AI asks clarifying questions before generating a roadmap.
+//
+// Current flow: User provides goal → Generate roadmap immediately
+// Future flow: User provides goal → AI asks questions → Generate tailored roadmap
+// ============================================================================
+
+// ContinueAISession would handle multi-turn conversations with the AI
+// NOT CURRENTLY USED - placeholder for future interactive sessions
 func ContinueAISession(messages []Message) (reply string, isComplete bool, roadmap *types.Roadmap, err error) {
-	// Compose prompt as in your plan
-	// Call OpenAI with full context
-	// Parse response: if it's a question, return it; if it's a roadmap, return it and set isComplete=true
-	// (You can use a special field in the AI response to distinguish)
-	// For now, pseudo-code:
-	// - If response contains "roadmap": isComplete = true, roadmap = parsed roadmap
-	// - Else: isComplete = false, reply = next question
+	// TODO: Implement interactive session logic
+	// - If AI needs more info: return question, isComplete=false
+	// - If AI has enough info: generate roadmap, isComplete=true
 	return
 }
 
+// UpdateAISessionContext would append new messages to a session's context
+// NOT CURRENTLY USED - placeholder for future feature
 func UpdateAISessionContext(sessionID uuid.UUID, message []Message) {
-
+	// TODO: Update session context in database
 }
 
+// UpdateAISession would modify an existing AI session
+// NOT CURRENTLY USED - placeholder for future feature
 func UpdateAISession(sessionID *AISession) {
-
+	// TODO: Update session metadata in database
 }
 
+// SaveAISession would persist a session to the database
+// NOT CURRENTLY USED - placeholder for future feature
 func SaveAISession(sessionID *AISession) {
-
+	// TODO: Save session to database
 }
 
+// LoadAISession would retrieve a session from the database
+// NOT CURRENTLY USED - placeholder for future feature
 func LoadAISession(sessionID string) (AISession, error) {
-
 	var session AISession
-
+	// TODO: Load session from database
 	return session, nil
 }

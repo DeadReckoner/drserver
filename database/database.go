@@ -209,7 +209,17 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 	}
 
 	var createdRoadmap types.Roadmap
-	if err := db.Where("roadmap_id = ?", rm.RoadmapID).Preload("Milestones.Tasks.Steps").First(&createdRoadmap).Error; err != nil {
+	query := db.Where("roadmap_id = ?", rm.RoadmapID).
+		Preload("Milestones.Tasks.Steps")
+
+	// Also preload macro map if it was created
+	if rm.MacroMap != nil {
+		query = query.
+			Preload("MacroMap.Phases.MacroMilestones.Spikes").
+			Preload("MacroMap.Phases.MacroMilestones.Risks")
+	}
+
+	if err := query.First(&createdRoadmap).Error; err != nil {
 		return types.Roadmap{}, err
 	}
 
@@ -239,8 +249,8 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 	return roadmaps
 }
 
-// GetRoadmapMacroMap loads only the Macro Map (strategic overview) for a roadmap
-func GetRoadmapMacroMap(c *gin.Context, roadmapID string) types.Roadmap {
+// GetRoadmapWithMacroMap loads only the Macro Map (strategic overview) for a roadmap
+func GetRoadmapWithMacroMap(c *gin.Context, roadmapID string) types.Roadmap {
 	var roadmap types.Roadmap
 	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {
@@ -266,36 +276,8 @@ func GetRoadmapMacroMap(c *gin.Context, roadmapID string) types.Roadmap {
 	return roadmap
 }
 
-// GetRoadmapMilestoneMap loads only the Milestone Map (tactical view) for a roadmap
-func GetRoadmapMilestoneMap(c *gin.Context, roadmapID string) types.Roadmap {
-	var roadmap types.Roadmap
-	user_id, exists := c.Get("user_id")
-	if !exists || user_id == "" {
-		log.Println("missing or invalid user_id")
-		return roadmap
-	}
-
-	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).
-		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
-			return db.Order("day ASC")
-		}).
-		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-			return db.Order("day ASC")
-		}).
-		Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
-			return db.Order("number ASC")
-		}).
-		First(&roadmap)
-
-	if result.Error != nil {
-		log.Println("Error fetching roadmap milestone map:", result.Error)
-	}
-
-	return roadmap
-}
-
-// GetRoadmapFull loads both Macro Map and Milestone Map (complete view)
-func GetRoadmapFull(c *gin.Context, roadmapID string) types.Roadmap {
+// GetRoadmapWithMacroMapAndMilestones loads both Macro Map and Milestone Map (complete view)
+func GetRoadmapWithMacroMapAndMilestones(c *gin.Context, roadmapID string) types.Roadmap {
 	var roadmap types.Roadmap
 	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {
@@ -1004,20 +986,3 @@ func GetMacroMap(c *gin.Context, roadmapID string) (types.MacroMap, error) {
 	return macroMap, nil
 }
 
-// LinkMacroMilestoneToMilestone links a macro milestone to a detailed milestone
-func LinkMacroMilestoneToMilestone(macroMilestoneID string, milestoneID string) error {
-	result := db.Model(&types.MacroMilestone{}).
-		Where("macro_milestone_id = ?", macroMilestoneID).
-		Update("detailed_milestone_id", milestoneID)
-
-	if result.Error != nil {
-		return result.Error
-	}
-
-	// Also update the milestone to link back
-	result = db.Model(&types.Milestone{}).
-		Where("milestone_id = ?", milestoneID).
-		Update("macro_milestone_id", macroMilestoneID)
-
-	return result.Error
-}
