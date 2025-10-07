@@ -36,11 +36,11 @@ func AgentGenerate(c *gin.Context) {
 	// Set roadmap type to "ai_generated" since this was created by the AI
 	generated.Roadmap.Type = "ai_generated"
 
-	// Return both the macro map and the roadmap
-	utils.DataResponse(c, http.StatusOK, gin.H{
-		"macro_map": generated.MacroMap,
-		"roadmap":   generated.Roadmap,
-	})
+	// Attach macro map to roadmap (nest it inside)
+	generated.Roadmap.MacroMap = generated.MacroMap
+
+	// Return the complete roadmap with nested macro map
+	utils.DataResponse(c, http.StatusOK, generated.Roadmap)
 }
 
 func StartAISession(c *gin.Context) {
