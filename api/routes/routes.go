@@ -25,7 +25,6 @@ func setupV1Routes(router *gin.Engine) {
 
 	setupUserRoutes(v1)
 	setupRoadmapRoutes(v1)
-	setupTaskRoutes(v1)
 	setupAgentRoutes(v1)
 	setupWebSocketRoutes(v1)
 }
@@ -52,20 +51,12 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		roadmaps.DELETE("/:roadmapid", utils.ValidateUUID("roadmapid"), handlers.DeleteRoadmap)
 
 		// Macro Map routes
-		roadmaps.POST("/:roadmapid/macro-map",
-			utils.ValidateUUID("roadmapid"),
-			handlers.CreateMacroMap)
-		roadmaps.GET("/:roadmapid/macro-map",
-			utils.ValidateUUID("roadmapid"),
-			handlers.GetMacroMap)
+		roadmaps.POST("/:roadmapid/macro-map", utils.ValidateUUID("roadmapid"), handlers.CreateMacroMap)
+		roadmaps.GET("/:roadmapid/macro-map", utils.ValidateUUID("roadmapid"), handlers.GetMacroMap)
 
 		// Milestone routes
-		roadmaps.GET("/:roadmapid/milestones",
-			utils.ValidateUUID("roadmapid"),
-			handlers.GetMilestonesByRoadmap)
-		roadmaps.POST("/:roadmapid/milestones",
-			utils.ValidateUUID("roadmapid"),
-			handlers.CreateMilestone)
+		roadmaps.GET("/:roadmapid/milestones", utils.ValidateUUID("roadmapid"), handlers.GetMilestonesByRoadmap)
+		roadmaps.POST("/:roadmapid/milestones", utils.ValidateUUID("roadmapid"), handlers.CreateMilestone)
 	}
 
 	milestones := rg.Group("/milestones")
@@ -73,14 +64,9 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		milestones.GET("/:milestoneid", utils.ValidateUUID("milestoneid"), handlers.GetMilestone)
 		milestones.PATCH("/:milestoneid", utils.ValidateUUID("milestoneid"), handlers.UpdateMilestone)
 		milestones.DELETE("/:milestoneid", utils.ValidateUUID("milestoneid"), handlers.DeleteMilestone)
-
-		milestones.GET("/:milestoneid/tasks",
-			utils.ValidateUUID("milestoneid"),
-			handlers.GetTasksByMilestone)
+		milestones.GET("/:milestoneid/tasks", utils.ValidateUUID("milestoneid"), handlers.GetTasksByMilestone)
 	}
-}
 
-func setupTaskRoutes(rg *gin.RouterGroup) {
 	tasks := rg.Group("/tasks")
 	{
 		tasks.POST("", handlers.CreateTask)
