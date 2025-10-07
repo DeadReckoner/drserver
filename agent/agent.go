@@ -488,13 +488,14 @@ func buildMacroContext(macroMap *types.MacroMap) string {
 // parseMacroMapResponse extracts the MacroMap from OpenAI's response wrapper
 //
 // OpenAI responses have this structure:
-// {
-//   "output": [{
-//     "content": [{
-//       "text": "{\"phases\": [...]}"  <-- Our actual macro map JSON is HERE
-//     }]
-//   }]
-// }
+//
+//	{
+//	  "output": [{
+//	    "content": [{
+//	      "text": "{\"phases\": [...]}"  <-- Our actual macro map JSON is HERE
+//	    }]
+//	  }]
+//	}
 //
 // This function unwraps the response and parses the inner JSON into our MacroMap type
 func parseMacroMapResponse(rawResp []byte, macroMap *types.MacroMap) error {
