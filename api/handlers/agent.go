@@ -23,6 +23,8 @@ func AgentGenerate(c *gin.Context) {
 
 	fmt.Printf("Goal request received: %+v\n", goalReq)
 
+	start := time.Now()
+
 	// Generate both macro map and milestone map
 	generated, err := agent.GenerateGoalFromStructure(goalReq)
 	if err != nil {
@@ -30,6 +32,9 @@ func AgentGenerate(c *gin.Context) {
 		utils.InternalErrorResponse(c, err)
 		return
 	}
+
+	duration := time.Since(start)
+	log.Printf("Request took: %v", duration)
 
 	fmt.Printf("Generated roadmap with macro map: %+v\n", generated)
 

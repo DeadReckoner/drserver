@@ -249,12 +249,42 @@ func generateMacroMap(userPrompt string) ([]byte, error) {
 
 	// Build the OpenAI request with system prompt and user prompt
 	reqBody := AIRequest{
-		Model: "gpt-4o-2024-08-06", // Using GPT-4o for structured output
+		Model: "gpt-5-nano", // Using GPT-4o for structured output
 		Input: []Message{
 			{
 				Role: "system",
-				// System message defines the AI's role and constraints
-				Content: "You are an AI strategic planner that creates high-level roadmaps. Generate a macro map with 2-4 phases representing major stages of the goal. Each phase should have 2-5 macro milestones with acceptance tests, duration estimates (min/max days), spikes (time-boxed investigations - use empty array if none), and risks (use empty array if none). This is a strategic overview - keep descriptions concise and focus on the big picture. Resources forecast should be a JSON string describing needed materials, tools, or prerequisites.",
+				// Goal Achievement Coach Agent - Strategic Planning Phase
+				Content: `You are a Goal Achievement Coach Agent focused on creating strategic roadmaps.
+
+CORE DIRECTIVES:
+- Be autonomous: Make informed assumptions rather than asking for clarification
+- Be thorough: Create comprehensive, actionable plans
+- Be realistic: Provide achievable timelines with buffer for learning curves
+- Be empowering: Frame guidance as enabling the user, not prescribing
+
+YOUR TASK - STRATEGIC PLANNING (MACRO MAP):
+Generate a high-level strategic roadmap (macro map) with 2-4 major phases representing the journey from current state to goal achievement.
+
+For each phase, create 2-5 macro milestones that represent significant achievements. Each macro milestone must include:
+- Clear acceptance test (how to know it's complete)
+- Duration estimates (min/max days, accounting for learning curves)
+- Resources forecast (tools, materials, courses needed as JSON string)
+- Spikes: Time-boxed investigations for unknowns (use empty array if none needed)
+- Risks: Potential obstacles with severity level (use empty array if no significant risks)
+
+STRATEGIC PRINCIPLES:
+1. Start with fundamentals before advanced concepts
+2. Build milestones that validate progress before moving forward
+3. Include learning time - people need to absorb and practice
+4. Anticipate common obstacles and plan mitigations
+5. Balance ambition with achievability
+
+ASSUMPTIONS POLICY:
+If the goal is vague, assume the most common interpretation and proceed. Document your assumptions in the phase descriptions.
+
+Resources forecast should be a JSON string like: {"books": ["Book Title"], "tools": ["Tool Name"], "courses": ["Course Name"], "budget": "$X"}
+
+This is the STRATEGIC VIEW - keep it high-level and focused on major phases and milestones.`,
 			},
 			{
 				Role:    "user",
@@ -403,22 +433,54 @@ func generateMilestoneMap(userPrompt string, macroMap *types.MacroMap) ([]byte, 
 
 	// Build a system prompt that includes the strategic context from the macro map
 	// This is the KEY connection between step 1 (macro) and step 2 (milestone)
-	systemPrompt := fmt.Sprintf(`You are an AI tactical planner that creates detailed action plans based on a strategic roadmap.
+	systemPrompt := fmt.Sprintf(`You are a Goal Achievement Coach Agent focused on creating detailed, actionable tactical plans.
 
-STRATEGIC CONTEXT:
+CORE DIRECTIVES:
+- Be thorough: Break down complex actions into clear, achievable steps
+- Be specific: Every task should have concrete actions, not vague suggestions
+- Be realistic: Account for learning time, practice, and potential setbacks
+- Be empowering: Include rationales that help users understand WHY each task matters
+
+STRATEGIC CONTEXT (from macro map):
 %s
 
-Based on this strategic plan, generate EXACTLY 1 detailed milestone that represents the FIRST actionable phase (typically 1-2 weeks). This milestone must:
-- Contain 10-14 specific, actionable tasks
-- Each task should have: title, description, rationale (why it matters), estimated minutes, optional dependencies (JSON array of task titles), and confidence level (low/medium/high)
-- Each task should have 2-4 detailed steps
-- Add a 'message' field with a friendly intro
-- Align with the first macro milestone in the strategic plan
-- Set all 'completed' and 'reached' fields to false
-- Ensure day numbers are sequential starting from day 1`, macroContext)
+YOUR TASK - TACTICAL PLANNING (MILESTONE MAP):
+Generate EXACTLY 1 detailed milestone representing the FIRST actionable phase (typically 1-2 weeks) that aligns with the first macro milestone above.
+
+MILESTONE REQUIREMENTS:
+- Create 10-14 specific, actionable tasks that build toward the milestone goal
+- Tasks should progress logically - each building on previous work
+- Mix learning tasks with practice/application tasks
+- Include validation/checkpoint tasks to measure progress
+
+EACH TASK MUST INCLUDE:
+- Title: Clear, action-oriented (e.g., "Practice C Major Scale with Metronome")
+- Description: What this task involves and how to approach it
+- Rationale: Why this task matters for the overall goal (builds motivation and understanding)
+- Estimated minutes: Realistic time estimate (account for learning curve)
+- Dependencies: JSON array of prerequisite task titles (e.g., ["Task 1 Title", "Task 2 Title"] or [] for none)
+- Confidence: Your confidence in the estimate (low/medium/high)
+- Day: Which day in the milestone this task should be done (spread across 7-14 days)
+- 2-4 detailed steps: Granular instructions that remove ambiguity
+
+TASK DESIGN PRINCIPLES:
+1. Start with foundational/easier tasks, progress to more complex
+2. Include both "learning" and "doing" tasks
+3. Build in practice and repetition for skill development
+4. Add checkpoint/validation tasks every 3-4 tasks
+5. Make dependencies realistic - don't over-constrain the sequence
+6. Spread tasks across days to allow for learning and practice time
+
+MESSAGE FIELD:
+Add a friendly, encouraging message that introduces the milestone and sets expectations (e.g., "Here's your first milestone! This will build your foundation...")
+
+FORMATTING:
+- Set all 'completed' and 'reached' fields to false (user hasn't started yet)
+- Day numbers should be sequential starting from day 1
+- Dependencies should be exact task titles from earlier tasks in the list`, macroContext)
 
 	reqBody := AIRequest{
-		Model: "gpt-4o-2024-08-06",
+		Model: "gpt-5-mini",
 		Input: []Message{
 			{
 				Role:    "system",
@@ -506,12 +568,25 @@ func parseMacroMapResponse(rawResp []byte, macroMap *types.MacroMap) error {
 	}
 
 	// Validate that we got content back
-	if len(apiResp.Output) == 0 || len(apiResp.Output[0].Content) == 0 {
+	if len(apiResp.Output) == 0 {
+		return fmt.Errorf("no output found in OpenAI response")
+	}
+
+	// Find the message output (skip reasoning outputs)
+	var messageContent []types.OpenAIContent
+	for _, output := range apiResp.Output {
+		if output.Type == "message" && len(output.Content) > 0 {
+			messageContent = output.Content
+			break
+		}
+	}
+
+	if len(messageContent) == 0 {
 		return fmt.Errorf("no content found in OpenAI output")
 	}
 
 	// Extract the inner JSON string (the actual macro map data)
-	rawJSON := apiResp.Output[0].Content[0].Text
+	rawJSON := messageContent[0].Text
 
 	// Parse the macro map JSON into our Go struct
 	if err := json.Unmarshal([]byte(rawJSON), macroMap); err != nil {
@@ -558,8 +633,11 @@ func makeOpenAIRequest(reqBody AIRequest) ([]byte, error) {
 
 	// Check for HTTP errors (4xx, 5xx status codes)
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("OpenAI error: %s", string(respBytes))
+		return nil, fmt.Errorf("OpenAI error (status %d): %s", resp.StatusCode, string(respBytes))
 	}
+
+	// Debug: log the raw response
+	fmt.Printf("OpenAI Response (status %d): %s\n", resp.StatusCode, string(respBytes))
 
 	// Return raw response bytes for parsing by caller
 	return respBytes, nil
@@ -577,12 +655,25 @@ func ParseRoadmap(raw []byte) (*types.Roadmap, error) {
 	}
 
 	// Validate content exists
-	if len(apiResp.Output) == 0 || len(apiResp.Output[0].Content) == 0 {
+	if len(apiResp.Output) == 0 {
+		return nil, fmt.Errorf("no output found in OpenAI response")
+	}
+
+	// Find the message output (skip reasoning outputs)
+	var messageContent []types.OpenAIContent
+	for _, output := range apiResp.Output {
+		if output.Type == "message" && len(output.Content) > 0 {
+			messageContent = output.Content
+			break
+		}
+	}
+
+	if len(messageContent) == 0 {
 		return nil, fmt.Errorf("no content found in OpenAI output")
 	}
 
 	// Extract the inner JSON string (the actual roadmap data)
-	rawJSON := apiResp.Output[0].Content[0].Text
+	rawJSON := messageContent[0].Text
 
 	// Parse into Roadmap structure
 	var roadmap types.Roadmap
