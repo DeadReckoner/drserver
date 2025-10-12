@@ -22,6 +22,7 @@ func SetupRoutes() *gin.Engine {
 func setupV1Routes(router *gin.Engine) {
 	v1 := router.Group("/api/v1")
 	v1.Use(middleware.AuthMiddleware())
+	v1.Use(middleware.AdminMiddleware())
 
 	setupUserRoutes(v1)
 	setupRoadmapRoutes(v1)

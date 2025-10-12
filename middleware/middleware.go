@@ -1,6 +1,8 @@
 package middleware
 
 import (
+	"context"
+	"dr/server/log"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,8 +12,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 )
+
+// setup context key type
+type contextkey string
+
+const RequestIDKey contextkey = "requestID"
 
 type AuthenticatedUser struct {
 	ID               string    `json:"id"`
@@ -53,11 +61,10 @@ type AuthenticatedUser struct {
 	IsAnonymous bool      `json:"is_anonymous"`
 }
 
-
 func AuthMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context){
+	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == ""{
+		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Auth header missing"})
 			c.Abort()
 			return
@@ -82,21 +89,19 @@ func AuthMiddleware() gin.HandlerFunc {
 // -H "apikey: SUPABASE_KEY" \
 // -H "Authorization: Bearer USER_TOKEN"
 
-
 func parseToken(accessToken string) string {
-    godotenv.Load(".env")
-	// supabaseURL := os.Getenv("API_URL")
+	godotenv.Load(".env")
+
 	supabaseKey := os.Getenv("anon_key")
 	supabaseApi := os.Getenv("API_URL")
 
-
-	req, err := http.NewRequest("GET", supabaseApi + "/auth/v1/user", nil)
+	req, err := http.NewRequest("GET", supabaseApi+"/auth/v1/user", nil)
 	if err != nil {
 		fmt.Println("Error creating request:", err)
 		return ""
 	}
 	req.Header.Add("apiKey", supabaseKey)
-	req.Header.Add("Authorization", "Bearer "+ accessToken)
+	req.Header.Add("Authorization", "Bearer "+accessToken)
 
 	client := &http.Client{}
 
@@ -122,4 +127,37 @@ func parseToken(accessToken string) string {
 	}
 	return user.ID
 
+}
+
+func AdminMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+
+		//Check if request header is preset else set the uuid
+		requestID := c.GetHeader("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.New().String()
+		}
+
+		c.Set("requestID", requestID)
+
+		logger := log.NewLogger(requestID)
+
+		ctx := context.WithValue(c.Request.Context(), RequestIDKey, requestID)
+		ctx = log.WithLogger(ctx, logger)
+
+		c.Request = c.Request.WithContext(ctx)
+
+		// Set the header
+		c.Header("X-Request-ID", requestID)
+
+		c.Next()
+
+	}
+}
+
+func GetRequestID(ctx context.Context) string { // Exported helper
+	if id, ok := ctx.Value(RequestIDKey).(string); ok {
+		return id
+	}
+	return "unknown"
 }

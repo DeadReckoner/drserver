@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"dr/server/log"
 	"dr/server/types"
 	"encoding/json"
 	"fmt"
@@ -14,8 +15,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// OpenAI API endpoint for structured output responses
-const openAIURL = "https://api.openai.com/v1/responses"
+const (
+	// OpenAI API endpoint for structured output responses
+	openAIURL             = "https://api.openai.com/v1/responses"
+	GenerationTemperature = 0.7
+	RequestTimeout        = 60 * time.Second
+)
 
 // Message represents a single message in a conversation with the AI
 // Used to build up context and chat history
@@ -39,9 +44,11 @@ type AISession struct {
 // AIRequest represents the full request payload sent to OpenAI's API
 // Includes the model name, conversation messages, and strict JSON schema formatting
 type AIRequest struct {
-	Model string    `json:"model"` // e.g., "gpt-4o-2024-08-06"
-	Input []Message `json:"input"` // Conversation messages (system + user prompts)
-	Text  struct {
+	Model     string    `json:"model"`                       // e.g., "gpt-5-mini"
+	Input     []Message `json:"input"`                       // Conversation messages (system + user prompts)
+	MaxTokens int       `json:"max_output_tokens,omitempty"` // Maximum tokens to generatexs
+	Stream    bool      `json:"stream,omitempty"`            // Enable streaming responses
+	Text      struct {
 		Format struct {
 			Type   string                 `json:"type"`   // "json_schema"
 			Name   string                 `json:"name"`   // Schema name (e.g., "macro_map")
@@ -62,7 +69,7 @@ type GeneratedRoadmap struct {
 // GenerateGoalFromStructure is the main entry point when the user provides structured goal data
 // (via a form with fields like goal name, time commitment, skill level, etc.)
 // It converts the structured data into a natural language prompt and calls the generation pipeline
-func GenerateGoalFromStructure(goalReq types.GoalRequest) (*GeneratedRoadmap, error) {
+func GenerateGoalFromStructure(ctx context.Context, goalReq types.GoalRequest) (*GeneratedRoadmap, error) {
 	// Convert structured fields into a natural language prompt for the AI
 	prompt := fmt.Sprintf(`
 Based on the following goal information, create a detailed roadmap:
@@ -82,14 +89,7 @@ Please create a comprehensive roadmap with milestones, tasks, and actionable ste
 		goalReq.WorkFrequency, goalReq.Constraints, goalReq.CurrentSkillLevel)
 
 	// Pass the constructed prompt to the main generation pipeline
-	return generateRoadmapFromPrompt(prompt)
-}
-
-// GenerateGoalBlueprint is the entry point when the user provides a free-form text description
-// (e.g., "I want to learn web development")
-// It directly passes the user's text to the generation pipeline
-func GenerateGoalBlueprint(userPrompt string) (*GeneratedRoadmap, error) {
-	return generateRoadmapFromPrompt(userPrompt)
+	return generateRoadmapFromPrompt(ctx, prompt)
 }
 
 // generateRoadmapFromPrompt is the core orchestrator for the two-step generation process
@@ -101,10 +101,12 @@ func GenerateGoalBlueprint(userPrompt string) (*GeneratedRoadmap, error) {
 // 3. Generate milestone map using macro map as context (tactical view: detailed tasks)
 // 4. Parse the milestone map response
 // 5. Return both structures
-func generateRoadmapFromPrompt(userPrompt string) (*GeneratedRoadmap, error) {
+func generateRoadmapFromPrompt(ctx context.Context, userPrompt string) (*GeneratedRoadmap, error) {
+
+	log.Info(ctx, "User Prompt", userPrompt)
 	// STEP 1: Generate Macro Map (Strategic View)
 	// This creates the high-level plan with 2-4 phases and macro milestones
-	macroMapResp, err := generateMacroMap(userPrompt)
+	macroMapResp, err := generateMacroMap(ctx, userPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate macro map: %w", err)
 	}
@@ -115,9 +117,10 @@ func generateRoadmapFromPrompt(userPrompt string) (*GeneratedRoadmap, error) {
 		return nil, fmt.Errorf("failed to parse macro map: %w", err)
 	}
 
+	log.Info(ctx, "Macro Map", macroMapData)
 	// STEP 2: Generate Milestone Map (Tactical View) based on the macro map
 	// This creates detailed tasks aligned with the strategic plan from step 1
-	milestoneMapResp, err := generateMilestoneMap(userPrompt, &macroMapData)
+	milestoneMapResp, err := generateMilestoneMap(ctx, userPrompt, &macroMapData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate milestone map: %w", err)
 	}
@@ -146,7 +149,7 @@ func generateRoadmapFromPrompt(userPrompt string) (*GeneratedRoadmap, error) {
 //   - Resources forecast (tools, materials needed)
 //   - Spikes (time-boxed investigations)
 //   - Risks (potential blockers with severity)
-func generateMacroMap(userPrompt string) ([]byte, error) {
+func generateMacroMap(ctx context.Context, userPrompt string) ([]byte, error) {
 	// Define the strict JSON schema that OpenAI must follow
 	// NOTE: With strict=true, ALL properties MUST be in the required array
 	schema := map[string]interface{}{
@@ -247,6 +250,38 @@ func generateMacroMap(userPrompt string) ([]byte, error) {
 		"additionalProperties": false,
 	}
 
+	systemPrompt := `You are a Goal Achievement Coach Agent focused on creating strategic roadmaps.
+
+				CORE DIRECTIVES:
+				- Be autonomous: Make informed assumptions rather than asking for clarification
+				- Be thorough: Create comprehensive, actionable plans
+				- Be realistic: Provide achievable timelines with buffer for learning curves
+				- Be empowering: Frame guidance as enabling the user, not prescribing
+
+				YOUR TASK - STRATEGIC PLANNING (MACRO MAP):
+				Generate a high-level strategic roadmap (macro map) with 2-4 major phases representing the journey from current state to goal achievement.
+
+				For each phase, create 2-5 macro milestones that represent significant achievements. Each macro milestone must include:
+				- Clear acceptance test (how to know it's complete)
+				- Duration estimates (min/max days, accounting for learning curves)
+				- Resources forecast (tools, materials, courses needed as JSON string)
+				- Spikes: Time-boxed investigations for unknowns (use empty array if none needed)
+				- Risks: Potential obstacles with severity level (use empty array if no significant risks)
+
+				STRATEGIC PRINCIPLES:
+				1. Start with fundamentals before advanced concepts
+				2. Build milestones that validate progress before moving forward
+				3. Include learning time - people need to absorb and practice
+				4. Anticipate common obstacles and plan mitigations
+				5. Balance ambition with achievability
+
+				ASSUMPTIONS POLICY:
+				If the goal is vague, assume the most common interpretation and proceed. Document your assumptions in the phase descriptions.
+
+				Resources forecast should be a JSON string like: {"books": ["Book Title"], "tools": ["Tool Name"], "courses": ["Course Name"], "budget": "$X"}
+
+				This is the STRATEGIC VIEW - keep it high-level and focused on major phases and milestones.`
+
 	// Build the OpenAI request with system prompt and user prompt
 	reqBody := AIRequest{
 		Model: "gpt-5-nano", // Using GPT-4o for structured output
@@ -254,37 +289,7 @@ func generateMacroMap(userPrompt string) ([]byte, error) {
 			{
 				Role: "system",
 				// Goal Achievement Coach Agent - Strategic Planning Phase
-				Content: `You are a Goal Achievement Coach Agent focused on creating strategic roadmaps.
-
-CORE DIRECTIVES:
-- Be autonomous: Make informed assumptions rather than asking for clarification
-- Be thorough: Create comprehensive, actionable plans
-- Be realistic: Provide achievable timelines with buffer for learning curves
-- Be empowering: Frame guidance as enabling the user, not prescribing
-
-YOUR TASK - STRATEGIC PLANNING (MACRO MAP):
-Generate a high-level strategic roadmap (macro map) with 2-4 major phases representing the journey from current state to goal achievement.
-
-For each phase, create 2-5 macro milestones that represent significant achievements. Each macro milestone must include:
-- Clear acceptance test (how to know it's complete)
-- Duration estimates (min/max days, accounting for learning curves)
-- Resources forecast (tools, materials, courses needed as JSON string)
-- Spikes: Time-boxed investigations for unknowns (use empty array if none needed)
-- Risks: Potential obstacles with severity level (use empty array if no significant risks)
-
-STRATEGIC PRINCIPLES:
-1. Start with fundamentals before advanced concepts
-2. Build milestones that validate progress before moving forward
-3. Include learning time - people need to absorb and practice
-4. Anticipate common obstacles and plan mitigations
-5. Balance ambition with achievability
-
-ASSUMPTIONS POLICY:
-If the goal is vague, assume the most common interpretation and proceed. Document your assumptions in the phase descriptions.
-
-Resources forecast should be a JSON string like: {"books": ["Book Title"], "tools": ["Tool Name"], "courses": ["Course Name"], "budget": "$X"}
-
-This is the STRATEGIC VIEW - keep it high-level and focused on major phases and milestones.`,
+				Content: systemPrompt,
 			},
 			{
 				Role:    "user",
@@ -299,7 +304,7 @@ This is the STRATEGIC VIEW - keep it high-level and focused on major phases and 
 	reqBody.Text.Format.Strict = true // Enforce ALL properties must be provided
 
 	// Make the HTTP request to OpenAI and return raw JSON response
-	return makeOpenAIRequest(reqBody)
+	return makeOpenAIRequest(ctx, reqBody)
 }
 
 // generateMilestoneMap creates the tactical detailed plan aligned with the strategic macro map
@@ -311,7 +316,7 @@ This is the STRATEGIC VIEW - keep it high-level and focused on major phases and 
 // KEY DIFFERENCE FROM MACRO MAP:
 // - Macro map = "What phases and major milestones?" (weeks/months view)
 // - Milestone map = "What specific tasks this week?" (days/tasks view)
-func generateMilestoneMap(userPrompt string, macroMap *types.MacroMap) ([]byte, error) {
+func generateMilestoneMap(ctx context.Context, userPrompt string, macroMap *types.MacroMap) ([]byte, error) {
 	// Convert the macro map into a text summary to inject into the AI prompt
 	// This ensures the detailed tasks align with the strategic plan
 	macroContext := buildMacroContext(macroMap)
@@ -435,49 +440,49 @@ func generateMilestoneMap(userPrompt string, macroMap *types.MacroMap) ([]byte, 
 	// This is the KEY connection between step 1 (macro) and step 2 (milestone)
 	systemPrompt := fmt.Sprintf(`You are a Goal Achievement Coach Agent focused on creating detailed, actionable tactical plans.
 
-CORE DIRECTIVES:
-- Be thorough: Break down complex actions into clear, achievable steps
-- Be specific: Every task should have concrete actions, not vague suggestions
-- Be realistic: Account for learning time, practice, and potential setbacks
-- Be empowering: Include rationales that help users understand WHY each task matters
+									CORE DIRECTIVES:
+									- Be thorough: Break down complex actions into clear, achievable steps
+									- Be specific: Every task should have concrete actions, not vague suggestions
+									- Be realistic: Account for learning time, practice, and potential setbacks
+									- Be empowering: Include rationales that help users understand WHY each task matters
 
-STRATEGIC CONTEXT (from macro map):
-%s
+									STRATEGIC CONTEXT (from macro map):
+									%s
 
-YOUR TASK - TACTICAL PLANNING (MILESTONE MAP):
-Generate EXACTLY 1 detailed milestone representing the FIRST actionable phase (typically 1-2 weeks) that aligns with the first macro milestone above.
+									YOUR TASK - TACTICAL PLANNING (MILESTONE MAP):
+									Generate EXACTLY 1 detailed milestone representing the FIRST actionable phase (typically 1-2 weeks) that aligns with the first macro milestone above.
 
-MILESTONE REQUIREMENTS:
-- Create 10-14 specific, actionable tasks that build toward the milestone goal
-- Tasks should progress logically - each building on previous work
-- Mix learning tasks with practice/application tasks
-- Include validation/checkpoint tasks to measure progress
+									MILESTONE REQUIREMENTS:
+									- Create 10-14 specific, actionable tasks that build toward the milestone goal
+									- Tasks should progress logically - each building on previous work
+									- Mix learning tasks with practice/application tasks
+									- Include validation/checkpoint tasks to measure progress
 
-EACH TASK MUST INCLUDE:
-- Title: Clear, action-oriented (e.g., "Practice C Major Scale with Metronome")
-- Description: What this task involves and how to approach it
-- Rationale: Why this task matters for the overall goal (builds motivation and understanding)
-- Estimated minutes: Realistic time estimate (account for learning curve)
-- Dependencies: JSON array of prerequisite task titles (e.g., ["Task 1 Title", "Task 2 Title"] or [] for none)
-- Confidence: Your confidence in the estimate (low/medium/high)
-- Day: Which day in the milestone this task should be done (spread across 7-14 days)
-- 2-4 detailed steps: Granular instructions that remove ambiguity
+									EACH TASK MUST INCLUDE:
+									- Title: Clear, action-oriented (e.g., "Practice C Major Scale with Metronome")
+									- Description: What this task involves and how to approach it
+									- Rationale: Why this task matters for the overall goal (builds motivation and understanding)
+									- Estimated minutes: Realistic time estimate (account for learning curve)
+									- Dependencies: JSON array of prerequisite task titles (e.g., ["Task 1 Title", "Task 2 Title"] or [] for none)
+									- Confidence: Your confidence in the estimate (low/medium/high)
+									- Day: Which day in the milestone this task should be done (spread across 7-14 days)
+									- 2-4 detailed steps: Granular instructions that remove ambiguity
 
-TASK DESIGN PRINCIPLES:
-1. Start with foundational/easier tasks, progress to more complex
-2. Include both "learning" and "doing" tasks
-3. Build in practice and repetition for skill development
-4. Add checkpoint/validation tasks every 3-4 tasks
-5. Make dependencies realistic - don't over-constrain the sequence
-6. Spread tasks across days to allow for learning and practice time
+									TASK DESIGN PRINCIPLES:
+									1. Start with foundational/easier tasks, progress to more complex
+									2. Include both "learning" and "doing" tasks
+									3. Build in practice and repetition for skill development
+									4. Add checkpoint/validation tasks every 3-4 tasks
+									5. Make dependencies realistic - don't over-constrain the sequence
+									6. Spread tasks across days to allow for learning and practice time
 
-MESSAGE FIELD:
-Add a friendly, encouraging message that introduces the milestone and sets expectations (e.g., "Here's your first milestone! This will build your foundation...")
+									MESSAGE FIELD:
+									Add a friendly, encouraging message that introduces the milestone and sets expectations (e.g., "Here's your first milestone! This will build your foundation...")
 
-FORMATTING:
-- Set all 'completed' and 'reached' fields to false (user hasn't started yet)
-- Day numbers should be sequential starting from day 1
-- Dependencies should be exact task titles from earlier tasks in the list`, macroContext)
+									FORMATTING:
+									- Set all 'completed' and 'reached' fields to false (user hasn't started yet)
+									- Day numbers should be sequential starting from day 1
+									- Dependencies should be exact task titles from earlier tasks in the list`, macroContext)
 
 	reqBody := AIRequest{
 		Model: "gpt-5-mini",
@@ -498,7 +503,7 @@ FORMATTING:
 	reqBody.Text.Format.Schema = schema
 	reqBody.Text.Format.Strict = true
 
-	return makeOpenAIRequest(reqBody)
+	return makeOpenAIRequest(ctx, reqBody)
 }
 
 // buildMacroContext converts the MacroMap structure into a human-readable text summary
@@ -600,7 +605,7 @@ func parseMacroMapResponse(rawResp []byte, macroMap *types.MacroMap) error {
 // Handles authentication, timeouts, and error responses
 //
 // Used by both generateMacroMap and generateMilestoneMap
-func makeOpenAIRequest(reqBody AIRequest) ([]byte, error) {
+func makeOpenAIRequest(ctx context.Context, reqBody AIRequest) ([]byte, error) {
 	// Serialize the request body to JSON
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -608,7 +613,7 @@ func makeOpenAIRequest(reqBody AIRequest) ([]byte, error) {
 	}
 
 	// Create HTTP POST request to OpenAI
-	req, err := http.NewRequestWithContext(context.Background(), "POST", openAIURL, bytes.NewBuffer(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", openAIURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -635,9 +640,6 @@ func makeOpenAIRequest(reqBody AIRequest) ([]byte, error) {
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("OpenAI error (status %d): %s", resp.StatusCode, string(respBytes))
 	}
-
-	// Debug: log the raw response
-	fmt.Printf("OpenAI Response (status %d): %s\n", resp.StatusCode, string(respBytes))
 
 	// Return raw response bytes for parsing by caller
 	return respBytes, nil

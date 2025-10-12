@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"dr/server/agent"
+	"dr/server/log"
 	"dr/server/types"
 	"fmt"
-	"log"
+
 	"net/http"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 )
 
 func AgentGenerate(c *gin.Context) {
+	ctx := c.Request.Context()
 	var goalReq types.GoalRequest
 
 	if !utils.BindJSONOrAbort(c, &goalReq) {
@@ -24,17 +26,18 @@ func AgentGenerate(c *gin.Context) {
 	fmt.Printf("Goal request received: %+v\n", goalReq)
 
 	start := time.Now()
+	log.Info(ctx, "Start Time:", start)
 
 	// Generate both macro map and milestone map
-	generated, err := agent.GenerateGoalFromStructure(goalReq)
+	generated, err := agent.GenerateGoalFromStructure(ctx, goalReq)
 	if err != nil {
-		log.Printf("Failed to generate roadmap: %v", err)
+		//log.Printf("Failed to generate roadmap: %v", err)
 		utils.InternalErrorResponse(c, err)
 		return
 	}
 
-	duration := time.Since(start)
-	log.Printf("Request took: %v", duration)
+	//duration := time.Since(start)
+	//log.Printf("Request took: %v", duration)
 
 	fmt.Printf("Generated roadmap with macro map: %+v\n", generated)
 

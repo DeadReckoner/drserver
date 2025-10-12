@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"dr/server/database"
+	"dr/server/log"
 	"dr/server/types"
 	"fmt"
-	"log"
 	"net/http"
 
 	"dr/server/api/utils"
@@ -13,6 +13,7 @@ import (
 )
 
 func CreateUser(c *gin.Context) {
+	ctx := c.Request.Context()
 	var newUser types.User
 
 	if !utils.BindJSONOrAbort(c, &newUser) {
@@ -29,10 +30,11 @@ func CreateUser(c *gin.Context) {
 
 	user := database.GetUser(c)
 	utils.DataResponse(c, http.StatusOK, user)
-	log.Println("User upserted successfully")
+	log.Info(ctx, "User upserted successfully")
 }
 
 func UpdateUser(c *gin.Context) {
+	ctx := c.Request.Context()
 	userID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
 		return
@@ -51,11 +53,14 @@ func UpdateUser(c *gin.Context) {
 
 	user := database.GetUser(c)
 	utils.DataResponse(c, http.StatusOK, user)
-	log.Println("User updated successfully")
+	log.Info(ctx, "User updated successfully")
 }
 
 func GetUser(c *gin.Context) {
+	ctx := c.Request.Context()
 	user := database.GetUser(c)
+
+	log.Info(ctx, "User: ", user)
 	if user.UserID == "" {
 		utils.NotFoundResponse(c, "User")
 		return
@@ -65,6 +70,7 @@ func GetUser(c *gin.Context) {
 }
 
 func DeleteUser(c *gin.Context) {
+	ctx := c.Request.Context()
 	userID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
 		return
@@ -79,7 +85,7 @@ func DeleteUser(c *gin.Context) {
 	}
 
 	utils.MessageResponse(c, http.StatusOK, "User deleted successfully")
-	log.Println("User deleted successfully")
+	log.Info(ctx, "User deleted successfully")
 }
 
 func SearchUsers(c *gin.Context) {

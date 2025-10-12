@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"dr/server/database"
+	"dr/server/log"
 	"dr/server/types"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -14,6 +14,7 @@ import (
 )
 
 func CreateRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
 	var newRoadmap types.Roadmap
 
 	if !utils.BindJSONOrAbort(c, &newRoadmap) {
@@ -35,7 +36,7 @@ func CreateRoadmap(c *gin.Context) {
 	}
 
 	utils.DataResponse(c, http.StatusCreated, createdRoadmap)
-	log.Println("Roadmap created successfully")
+	log.Info(ctx, "Roadmap created successfully")
 }
 
 func GetRoadmapsByUser(c *gin.Context) {
@@ -73,6 +74,7 @@ func GetRoadmap(c *gin.Context) {
 }
 
 func UpdateRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 	var updatedRoadmap types.Roadmap
 
@@ -89,10 +91,11 @@ func UpdateRoadmap(c *gin.Context) {
 	}
 
 	utils.DataResponse(c, http.StatusOK, roadmap)
-	log.Println("Roadmap updated successfully")
+	log.Info(ctx, "Roadmap updated successfully")
 }
 
 func DeleteRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
 	err := database.DeleteRoadmap(c, roadmapID)
@@ -102,7 +105,7 @@ func DeleteRoadmap(c *gin.Context) {
 	}
 
 	utils.MessageResponse(c, http.StatusOK, "Roadmap deleted successfully")
-	log.Println("Roadmap deleted successfully")
+	log.Info(ctx, "Roadmap deleted successfully")
 }
 
 func GetMilestonesByRoadmap(c *gin.Context) {
@@ -124,6 +127,7 @@ func GetMilestone(c *gin.Context) {
 }
 
 func UpdateMilestone(c *gin.Context) {
+	ctx := c.Request.Context()
 	milestoneID := c.Param("milestoneid")
 	var updatedMilestone types.Milestone
 
@@ -138,10 +142,11 @@ func UpdateMilestone(c *gin.Context) {
 	}
 
 	utils.DataResponse(c, http.StatusOK, milestone)
-	log.Println("Milestone updated successfully")
+	log.Info(ctx, "Milestone updated successfully")
 }
 
 func CreateMilestone(c *gin.Context) {
+	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 	var newMilestone types.Milestone
 
@@ -158,10 +163,11 @@ func CreateMilestone(c *gin.Context) {
 	}
 
 	utils.DataResponse(c, http.StatusCreated, createdMilestone)
-	log.Println("Milestone created successfully")
+	log.Info(ctx, "Milestone created successfully")
 }
 
 func DeleteMilestone(c *gin.Context) {
+	ctx := c.Request.Context()
 	milestoneID := c.Param("milestoneid")
 
 	err := database.DeleteMilestone(c, milestoneID)
@@ -171,10 +177,11 @@ func DeleteMilestone(c *gin.Context) {
 	}
 
 	utils.MessageResponse(c, http.StatusOK, "Milestone deleted successfully")
-	log.Println("Milestone deleted successfully")
+	log.Info(ctx, "Milestone deleted successfully")
 }
 
 func StartRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 	roadmap := database.GetRoadmap(c, roadmapID)
 
@@ -190,15 +197,15 @@ func StartRoadmap(c *gin.Context) {
 		fmt.Println("starting milestone ", milestone.Day)
 		roadmap.Milestones[index] = dateMilestones(c, roadmap.StartDate, milestone)
 		for taskIndex, task := range milestone.Tasks {
-			fmt.Println("starting task ", task.Day)
 			roadmap.Milestones[index].Tasks[taskIndex] = dateTasks(c, roadmap.StartDate, task)
+			log.Info(ctx, "Setting Task Date: ", task.Day, task.Date)
 		}
 	}
 
 	updatedRoadmap := database.UpdateRoadmap(c, roadmapID, roadmap)
 
 	utils.DataResponse(c, http.StatusOK, updatedRoadmap)
-	log.Println("Roadmap started successfully")
+	log.Info(ctx, "Roadmap started successfully")
 }
 
 func dateMilestones(c *gin.Context, startDate time.Time, milestone types.Milestone) types.Milestone {
@@ -218,6 +225,7 @@ func dateTasks(c *gin.Context, startDate time.Time, task types.Task) types.Task 
 // Macro Map handlers
 
 func CreateMacroMap(c *gin.Context) {
+	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 	var newMacroMap types.MacroMap
 
@@ -234,7 +242,7 @@ func CreateMacroMap(c *gin.Context) {
 	}
 
 	utils.DataResponse(c, http.StatusCreated, createdMacroMap)
-	log.Println("Macro map created successfully")
+	log.Info(ctx, "Macro map created successfully")
 }
 
 func GetMacroMap(c *gin.Context) {
@@ -248,4 +256,3 @@ func GetMacroMap(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusOK, macroMap)
 }
-
