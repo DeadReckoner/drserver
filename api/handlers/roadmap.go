@@ -27,6 +27,9 @@ func CreateRoadmap(c *gin.Context) {
 		newRoadmap.Type = "custom_made"
 	}
 
+	// Set start_date to null (zero time) - it will be set when the roadmap is started
+	newRoadmap.StartDate = time.Time{}
+
 	fmt.Printf("Roadmap received: %+v\n", newRoadmap)
 
 	createdRoadmap, err := database.CreateRoadmap(c, newRoadmap)

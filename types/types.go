@@ -91,7 +91,7 @@ type MacroMilestone struct {
 	OrderIndex          int     `json:"order_index"`
 
 	// Resources forecast stored as JSONB
-	ResourcesForecast   string  `gorm:"type:jsonb" json:"resources_forecast,omitempty"`
+	ResourcesForecast   *string `gorm:"type:jsonb" json:"resources_forecast,omitempty"`
 
 	// Related spikes and risks
 	Spikes              []Spike `gorm:"foreignKey:MacroMilestoneID;constraint:OnDelete:CASCADE;" json:"spikes,omitempty"`
@@ -143,7 +143,7 @@ type Task struct {
 	// New fields from Milestone Map spec
 	Rationale   string    `json:"rationale,omitempty"`
 	EstMinutes  int       `json:"est_minutes,omitempty"`
-	Dependencies string   `gorm:"type:jsonb" json:"dependencies,omitempty"`
+	Dependencies *string  `gorm:"type:jsonb" json:"dependencies,omitempty"`
 	Confidence  string    `json:"confidence,omitempty"`
 
 	Day         int       `json:"day"`
