@@ -120,8 +120,8 @@ func DeleteUser(c *gin.Context) error {
 	return nil
 }
 
-// GetTasks by id with optional date filtering
-func GetTasks(c *gin.Context, startDate, endDate string) []types.Task {
+// GetTasks by id with optional date and roadmap filtering
+func GetTasks(c *gin.Context, startDate, endDate, roadmapID string) []types.Task {
 	var tasks []types.Task
 
 	user_id, exists := c.Get("user_id")
@@ -130,6 +130,11 @@ func GetTasks(c *gin.Context, startDate, endDate string) []types.Task {
 	}
 
 	query := db.Debug().Where("user_id = ?", user_id)
+
+	// Apply roadmap filtering if roadmap_id is provided
+	if roadmapID != "" {
+		query = query.Where("roadmap_id = ?", roadmapID)
+	}
 
 	// Apply date filtering if start_date is provided
 	if startDate != "" {
@@ -197,9 +202,8 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 	for i := range rm.Milestones {
 		rm.Milestones[i].UserID = rm.UserID
 		for j := range rm.Milestones[i].Tasks {
-
 			rm.Milestones[i].Tasks[j].UserID = rm.UserID
-
+			rm.Milestones[i].Tasks[j].RoadmapID = rm.RoadmapID
 		}
 	}
 
@@ -556,6 +560,14 @@ func CreateTask(c *gin.Context, task types.Task) (types.Task, error) {
 
 	task.UserID = user_id.(string)
 
+	// Get roadmap_id from milestone if not provided
+	if task.RoadmapID == "" && task.MilestoneID != "" {
+		var milestone types.Milestone
+		if err := db.Where("milestone_id = ?", task.MilestoneID).First(&milestone).Error; err == nil {
+			task.RoadmapID = milestone.RoadmapID
+		}
+	}
+
 	for i := range task.Steps {
 		task.Steps[i].TaskID = task.TaskID
 	}
@@ -717,6 +729,7 @@ func CreateMilestone(c *gin.Context, roadmapID string, milestone types.Milestone
 
 	for i := range milestone.Tasks {
 		milestone.Tasks[i].UserID = milestone.UserID
+		milestone.Tasks[i].RoadmapID = milestone.RoadmapID
 		milestone.Tasks[i].MilestoneID = milestone.MilestoneID
 		for j := range milestone.Tasks[i].Steps {
 			milestone.Tasks[i].Steps[j].TaskID = milestone.Tasks[i].TaskID

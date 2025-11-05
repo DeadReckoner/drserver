@@ -41,6 +41,16 @@ func setupUserRoutes(rg *gin.RouterGroup) {
 	}
 }
 
+func setupFriendRoutes(rg *gin.RouterGroup) {
+	friends := rg.Group("/friends")
+	{
+		friends.GET("")
+		friends.DELETE("/:id")
+		friends.POST("/request/:id", handlers.CreateFriendRequest)
+		friends.GET("/requests", handlers.GetFriendRequests)
+	}
+}
+
 func setupRoadmapRoutes(rg *gin.RouterGroup) {
 	roadmaps := rg.Group("/roadmaps")
 	{

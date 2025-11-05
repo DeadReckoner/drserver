@@ -54,7 +54,8 @@ Create a new user.
 {
   "first_name": "John",
   "last_name": "Doe",
-  "email": "john.doe@example.com"
+  "email": "john.doe@example.com",
+  "phone_number": "+1-555-123-4567"
 }
 ```
 
@@ -66,6 +67,7 @@ Create a new user.
     "first_name": "John",
     "last_name": "Doe",
     "email": "john.doe@example.com",
+    "phone_number": "+1-555-123-4567",
     "CreatedAt": "2024-01-01T10:00:00Z"
   }
 }
@@ -82,6 +84,7 @@ Get current authenticated user information.
     "first_name": "John",
     "last_name": "Doe",
     "email": "john.doe@example.com",
+    "phone_number": "+1-555-123-4567",
     "CreatedAt": "2024-01-01T10:00:00Z"
   }
 }
@@ -105,7 +108,8 @@ Update user information.
 {
   "first_name": "Jane",
   "last_name": "Smith",
-  "email": "jane.smith@example.com"
+  "email": "jane.smith@example.com",
+  "phone_number": "+1-555-987-6543"
 }
 ```
 
@@ -117,6 +121,7 @@ Update user information.
     "first_name": "Jane",
     "last_name": "Smith",
     "email": "jane.smith@example.com",
+    "phone_number": "+1-555-987-6543",
     "CreatedAt": "2024-01-01T10:00:00Z"
   }
 }
@@ -361,6 +366,7 @@ Get all tasks for a specific milestone.
   "data": [
     {
       "task_id": "550e8400-e29b-41d4-a716-446655440003",
+      "roadmap_id": "550e8400-e29b-41d4-a716-446655440001",
       "milestone_id": "550e8400-e29b-41d4-a716-446655440002",
       "user_id": "550e8400-e29b-41d4-a716-446655440000",
       "title": "Learn HTML Tags",
@@ -383,6 +389,7 @@ Create a new task.
 **Request Body:**
 ```json
 {
+  "roadmap_id": "550e8400-e29b-41d4-a716-446655440001",
   "milestone_id": "550e8400-e29b-41d4-a716-446655440002",
   "title": "Learn HTML Tags",
   "description": "Study common HTML tags and their usage",
@@ -390,11 +397,14 @@ Create a new task.
 }
 ```
 
+**Note:** `roadmap_id` is optional - it will be automatically derived from the milestone if not provided.
+
 **Response (201 Created):**
 ```json
 {
   "data": {
     "task_id": "550e8400-e29b-41d4-a716-446655440003",
+    "roadmap_id": "550e8400-e29b-41d4-a716-446655440001",
     "milestone_id": "550e8400-e29b-41d4-a716-446655440002",
     "user_id": "550e8400-e29b-41d4-a716-446655440000",
     "title": "Learn HTML Tags",
@@ -406,11 +416,20 @@ Create a new task.
 }
 ```
 
-### GET /api/v1/tasks/user/:userid
-Get all tasks for a specific user.
+### GET /api/v1/tasks/user
+Get all tasks for the current authenticated user with optional filters.
 
-**URL Parameters:**
-- `userid` (UUID) - User ID
+**Query Parameters:**
+- `start_date` (optional) - Filter tasks by start date (format: YYYY-MM-DD)
+- `end_date` (optional) - Filter tasks by end date (format: YYYY-MM-DD)
+- `roadmap_id` (optional) - Filter tasks by roadmap ID (UUID)
+
+**Examples:**
+- Get all tasks: `GET /api/v1/tasks/user`
+- Get tasks for a specific date: `GET /api/v1/tasks/user?start_date=2024-01-01`
+- Get tasks in a date range: `GET /api/v1/tasks/user?start_date=2024-01-01&end_date=2024-01-31`
+- Get tasks for a roadmap: `GET /api/v1/tasks/user?roadmap_id=550e8400-e29b-41d4-a716-446655440001`
+- Combine filters: `GET /api/v1/tasks/user?roadmap_id=550e8400-e29b-41d4-a716-446655440001&start_date=2024-01-01`
 
 **Response (200 OK):**
 ```json
@@ -418,6 +437,7 @@ Get all tasks for a specific user.
   "data": [
     {
       "task_id": "550e8400-e29b-41d4-a716-446655440003",
+      "roadmap_id": "550e8400-e29b-41d4-a716-446655440001",
       "milestone_id": "550e8400-e29b-41d4-a716-446655440002",
       "user_id": "550e8400-e29b-41d4-a716-446655440000",
       "title": "Learn HTML Tags",
@@ -441,6 +461,7 @@ Get a specific task by ID.
 {
   "data": {
     "task_id": "550e8400-e29b-41d4-a716-446655440003",
+    "roadmap_id": "550e8400-e29b-41d4-a716-446655440001",
     "milestone_id": "550e8400-e29b-41d4-a716-446655440002",
     "user_id": "550e8400-e29b-41d4-a716-446655440000",
     "title": "Learn HTML Tags",
@@ -472,6 +493,7 @@ Update a task.
 {
   "data": {
     "task_id": "550e8400-e29b-41d4-a716-446655440003",
+    "roadmap_id": "550e8400-e29b-41d4-a716-446655440001",
     "milestone_id": "550e8400-e29b-41d4-a716-446655440002",
     "user_id": "550e8400-e29b-41d4-a716-446655440000",
     "title": "Master HTML Tags",
@@ -633,8 +655,9 @@ WebSocket connection for real-time messaging.
 {
   "user_id": "string (UUID)",
   "first_name": "string",
-  "last_name": "string", 
+  "last_name": "string",
   "email": "string",
+  "phone_number": "string",
   "CreatedAt": "datetime"
 }
 ```
@@ -671,6 +694,7 @@ WebSocket connection for real-time messaging.
 ```json
 {
   "task_id": "string (UUID)",
+  "roadmap_id": "string (UUID)",
   "milestone_id": "string (UUID)",
   "user_id": "string (UUID)",
   "title": "string",

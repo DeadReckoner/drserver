@@ -39,14 +39,16 @@ type DateRange struct {
 func GetTasks(c *gin.Context) {
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
+	roadmapID := c.Query("roadmap_id")
 
 	dateRange := DateRange{
 		StartDate: startDate,
 		EndDate:   endDate,
 	}
 	fmt.Println("date range: ", dateRange)
+	fmt.Println("roadmap_id: ", roadmapID)
 
-	tasks := database.GetTasks(c, startDate, endDate)
+	tasks := database.GetTasks(c, startDate, endDate, roadmapID)
 	utils.DataResponse(c, http.StatusOK, tasks)
 }
 

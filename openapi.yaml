@@ -504,18 +504,35 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/v1/tasks/user/{userid}:
+  /api/v1/tasks/user:
     get:
-      summary: Get tasks for a user
+      summary: Get tasks for current user with optional filters
       tags: [Tasks]
       parameters:
-        - name: userid
-          in: path
-          required: true
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Filter tasks by start date (format YYYY-MM-DD)
+          example: "2024-01-01"
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Filter tasks by end date (format YYYY-MM-DD). Used with start_date for range filtering.
+          example: "2024-01-31"
+        - name: roadmap_id
+          in: query
+          required: false
           schema:
             type: string
             format: uuid
-          description: User ID
+          description: Filter tasks by roadmap ID
+          example: "123e4567-e89b-12d3-a456-426614174000"
       responses:
         '200':
           description: Tasks retrieved successfully
@@ -1055,6 +1072,9 @@ components:
           type: string
           format: email
           example: "john.doe@example.com"
+        phone_number:
+          type: string
+          example: "+1-555-123-4567"
         CreatedAt:
           type: string
           format: date-time
@@ -1072,6 +1092,9 @@ components:
           type: string
           format: email
           example: "john.doe@example.com"
+        phone_number:
+          type: string
+          example: "+1-555-123-4567"
 
     # Roadmap Management
     Roadmap:
@@ -1223,6 +1246,10 @@ components:
           type: string
           format: uuid
           example: "123e4567-e89b-12d3-a456-426614174000"
+        roadmap_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
         milestone_id:
           type: string
           format: uuid
@@ -1268,6 +1295,11 @@ components:
     TaskInput:
       type: object
       properties:
+        roadmap_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+          description: Optional - will be automatically derived from milestone if not provided
         milestone_id:
           type: string
           format: uuid

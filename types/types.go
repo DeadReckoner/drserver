@@ -5,11 +5,12 @@ import (
 )
 
 type User struct {
-	UserID    string `gorm:"type:uuid;primaryKey;column:user_id" json:"user_id"`
-	FirstName string `gorm:"column:first_name" json:"first_name"`
-	LastName  string `gorm:"column:last_name" json:"last_name"`
-	Email     string `gorm:"column:email" json:"email"`
-	CreatedAt time.Time
+	UserID      string `gorm:"type:uuid;primaryKey;column:user_id" json:"user_id"`
+	FirstName   string `gorm:"column:first_name" json:"first_name"`
+	LastName    string `gorm:"column:last_name" json:"last_name"`
+	Email       string `gorm:"column:email" json:"email"`
+	PhoneNumber string `gorm:"column:phone_number" json:"phone_number"`
+	CreatedAt   time.Time
 }
 
 type Prompt struct {
@@ -135,6 +136,7 @@ type Milestone struct {
 
 type Task struct {
 	TaskID      string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"task_id"`
+	RoadmapID   string    `gorm:"type:uuid" json:"roadmap_id"`
 	MilestoneID string    `gorm:"type:uuid" json:"milestone_id"`
 	UserID      string    `gorm:"type:uuid" json:"user_id"`
 	Title       string    `json:"title"`
