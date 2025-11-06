@@ -13,6 +13,48 @@ type User struct {
 	CreatedAt   time.Time
 }
 
+type Friendship struct {
+	ID           string                 `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:id" json:"id"`
+	RequesterID  string                 `gorm:"type:uuid;column:requester_id;not null" json:"requester_id"`
+	AddresseeID  string                 `gorm:"type:uuid;column:addressee_id;not null" json:"addressee_id"`
+	Status       string                 `gorm:"column:status;default:pending" json:"status"`
+	Restrictions map[string]interface{} `gorm:"type:jsonb;column:restrictions" json:"restrictions,omitempty"`
+	CreatedAt    time.Time              `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt    *time.Time             `gorm:"column:updated_at" json:"updated_at,omitempty"`
+
+	// Relationships for preloading
+	Requester *User `gorm:"foreignKey:RequesterID;references:UserID" json:"requester,omitempty"`
+	Addressee *User `gorm:"foreignKey:AddresseeID;references:UserID" json:"addressee,omitempty"`
+}
+
+func (Friendship) TableName() string {
+	return "friendships"
+}
+
+type UserSearchResult struct {
+	UserID           string `json:"user_id"`
+	FirstName        string `json:"first_name"`
+	LastName         string `json:"last_name"`
+	Email            string `json:"email"`
+	FriendshipStatus string `json:"friendship_status"` // "accepted", "pending", or "none"
+}
+
+type UpdateFriendshipStatusRequest struct {
+	Status string `json:"status" binding:"required"` // "accepted" or "rejected"
+}
+
+type FriendResponse struct {
+	FriendshipID string    `json:"friendship_id"`
+	Friend       User      `json:"friend"`
+	Restrictions map[string]interface{} `json:"restrictions,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type FriendProfileResponse struct {
+	User             User      `json:"user"`
+	AllowedRoadmaps  []Roadmap `json:"allowed_roadmaps"`
+}
+
 type Prompt struct {
 	UserPrompt string `json:"user_prompt"`
 }

@@ -926,6 +926,285 @@ func SearchUsersByEmail(email string) []types.User {
 	return users
 }
 
+// GetFriendshipStatus returns the friendship status between two users
+// Returns "accepted", "pending", or "none"
+func GetFriendshipStatus(userID1, userID2 string) string {
+	var friendship types.Friendship
+	result := db.Where(
+		"((requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)) AND status IN (?, ?)",
+		userID1, userID2, userID2, userID1, "pending", "accepted",
+	).First(&friendship)
+
+	if result.Error != nil {
+		return "none"
+	}
+
+	return friendship.Status
+}
+
+// CreateFriendRequest creates a new friend request
+func CreateFriendRequest(c *gin.Context, addresseeID string) (types.Friendship, error) {
+	requesterID, exists := c.Get("user_id")
+	if !exists || requesterID == "" {
+		return types.Friendship{}, errors.New("missing or invalid user_id")
+	}
+
+	requesterIDStr := requesterID.(string)
+
+	// Validate addressee exists
+	var addressee types.User
+	if err := db.Where("user_id = ?", addresseeID).First(&addressee).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return types.Friendship{}, errors.New("addressee user not found")
+		}
+		return types.Friendship{}, err
+	}
+
+	// Check if trying to friend yourself
+	if requesterIDStr == addresseeID {
+		return types.Friendship{}, errors.New("cannot send friend request to yourself")
+	}
+
+	// Check if friendship already exists (in either direction)
+	var existingFriendship types.Friendship
+	result := db.Where(
+		"((requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)) AND status IN (?, ?)",
+		requesterIDStr, addresseeID, addresseeID, requesterIDStr, "pending", "accepted",
+	).First(&existingFriendship)
+
+	if result.Error == nil {
+		// Friendship already exists
+		if existingFriendship.Status == "accepted" {
+			return types.Friendship{}, errors.New("users are already friends")
+		}
+		return types.Friendship{}, errors.New("friend request already exists")
+	}
+
+	// Create new friend request
+	friendship := types.Friendship{
+		RequesterID: requesterIDStr,
+		AddresseeID: addresseeID,
+		Status:      "pending",
+	}
+
+	if err := db.Create(&friendship).Error; err != nil {
+		return types.Friendship{}, err
+	}
+
+	return friendship, nil
+}
+
+// GetFriendRequests returns all pending friend requests received by the user
+func GetFriendRequests(c *gin.Context) []types.Friendship {
+	var friendships []types.Friendship
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		log.Println("missing or invalid user_id")
+		return []types.Friendship{}
+	}
+
+	result := db.Where("addressee_id = ? AND status = ?", userID, "pending").
+		Preload("Requester").
+		Order("created_at DESC").
+		Find(&friendships)
+
+	if result.Error != nil {
+		log.Println("Error fetching friend requests:", result.Error)
+		return []types.Friendship{}
+	}
+
+	return friendships
+}
+
+// GetFriends returns all accepted friendships for the user
+func GetFriends(c *gin.Context) []types.Friendship {
+	var friendships []types.Friendship
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		log.Println("missing or invalid user_id")
+		return []types.Friendship{}
+	}
+
+	result := db.Where("(requester_id = ? OR addressee_id = ?) AND status = ?", userID, userID, "accepted").
+		Preload("Requester").
+		Preload("Addressee").
+		Order("created_at DESC").
+		Find(&friendships)
+
+	if result.Error != nil {
+		log.Println("Error fetching friends:", result.Error)
+		return []types.Friendship{}
+	}
+
+	return friendships
+}
+
+// GetFriendProfile returns a friend's profile with allowed roadmaps
+func GetFriendProfile(c *gin.Context, friendUserID string) (types.User, []types.Roadmap, error) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return types.User{}, nil, errors.New("missing or invalid user_id")
+	}
+
+	userIDStr := userID.(string)
+
+	// Fetch the friendship between current user and friend
+	var friendship types.Friendship
+	result := db.Where(
+		"((requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)) AND status = ?",
+		userIDStr, friendUserID, friendUserID, userIDStr, "accepted",
+	).First(&friendship)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return types.User{}, nil, errors.New("you are not friends with this user")
+		}
+		return types.User{}, nil, result.Error
+	}
+
+	// Get friend's user info
+	var friendUser types.User
+	if err := db.Where("user_id = ?", friendUserID).First(&friendUser).Error; err != nil {
+		return types.User{}, nil, err
+	}
+
+	// Get allowed roadmaps
+	var roadmaps []types.Roadmap
+
+	// Check if there are restrictions
+	if friendship.Restrictions != nil {
+		if allowedIDs, ok := friendship.Restrictions["allowed_roadmap_ids"].([]interface{}); ok && len(allowedIDs) > 0 {
+			// Convert interface{} slice to string slice
+			roadmapIDs := make([]string, 0, len(allowedIDs))
+			for _, id := range allowedIDs {
+				if strID, ok := id.(string); ok {
+					roadmapIDs = append(roadmapIDs, strID)
+				}
+			}
+
+			// Get only allowed roadmaps
+			if len(roadmapIDs) > 0 {
+				db.Where("user_id = ? AND roadmap_id IN ?", friendUserID, roadmapIDs).
+					Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+						return db.Order("day ASC")
+					}).
+					Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+						return db.Order("day ASC")
+					}).
+					Find(&roadmaps)
+			}
+		} else {
+			// No allowed_roadmap_ids specified, return all roadmaps
+			db.Where("user_id = ?", friendUserID).
+				Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+					return db.Order("day ASC")
+				}).
+				Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+					return db.Order("day ASC")
+				}).
+				Find(&roadmaps)
+		}
+	} else {
+		// No restrictions, return all roadmaps
+		db.Where("user_id = ?", friendUserID).
+			Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+				return db.Order("day ASC")
+			}).
+			Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+				return db.Order("day ASC")
+			}).
+			Find(&roadmaps)
+	}
+
+	return friendUser, roadmaps, nil
+}
+
+// RemoveFriend deletes a friendship between the current user and the specified friend
+func RemoveFriend(c *gin.Context, friendUserID string) error {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return errors.New("missing or invalid user_id")
+	}
+
+	userIDStr := userID.(string)
+
+	// Find the friendship in either direction
+	var friendship types.Friendship
+	result := db.Where(
+		"((requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?))",
+		userIDStr, friendUserID, friendUserID, userIDStr,
+	).First(&friendship)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return errors.New("friendship not found")
+		}
+		return result.Error
+	}
+
+	// Delete the friendship
+	if err := db.Delete(&friendship).Error; err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// UpdateFriendshipStatus updates the status of a friend request (accept or reject)
+func UpdateFriendshipStatus(c *gin.Context, friendshipID string, newStatus string) (types.Friendship, error) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return types.Friendship{}, errors.New("missing or invalid user_id")
+	}
+
+	userIDStr := userID.(string)
+
+	// Validate status
+	if newStatus != "accepted" && newStatus != "rejected" {
+		return types.Friendship{}, errors.New("invalid status: must be 'accepted' or 'rejected'")
+	}
+
+	// Fetch the friendship
+	var friendship types.Friendship
+	if err := db.Where("id = ?", friendshipID).First(&friendship).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return types.Friendship{}, errors.New("friendship not found")
+		}
+		return types.Friendship{}, err
+	}
+
+	// Verify current user is the addressee
+	if friendship.AddresseeID != userIDStr {
+		return types.Friendship{}, errors.New("only the addressee can respond to a friend request")
+	}
+
+	// Verify status is pending
+	if friendship.Status != "pending" {
+		return types.Friendship{}, errors.New("friend request is not pending")
+	}
+
+	// If rejected, delete the friendship
+	if newStatus == "rejected" {
+		if err := db.Delete(&friendship).Error; err != nil {
+			return types.Friendship{}, err
+		}
+		// Return the friendship with rejected status for the response
+		friendship.Status = "rejected"
+		return friendship, nil
+	}
+
+	// If accepted, update status
+	now := time.Now()
+	friendship.Status = "accepted"
+	friendship.UpdatedAt = &now
+
+	if err := db.Save(&friendship).Error; err != nil {
+		return types.Friendship{}, err
+	}
+
+	return friendship, nil
+}
+
 // CreateMacroMap creates a macro map with all its phases, milestones, spikes, and risks
 func CreateMacroMap(c *gin.Context, roadmapID string, macroMap types.MacroMap) (types.MacroMap, error) {
 	user_id, exists := c.Get("user_id")

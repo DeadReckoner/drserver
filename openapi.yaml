@@ -58,6 +58,203 @@ paths:
                     type: string
                     example: ok
 
+  # Friend Management
+  /api/v1/friends/search:
+    get:
+      summary: Search users by email
+      tags: [Friends]
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Email to search (partial match)
+          example: "john@example.com"
+      responses:
+        '200':
+          description: Search results with friendship status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/UserSearchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/friends/requests:
+    get:
+      summary: Get pending friend requests
+      description: Returns all pending friend requests received by the authenticated user
+      tags: [Friends]
+      responses:
+        '200':
+          description: Friend requests retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Friendship'
+
+  /api/v1/friends/request/{id}:
+    post:
+      summary: Send friend request
+      tags: [Friends]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Target user ID to send friend request to
+      responses:
+        '201':
+          description: Friend request sent successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Friendship'
+        '400':
+          description: Invalid request (e.g., trying to friend yourself)
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Friend request already exists or users are already friends
+
+  /api/v1/friends/{id}:
+    patch:
+      summary: Update friend request status
+      description: Accept or reject a pending friend request (only addressee can update)
+      tags: [Friends]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Friendship ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [accepted, rejected]
+                  description: New status for the friend request
+                  example: "accepted"
+      responses:
+        '200':
+          description: Friend request status updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Friendship'
+        '400':
+          description: Invalid status or request is not pending
+        '403':
+          description: Only the addressee can respond to a friend request
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Remove friendship
+      description: Delete friendship between you and the specified user
+      tags: [Friends]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Friend's user ID
+      responses:
+        '200':
+          description: Friendship removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/friends:
+    get:
+      summary: Get list of friends
+      description: Returns all accepted friendships with friend profile information
+      tags: [Friends]
+      responses:
+        '200':
+          description: Friends list retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/FriendResponse'
+
+  /api/v1/friends/{id}/profile:
+    get:
+      summary: Get friend's profile with allowed roadmaps
+      description: Returns friend's profile and roadmaps they've allowed you to see based on restrictions
+      tags: [Friends]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Friend's user ID
+      responses:
+        '200':
+          description: Friend profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/FriendProfileResponse'
+        '403':
+          description: You are not friends with this user
+
   # User Management
   /api/v1/users:
     post:
@@ -102,6 +299,36 @@ paths:
           $ref: '#/components/responses/NotFound'
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/users/search:
+    get:
+      summary: Search users by email
+      description: Search for users by email (partial match). For friend-related searches with friendship status, use /api/v1/friends/search instead.
+      tags: [Users]
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Email to search (partial match)
+          example: "john@example.com"
+      responses:
+        '200':
+          description: Users found
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /api/v1/users/{id}:
     patch:
@@ -1096,6 +1323,107 @@ components:
           type: string
           example: "+1-555-123-4567"
 
+    # Friend Management
+    Friendship:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        requester_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        addressee_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174001"
+        status:
+          type: string
+          enum: [pending, accepted, rejected, blocked]
+          example: "pending"
+        restrictions:
+          type: object
+          nullable: true
+          description: JSONB object containing friendship restrictions
+          properties:
+            allowed_roadmap_ids:
+              type: array
+              items:
+                type: string
+                format: uuid
+              example: ["roadmap-uuid-1", "roadmap-uuid-2"]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        requester:
+          $ref: '#/components/schemas/User'
+          description: Requester user details (only when preloaded)
+        addressee:
+          $ref: '#/components/schemas/User'
+          description: Addressee user details (only when preloaded)
+
+    UserSearchResult:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        first_name:
+          type: string
+          example: "John"
+        last_name:
+          type: string
+          example: "Doe"
+        email:
+          type: string
+          format: email
+          example: "john.doe@example.com"
+        friendship_status:
+          type: string
+          enum: [none, pending, accepted]
+          description: Current friendship status with this user
+          example: "none"
+
+    FriendResponse:
+      type: object
+      properties:
+        friendship_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        friend:
+          $ref: '#/components/schemas/User'
+        restrictions:
+          type: object
+          nullable: true
+          properties:
+            allowed_roadmap_ids:
+              type: array
+              items:
+                type: string
+                format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    FriendProfileResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        allowed_roadmaps:
+          type: array
+          items:
+            $ref: '#/components/schemas/Roadmap'
+          description: Roadmaps this friend has allowed you to see
+
     # Roadmap Management
     Roadmap:
       type: object
@@ -1651,6 +1979,8 @@ tags:
     description: Health check endpoints
   - name: Users
     description: User management operations
+  - name: Friends
+    description: Friend management and social features (search, requests, profile sharing)
   - name: Roadmaps
     description: Roadmap management operations
   - name: Macro Map

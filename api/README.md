@@ -140,6 +140,296 @@ Delete a user.
 }
 ```
 
+### GET /api/v1/users/search
+Search for users by email (used internally by friend search).
+
+**Query Parameters:**
+- `email` (required) - Email to search (partial match)
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/users/search?email=john"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "user_id": "550e8400-e29b-41d4-a716-446655440000",
+      "first_name": "John",
+      "last_name": "Doe",
+      "email": "john.doe@example.com",
+      "phone_number": "+1-555-123-4567",
+      "CreatedAt": "2024-01-01T10:00:00Z"
+    }
+  ]
+}
+```
+
+**Note:** For friend-related searches with friendship status, use `/api/v1/friends/search` instead.
+
+---
+
+## Friend Management
+
+### GET /api/v1/friends/search
+Search for users by email with friendship status.
+
+**Query Parameters:**
+- `email` (required) - Email to search (partial match)
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/friends/search?email=john"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "user_id": "550e8400-e29b-41d4-a716-446655440000",
+      "first_name": "John",
+      "last_name": "Doe",
+      "email": "john.doe@example.com",
+      "friendship_status": "none"
+    },
+    {
+      "user_id": "550e8400-e29b-41d4-a716-446655440001",
+      "first_name": "Jane",
+      "last_name": "Smith",
+      "email": "jane.smith@example.com",
+      "friendship_status": "accepted"
+    }
+  ]
+}
+```
+
+**Friendship Status Values:**
+- `none` - No friendship relationship
+- `pending` - Friend request exists (sent or received)
+- `accepted` - Users are friends
+
+### POST /api/v1/friends/request/:id
+Send a friend request to another user.
+
+**URL Parameters:**
+- `id` (UUID) - Target user ID to send friend request to
+
+**Example Request:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/friends/request/550e8400-e29b-41d4-a716-446655440001"
+```
+
+**Response (201 Created):**
+```json
+{
+  "data": {
+    "id": "friendship-uuid",
+    "requester_id": "your-user-uuid",
+    "addressee_id": "target-user-uuid",
+    "status": "pending",
+    "restrictions": null,
+    "created_at": "2024-01-01T10:00:00Z",
+    "updated_at": null
+  }
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Trying to friend yourself
+- `404 Not Found` - Target user not found
+- `409 Conflict` - Friend request already exists or users are already friends
+
+### GET /api/v1/friends/requests
+Get all pending friend requests received by you.
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/friends/requests"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "id": "friendship-uuid",
+      "requester_id": "requester-user-uuid",
+      "addressee_id": "your-user-uuid",
+      "status": "pending",
+      "restrictions": null,
+      "created_at": "2024-01-01T10:00:00Z",
+      "updated_at": null,
+      "requester": {
+        "user_id": "requester-user-uuid",
+        "first_name": "Jane",
+        "last_name": "Smith",
+        "email": "jane.smith@example.com",
+        "phone_number": "+1-555-987-6543",
+        "CreatedAt": "2024-01-01T09:00:00Z"
+      }
+    }
+  ]
+}
+```
+
+### PATCH /api/v1/friends/:id
+Accept or reject a friend request (only addressee can update).
+
+**URL Parameters:**
+- `id` (UUID) - Friendship ID
+
+**Request Body:**
+```json
+{
+  "status": "accepted"
+}
+```
+or
+```json
+{
+  "status": "rejected"
+}
+```
+
+**Example Request (Accept):**
+```bash
+curl -X PATCH \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"status": "accepted"}' \
+  "http://localhost:8080/api/v1/friends/friendship-uuid"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": {
+    "id": "friendship-uuid",
+    "requester_id": "requester-user-uuid",
+    "addressee_id": "your-user-uuid",
+    "status": "accepted",
+    "restrictions": null,
+    "created_at": "2024-01-01T10:00:00Z",
+    "updated_at": "2024-01-01T10:30:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Invalid status or request is not pending
+- `403 Forbidden` - Only the addressee can respond to a friend request
+- `404 Not Found` - Friendship not found
+
+### GET /api/v1/friends
+Get list of all your friends with their profile information.
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/friends"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "friendship_id": "friendship-uuid",
+      "friend": {
+        "user_id": "friend-user-uuid",
+        "first_name": "Jane",
+        "last_name": "Smith",
+        "email": "jane.smith@example.com",
+        "phone_number": "+1-555-987-6543",
+        "CreatedAt": "2024-01-01T09:00:00Z"
+      },
+      "restrictions": {
+        "allowed_roadmap_ids": ["roadmap-uuid-1", "roadmap-uuid-2"]
+      },
+      "created_at": "2024-01-01T10:00:00Z"
+    }
+  ]
+}
+```
+
+### GET /api/v1/friends/:id/profile
+Get a friend's profile with roadmaps they've allowed you to see.
+
+**URL Parameters:**
+- `id` (UUID) - Friend's user ID
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/friends/550e8400-e29b-41d4-a716-446655440001/profile"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": {
+    "user": {
+      "user_id": "friend-user-uuid",
+      "first_name": "Jane",
+      "last_name": "Smith",
+      "email": "jane.smith@example.com",
+      "phone_number": "+1-555-987-6543",
+      "CreatedAt": "2024-01-01T09:00:00Z"
+    },
+    "allowed_roadmaps": [
+      {
+        "roadmap_id": "roadmap-uuid-1",
+        "user_id": "friend-user-uuid",
+        "goal": "Learn Go Programming",
+        "description": "Master Go in 90 days",
+        "days": 90,
+        "completed": false,
+        "start_date": "2024-01-01T00:00:00Z",
+        "milestones": [...]
+      }
+    ]
+  }
+}
+```
+
+**Roadmap Visibility Rules:**
+- If `restrictions.allowed_roadmap_ids` is specified, only those roadmaps are returned
+- If `restrictions` is null or empty, all of the friend's roadmaps are returned
+
+**Error Responses:**
+- `403 Forbidden` - You are not friends with this user
+
+### DELETE /api/v1/friends/:id
+Remove a friendship.
+
+**URL Parameters:**
+- `id` (UUID) - Friend's user ID
+
+**Example Request:**
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/friends/550e8400-e29b-41d4-a716-446655440001"
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Friendship removed successfully"
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Friendship not found
+
 ---
 
 ## Roadmap Management
@@ -662,6 +952,54 @@ WebSocket connection for real-time messaging.
 }
 ```
 
+### Friendship
+```json
+{
+  "id": "string (UUID)",
+  "requester_id": "string (UUID)",
+  "addressee_id": "string (UUID)",
+  "status": "string (pending|accepted|rejected|blocked)",
+  "restrictions": {
+    "allowed_roadmap_ids": ["string (UUID)"]
+  },
+  "created_at": "datetime",
+  "updated_at": "datetime (nullable)",
+  "requester": "User object (when preloaded)",
+  "addressee": "User object (when preloaded)"
+}
+```
+
+### UserSearchResult
+```json
+{
+  "user_id": "string (UUID)",
+  "first_name": "string",
+  "last_name": "string",
+  "email": "string",
+  "friendship_status": "string (none|pending|accepted)"
+}
+```
+
+### FriendResponse
+```json
+{
+  "friendship_id": "string (UUID)",
+  "friend": "User object",
+  "restrictions": {
+    "allowed_roadmap_ids": ["string (UUID)"]
+  },
+  "created_at": "datetime"
+}
+```
+
+### FriendProfileResponse
+```json
+{
+  "user": "User object",
+  "allowed_roadmaps": ["array of Roadmap objects"]
+}
+```
+
 ### Roadmap
 ```json
 {
@@ -759,3 +1097,9 @@ WebSocket connection for real-time messaging.
 4. Database operations use GORM with PostgreSQL
 5. WebSocket connections support real-time messaging
 6. AI agent functionality requires external AI service integration
+7. Friend management features:
+   - Friendships use UUID-based IDs for consistency
+   - RLS (Row Level Security) policies control data access
+   - Roadmap sharing is controlled via `restrictions.allowed_roadmap_ids`
+   - Only the addressee can accept/reject friend requests
+   - Either party can remove a friendship

@@ -25,6 +25,7 @@ func setupV1Routes(router *gin.Engine) {
 	v1.Use(middleware.AdminMiddleware())
 
 	setupUserRoutes(v1)
+	setupFriendRoutes(v1)
 	setupRoadmapRoutes(v1)
 	setupAgentRoutes(v1)
 	setupWebSocketRoutes(v1)
@@ -44,10 +45,13 @@ func setupUserRoutes(rg *gin.RouterGroup) {
 func setupFriendRoutes(rg *gin.RouterGroup) {
 	friends := rg.Group("/friends")
 	{
-		friends.GET("")
-		friends.DELETE("/:id")
-		friends.POST("/request/:id", handlers.CreateFriendRequest)
+		friends.GET("/search", handlers.SearchFriends)
 		friends.GET("/requests", handlers.GetFriendRequests)
+		friends.POST("/request/:id", utils.ValidateUUID("id"), handlers.CreateFriendRequest)
+		friends.GET("/:id/profile", utils.ValidateUUID("id"), handlers.GetFriendProfile)
+		friends.PATCH("/:id", utils.ValidateUUID("id"), handlers.UpdateFriendRequestStatus)
+		friends.GET("", handlers.GetFriends)
+		friends.DELETE("/:id", utils.ValidateUUID("id"), handlers.RemoveFriend)
 	}
 }
 
