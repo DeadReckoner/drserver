@@ -28,6 +28,7 @@ func setupV1Routes(router *gin.Engine) {
 	setupFriendRoutes(v1)
 	setupRoadmapRoutes(v1)
 	setupAgentRoutes(v1)
+	setupMessageThreadRoutes(v1)
 	setupWebSocketRoutes(v1)
 }
 
@@ -111,16 +112,17 @@ func setupAgentRoutes(rg *gin.RouterGroup) {
 }
 
 func setupMessageThreadRoutes(rg *gin.RouterGroup) {
-	message := rg.Group("/thread")
+	threads := rg.Group("/threads")
 	{
-		message.POST("", handlers.CreateThread)
+		threads.GET("", handlers.GetThreads)
+		threads.GET("/:threadid/messages", utils.ValidateUUID("threadid"), handlers.GetMessages)
 	}
 }
 
 func setupWebSocketRoutes(rg *gin.RouterGroup) {
 	ws := rg.Group("/ws")
 	{
-		ws.GET("/messages", handlers.WSHandler)
+		// Thread-specific WebSocket connection
 		ws.GET("/messages/:threadid", utils.ValidateUUID("threadid"), handlers.WSHandler)
 	}
 }

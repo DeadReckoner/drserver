@@ -61,3 +61,7 @@ func ConflictResponse(c *gin.Context, message string) {
 func BadRequestResponse(c *gin.Context, message string) {
 	ErrorResponse(c, http.StatusBadRequest, message)
 }
+
+func ForbiddenResponse(c *gin.Context, message string) {
+	ErrorResponse(c, http.StatusForbidden, message)
+}

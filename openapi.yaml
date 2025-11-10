@@ -1169,22 +1169,29 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  # WebSocket
-  /api/v1/ws/messages:
+  # Messaging - Threads
+  /api/v1/threads:
     get:
-      summary: WebSocket endpoint for real-time messages
-      tags: [WebSocket]
-      description: Upgrade to WebSocket connection for real-time communication
+      summary: Get all threads for current user
+      description: Returns all message threads where the user is a participant, ordered by most recent activity
+      tags: [Messaging]
       responses:
-        '101':
-          description: WebSocket connection established
-        '400':
-          description: Failed to upgrade to WebSocket
+        '200':
+          description: Threads retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Thread'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
-  /api/v1/ws/messages/{threadid}:
+  /api/v1/threads/{threadid}/messages:
     get:
-      summary: WebSocket endpoint for thread-specific messages
-      tags: [WebSocket]
+      summary: Get message history for a thread
+      description: Returns all messages in a thread. User must be a participant to access messages.
+      tags: [Messaging]
       parameters:
         - name: threadid
           in: path
@@ -1193,10 +1200,62 @@ paths:
             type: string
             format: uuid
           description: Thread ID
-      description: Upgrade to WebSocket connection for thread-specific real-time communication
+      responses:
+        '200':
+          description: Messages retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+        '403':
+          description: User is not a participant of this thread
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # WebSocket
+  /api/v1/ws/messages/{threadid}:
+    get:
+      summary: WebSocket endpoint for thread-specific real-time messages
+      tags: [WebSocket, Messaging]
+      parameters:
+        - name: threadid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Thread ID
+      description: |
+        Upgrade to WebSocket connection for thread-specific real-time messaging.
+
+        **Connection Flow:**
+        1. Client connects to websocket with thread ID
+        2. Server verifies user is a participant
+        3. Connection established to thread-specific room
+
+        **Sending Messages:**
+        Send JSON: `{"content": "Your message here"}`
+
+        **Receiving Messages:**
+        Receive JSON: `{"message_id": "uuid", "thread_id": "uuid", "user_id": "uuid", "content": "text", "created_at": "ISO8601"}`
+
+        **Features:**
+        - Messages are automatically persisted to database
+        - Only participants in the thread receive broadcasts
+        - Includes message ID and timestamp from database
       responses:
         '101':
           description: WebSocket connection established
+        '401':
+          description: Unauthorized - missing or invalid authentication
+        '403':
+          description: Forbidden - user is not a participant of this thread
         '400':
           description: Failed to upgrade to WebSocket
 
@@ -1973,6 +2032,62 @@ components:
         content:
           type: string
           example: "What kind of goal would you like to achieve?"
+
+    # Messaging
+    Thread:
+      type: object
+      properties:
+        thread_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        name:
+          type: string
+          nullable: true
+          description: Thread name (empty for direct messages)
+          example: ""
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T12:30:00Z"
+          description: Timestamp of most recent activity
+
+    ThreadMessage:
+      type: object
+      properties:
+        message_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        thread_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        content:
+          type: string
+          example: "Hello, how are you?"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T12:30:45Z"
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2024-01-01T12:31:00Z"
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
 
 tags:
   - name: Health

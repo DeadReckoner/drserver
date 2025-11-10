@@ -229,3 +229,22 @@ type ThreadParticipants struct {
 	LeftAt    time.Time `json:"left_at"`
 	Role      string    `json:"role"`
 }
+
+// Response types for messaging API
+
+type ThreadWithParticipants struct {
+	ThreadID     string    `json:"thread_id"`
+	Name         string    `json:"name"`
+	Participants []User    `json:"participants"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type MessageResponse struct {
+	MessageID string    `json:"message_id"`
+	ThreadID  string    `json:"thread_id"`
+	UserID    string    `json:"user_id"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+	User      *User     `json:"user,omitempty"`
+}

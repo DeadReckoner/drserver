@@ -432,6 +432,180 @@ curl -X DELETE \
 
 ---
 
+## Messaging
+
+The messaging system provides real-time communication between friends through thread-based conversations. When a friend request is accepted, a private thread is automatically created between the two users.
+
+### Features
+- **Auto-created threads**: Threads are automatically created when friend requests are accepted
+- **Real-time messaging**: WebSocket-based messaging for instant communication
+- **Message persistence**: All messages are stored in the database
+- **Thread isolation**: Users can only access threads they're participants in
+- **Message history**: Retrieve past messages for any thread
+
+### GET /api/v1/threads
+Get all threads for the authenticated user with participant information.
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/threads"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "thread_id": "thread-uuid",
+      "name": "",
+      "participants": [
+        {
+          "user_id": "user-uuid-1",
+          "first_name": "John",
+          "last_name": "Doe",
+          "email": "john@example.com",
+          "phone_number": "+1-555-123-4567",
+          "CreatedAt": "2024-01-01T09:00:00Z"
+        },
+        {
+          "user_id": "user-uuid-2",
+          "first_name": "Jane",
+          "last_name": "Smith",
+          "email": "jane@example.com",
+          "phone_number": "+1-555-987-6543",
+          "CreatedAt": "2024-01-01T10:00:00Z"
+        }
+      ],
+      "created_at": "2024-01-01T10:30:00Z",
+      "updated_at": "2024-01-01T10:30:00Z"
+    }
+  ]
+}
+```
+
+### GET /api/v1/threads/:threadid/messages
+Get message history for a specific thread.
+
+**URL Parameters:**
+- `threadid` (UUID) - Thread ID
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/threads/thread-uuid/messages"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "message_id": "message-uuid-1",
+      "thread_id": "thread-uuid",
+      "user_id": "user-uuid-1",
+      "content": "Hello!",
+      "created_at": "2024-01-01T10:31:00Z",
+      "user": {
+        "user_id": "user-uuid-1",
+        "first_name": "John",
+        "last_name": "Doe",
+        "email": "john@example.com",
+        "phone_number": "+1-555-123-4567",
+        "CreatedAt": "2024-01-01T09:00:00Z"
+      }
+    },
+    {
+      "message_id": "message-uuid-2",
+      "thread_id": "thread-uuid",
+      "user_id": "user-uuid-2",
+      "content": "Hi there!",
+      "created_at": "2024-01-01T10:32:00Z",
+      "user": {
+        "user_id": "user-uuid-2",
+        "first_name": "Jane",
+        "last_name": "Smith",
+        "email": "jane@example.com",
+        "phone_number": "+1-555-987-6543",
+        "CreatedAt": "2024-01-01T10:00:00Z"
+      }
+    }
+  ]
+}
+```
+
+**Error Responses:**
+- `403 Forbidden` - You are not a participant of this thread
+- `404 Not Found` - Thread not found
+
+### WebSocket: GET /api/v1/ws/messages/:threadid
+WebSocket endpoint for real-time messaging within a specific thread.
+
+**URL Parameters:**
+- `threadid` (UUID) - Thread ID
+
+**Connection:**
+```javascript
+// Example WebSocket connection
+const ws = new WebSocket('ws://localhost:8080/api/v1/ws/messages/thread-uuid', {
+  headers: {
+    'Authorization': 'Bearer <token>'
+  }
+});
+```
+
+**Authentication:**
+- Include Bearer token in the request header when establishing WebSocket connection
+- Only thread participants can connect
+
+**Sending Messages:**
+Send JSON messages through the WebSocket connection:
+```json
+{
+  "content": "Hello from WebSocket!"
+}
+```
+
+**Receiving Messages:**
+All participants in the thread receive messages in this format:
+```json
+{
+  "message_id": "message-uuid",
+  "thread_id": "thread-uuid",
+  "user_id": "sender-user-uuid",
+  "content": "Hello from WebSocket!",
+  "created_at": "2024-01-01T10:35:00.123Z"
+}
+```
+
+**Message Flow:**
+1. Client sends JSON message with `content` field
+2. Server validates and persists message to database
+3. Server broadcasts the saved message (with `message_id` and `created_at`) to all connected clients in the thread
+4. All participants receive the message in real-time
+
+**Error Messages:**
+Errors are sent back to the client as JSON:
+```json
+{
+  "error": "invalid message format"
+}
+```
+
+**Error Scenarios:**
+- Empty message content: `{"error": "message content cannot be empty"}`
+- Invalid JSON format: `{"error": "invalid message format"}`
+- Database save failure: `{"error": "failed to save message"}`
+
+**Connection Notes:**
+- WebSocket connections are automatically upgraded from HTTP
+- Connection verification checks that user is a thread participant
+- Each thread has its own broadcast room
+- Messages are only sent to clients connected to the same thread
+- Graceful disconnection handling
+
+---
+
 ## Roadmap Management
 
 ### POST /api/v1/roadmaps
@@ -1054,6 +1228,52 @@ WebSocket connection for real-time messaging.
 }
 ```
 
+### Thread
+```json
+{
+  "thread_id": "string (UUID)",
+  "name": "string",
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+### ThreadWithParticipants
+```json
+{
+  "thread_id": "string (UUID)",
+  "name": "string",
+  "participants": "array of User objects",
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+### Message
+```json
+{
+  "message_id": "string (UUID)",
+  "thread_id": "string (UUID)",
+  "user_id": "string (UUID)",
+  "content": "string",
+  "created_at": "datetime",
+  "updated_at": "datetime",
+  "deleted_at": "datetime (nullable)"
+}
+```
+
+### MessageResponse
+```json
+{
+  "message_id": "string (UUID)",
+  "thread_id": "string (UUID)",
+  "user_id": "string (UUID)",
+  "content": "string",
+  "created_at": "datetime",
+  "user": "User object (nullable)"
+}
+```
+
 ---
 
 ## Error Responses
@@ -1103,3 +1323,9 @@ WebSocket connection for real-time messaging.
    - Roadmap sharing is controlled via `restrictions.allowed_roadmap_ids`
    - Only the addressee can accept/reject friend requests
    - Either party can remove a friendship
+8. Messaging system features:
+   - Threads are automatically created when friend requests are accepted
+   - WebSocket connections are thread-specific with isolated broadcast rooms
+   - All messages are persisted to the database before broadcasting
+   - Only thread participants can access messages and connect to WebSockets
+   - Each message gets a UUID and timestamp from the server

@@ -9,6 +9,7 @@ import (
 	"dr/server/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -173,8 +174,55 @@ func GetTasks(c *gin.Context, startDate, endDate, roadmapID string) []types.Task
 	return tasks
 }
 
+// generateUUIDs generates UUIDs for all entities in the roadmap.
+// The frontend sends empty strings for UUIDs, but GORM/PostgreSQL can't handle empty strings for UUID columns.
+// We generate UUIDs in Go and set all foreign keys before inserting.
+func generateUUIDs(rm *types.Roadmap) {
+	rm.RoadmapID = uuid.NewString()
+
+	if rm.MacroMap != nil {
+		rm.MacroMap.MacroMapID = uuid.NewString()
+		rm.MacroMap.RoadmapID = rm.RoadmapID
+
+		for i := range rm.MacroMap.Phases {
+			rm.MacroMap.Phases[i].PhaseID = uuid.NewString()
+			rm.MacroMap.Phases[i].MacroMapID = rm.MacroMap.MacroMapID
+
+			for j := range rm.MacroMap.Phases[i].MacroMilestones {
+				rm.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID = uuid.NewString()
+				rm.MacroMap.Phases[i].MacroMilestones[j].PhaseID = rm.MacroMap.Phases[i].PhaseID
+
+				for k := range rm.MacroMap.Phases[i].MacroMilestones[j].Spikes {
+					rm.MacroMap.Phases[i].MacroMilestones[j].Spikes[k].SpikeID = uuid.NewString()
+					rm.MacroMap.Phases[i].MacroMilestones[j].Spikes[k].MacroMilestoneID = rm.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID
+				}
+
+				for k := range rm.MacroMap.Phases[i].MacroMilestones[j].Risks {
+					rm.MacroMap.Phases[i].MacroMilestones[j].Risks[k].RiskID = uuid.NewString()
+					rm.MacroMap.Phases[i].MacroMilestones[j].Risks[k].MacroMilestoneID = rm.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID
+				}
+			}
+		}
+	}
+
+	for i := range rm.Milestones {
+		rm.Milestones[i].MilestoneID = uuid.NewString()
+		rm.Milestones[i].RoadmapID = rm.RoadmapID
+
+		for j := range rm.Milestones[i].Tasks {
+			rm.Milestones[i].Tasks[j].TaskID = uuid.NewString()
+			rm.Milestones[i].Tasks[j].MilestoneID = rm.Milestones[i].MilestoneID
+			rm.Milestones[i].Tasks[j].RoadmapID = rm.RoadmapID
+
+			for k := range rm.Milestones[i].Tasks[j].Steps {
+				rm.Milestones[i].Tasks[j].Steps[k].StepID = uuid.NewString()
+				rm.Milestones[i].Tasks[j].Steps[k].TaskID = rm.Milestones[i].Tasks[j].TaskID
+			}
+		}
+	}
+}
+
 func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
-	// Handle error later
 	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {
 		return types.Roadmap{}, errors.New("missing or invalid user_id")
@@ -186,7 +234,6 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 	var existingUser types.User
 	userResult := db.Where("user_id = ?", userIDStr).First(&existingUser)
 	if userResult.Error == gorm.ErrRecordNotFound {
-		// User doesn't exist, create a minimal user record
 		user := types.User{
 			UserID:    userIDStr,
 			CreatedAt: time.Now(),
@@ -198,12 +245,15 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 		return types.Roadmap{}, errors.New("failed to check user existence: " + userResult.Error.Error())
 	}
 
+	// Generate UUIDs for all entities and set foreign keys
+	generateUUIDs(&rm)
+
+	// Set user IDs for all nested entities
 	rm.UserID = userIDStr
 	for i := range rm.Milestones {
-		rm.Milestones[i].UserID = rm.UserID
+		rm.Milestones[i].UserID = userIDStr
 		for j := range rm.Milestones[i].Tasks {
-			rm.Milestones[i].Tasks[j].UserID = rm.UserID
-			rm.Milestones[i].Tasks[j].RoadmapID = rm.RoadmapID
+			rm.Milestones[i].Tasks[j].UserID = userIDStr
 		}
 	}
 
@@ -1202,6 +1252,16 @@ func UpdateFriendshipStatus(c *gin.Context, friendshipID string, newStatus strin
 		return types.Friendship{}, err
 	}
 
+	// Auto-create a thread between the two users
+	thread, err := CreateThread(c, friendship.RequesterID, friendship.AddresseeID)
+	if err != nil {
+		// Log the error but don't fail the friendship acceptance
+		// The thread can be created later if needed
+		log.Printf("Warning: Failed to create thread for friendship %s: %v", friendshipID, err)
+	} else {
+		log.Printf("Thread %s created for friendship between %s and %s", thread.ThreadID, friendship.RequesterID, friendship.AddresseeID)
+	}
+
 	return friendship, nil
 }
 
@@ -1276,5 +1336,170 @@ func GetMacroMap(c *gin.Context, roadmapID string) (types.MacroMap, error) {
 	}
 
 	return macroMap, nil
+}
+
+// ============================================================================
+// Thread & Message Management Functions
+// ============================================================================
+
+// CreateThread creates a new thread between two users and adds them as participants
+func CreateThread(c *gin.Context, userID1, userID2 string) (types.Thread, error) {
+	// Validate both users exist
+	var user1, user2 types.User
+	if err := db.Where("user_id = ?", userID1).First(&user1).Error; err != nil {
+		return types.Thread{}, errors.New("user1 not found")
+	}
+	if err := db.Where("user_id = ?", userID2).First(&user2).Error; err != nil {
+		return types.Thread{}, errors.New("user2 not found")
+	}
+
+	// Check if a thread already exists between these two users
+	var existingThread types.Thread
+	err := db.Raw(`
+		SELECT t.* FROM threads t
+		INNER JOIN thread_participants tp1 ON t.thread_id = tp1.thread_id AND tp1.user_id = ?
+		INNER JOIN thread_participants tp2 ON t.thread_id = tp2.thread_id AND tp2.user_id = ?
+		WHERE tp1.left_at IS NULL AND tp2.left_at IS NULL
+		LIMIT 1
+	`, userID1, userID2).Scan(&existingThread).Error
+
+	if err == nil && existingThread.ThreadID != "" {
+		// Thread already exists, return it
+		return existingThread, nil
+	}
+
+	// Create new thread
+	thread := types.Thread{
+		ThreadID:  uuid.NewString(),
+		Name:      "", // Direct messages don't need a name
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	if err := db.Create(&thread).Error; err != nil {
+		return types.Thread{}, err
+	}
+
+	// Add both users as participants
+	participants := []types.ThreadParticipants{
+		{
+			ThreadPID: uuid.NewString(),
+			ThreadID:  thread.ThreadID,
+			UserID:    userID1,
+			JoinedAt:  time.Now(),
+			Role:      "member",
+		},
+		{
+			ThreadPID: uuid.NewString(),
+			ThreadID:  thread.ThreadID,
+			UserID:    userID2,
+			JoinedAt:  time.Now(),
+			Role:      "member",
+		},
+	}
+
+	if err := db.Create(&participants).Error; err != nil {
+		// Rollback thread creation if participants fail
+		db.Where("thread_id = ?", thread.ThreadID).Delete(&types.Thread{})
+		return types.Thread{}, err
+	}
+
+	return thread, nil
+}
+
+// GetThreadsByUser returns all threads for a given user
+func GetThreadsByUser(c *gin.Context, userID string) ([]types.Thread, error) {
+	var threads []types.Thread
+
+	// Get all threads where user is a participant and hasn't left
+	err := db.Raw(`
+		SELECT DISTINCT t.* FROM threads t
+		INNER JOIN thread_participants tp ON t.thread_id = tp.thread_id
+		WHERE tp.user_id = ? AND tp.left_at IS NULL
+		ORDER BY t.updated_at DESC
+	`, userID).Scan(&threads).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return threads, nil
+}
+
+// GetThreadMessages retrieves message history for a thread
+// Verifies the user is a participant before returning messages
+func GetThreadMessages(c *gin.Context, threadID, userID string) ([]types.Messages, error) {
+	// Verify user is a participant
+	var participant types.ThreadParticipants
+	err := db.Where("thread_id = ? AND user_id = ? AND left_at IS NULL", threadID, userID).
+		First(&participant).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, errors.New("access denied: user is not a participant of this thread")
+		}
+		return nil, err
+	}
+
+	// Get messages
+	var messages []types.Messages
+	err = db.Where("thread_id = ? AND deleted_at IS NULL", threadID).
+		Order("created_at ASC").
+		Find(&messages).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return messages, nil
+}
+
+// CreateMessage saves a new message to the database
+func CreateMessage(c *gin.Context, threadID, userID, content string) (types.Messages, error) {
+	// Verify user is a participant
+	var participant types.ThreadParticipants
+	err := db.Where("thread_id = ? AND user_id = ? AND left_at IS NULL", threadID, userID).
+		First(&participant).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return types.Messages{}, errors.New("access denied: user is not a participant of this thread")
+		}
+		return types.Messages{}, err
+	}
+
+	// Create message
+	message := types.Messages{
+		MessageID: uuid.NewString(),
+		ThreadID:  threadID,
+		UserID:    userID,
+		Content:   content,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	if err := db.Create(&message).Error; err != nil {
+		return types.Messages{}, err
+	}
+
+	// Update thread's updated_at timestamp
+	db.Model(&types.Thread{}).Where("thread_id = ?", threadID).Update("updated_at", time.Now())
+
+	return message, nil
+}
+
+// GetThreadParticipants returns all participants of a thread
+func GetThreadParticipants(c *gin.Context, threadID string) ([]types.User, error) {
+	var users []types.User
+
+	err := db.Raw(`
+		SELECT u.* FROM users u
+		INNER JOIN thread_participants tp ON u.user_id = tp.user_id
+		WHERE tp.thread_id = ? AND tp.left_at IS NULL
+	`, threadID).Scan(&users).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return users, nil
 }
 
