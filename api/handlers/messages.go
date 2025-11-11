@@ -69,8 +69,26 @@ func GetThreads(c *gin.Context) {
 		return
 	}
 
-	utils.DataResponse(c, http.StatusOK, threads)
-	log.Info(ctx, fmt.Sprintf("Retrieved %d threads for user %s", len(threads), userID))
+	// Build response with participants for each thread
+	var response []types.ThreadWithParticipants
+	for _, thread := range threads {
+		participants, err := database.GetThreadParticipants(c, thread.ThreadID)
+		if err != nil {
+			fmt.Printf("Failed to get participants for thread %s: %v\n", thread.ThreadID, err)
+			continue
+		}
+
+		response = append(response, types.ThreadWithParticipants{
+			ThreadID:     thread.ThreadID,
+			Name:         thread.Name,
+			Participants: participants,
+			CreatedAt:    thread.CreatedAt,
+			UpdatedAt:    thread.UpdatedAt,
+		})
+	}
+
+	utils.DataResponse(c, http.StatusOK, response)
+	log.Info(ctx, fmt.Sprintf("Retrieved %d threads for user %s", len(response), userID))
 }
 
 // GetMessages returns all messages for a specific thread
@@ -168,7 +186,7 @@ func WSHandler(c *gin.Context) {
 	userIDStr := userID.(string)
 
 	// Verify user is a participant of this thread
-	_, err := database.GetThreadMessages(c, threadID, userIDStr)
+	err := database.VerifyThreadParticipant(c, threadID, userIDStr)
 	if err != nil {
 		if err.Error() == "access denied: user is not a participant of this thread" {
 			fmt.Printf("WebSocket access denied: user %s not participant of thread %s\n", userIDStr, threadID)

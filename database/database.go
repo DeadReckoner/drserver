@@ -1411,6 +1411,18 @@ func CreateThread(c *gin.Context, userID1, userID2 string) (types.Thread, error)
 func GetThreadsByUser(c *gin.Context, userID string) ([]types.Thread, error) {
 	var threads []types.Thread
 
+	// Debug: Check if user has any thread_participants records
+	var participantCount int64
+	db.Model(&types.ThreadParticipants{}).Where("user_id = ?", userID).Count(&participantCount)
+	log.Printf("DEBUG: User %s has %d thread_participants records", userID, participantCount)
+
+	// Debug: Check thread_participants with left_at info
+	var allParticipants []types.ThreadParticipants
+	db.Where("user_id = ?", userID).Find(&allParticipants)
+	for _, p := range allParticipants {
+		log.Printf("DEBUG: Participant record - ThreadID: %s, LeftAt: %v", p.ThreadID, p.LeftAt)
+	}
+
 	// Get all threads where user is a participant and hasn't left
 	err := db.Raw(`
 		SELECT DISTINCT t.* FROM threads t
@@ -1423,26 +1435,36 @@ func GetThreadsByUser(c *gin.Context, userID string) ([]types.Thread, error) {
 		return nil, err
 	}
 
+	log.Printf("DEBUG: Found %d threads for user %s", len(threads), userID)
+
 	return threads, nil
 }
 
-// GetThreadMessages retrieves message history for a thread
-// Verifies the user is a participant before returning messages
-func GetThreadMessages(c *gin.Context, threadID, userID string) ([]types.Messages, error) {
-	// Verify user is a participant
+// VerifyThreadParticipant checks if a user is a participant of a thread
+func VerifyThreadParticipant(c *gin.Context, threadID, userID string) error {
 	var participant types.ThreadParticipants
 	err := db.Where("thread_id = ? AND user_id = ? AND left_at IS NULL", threadID, userID).
 		First(&participant).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, errors.New("access denied: user is not a participant of this thread")
+			return errors.New("access denied: user is not a participant of this thread")
 		}
+		return err
+	}
+	return nil
+}
+
+// GetThreadMessages retrieves message history for a thread
+// Verifies the user is a participant before returning messages
+func GetThreadMessages(c *gin.Context, threadID, userID string) ([]types.MessageResponse, error) {
+	// Verify user is a participant
+	if err := VerifyThreadParticipant(c, threadID, userID); err != nil {
 		return nil, err
 	}
 
-	// Get messages
+	// Get messages with user information
 	var messages []types.Messages
-	err = db.Where("thread_id = ? AND deleted_at IS NULL", threadID).
+	err := db.Where("thread_id = ? AND deleted_at IS NULL", threadID).
 		Order("created_at ASC").
 		Find(&messages).Error
 
@@ -1450,19 +1472,39 @@ func GetThreadMessages(c *gin.Context, threadID, userID string) ([]types.Message
 		return nil, err
 	}
 
-	return messages, nil
+	// Build response with user information
+	var response []types.MessageResponse
+	for _, msg := range messages {
+		var user types.User
+		if err := db.Where("user_id = ?", msg.UserID).First(&user).Error; err == nil {
+			response = append(response, types.MessageResponse{
+				MessageID: msg.MessageID,
+				ThreadID:  msg.ThreadID,
+				UserID:    msg.UserID,
+				Content:   msg.Content,
+				CreatedAt: msg.CreatedAt,
+				User:      &user,
+			})
+		} else {
+			// If user not found, still include message but without user object
+			response = append(response, types.MessageResponse{
+				MessageID: msg.MessageID,
+				ThreadID:  msg.ThreadID,
+				UserID:    msg.UserID,
+				Content:   msg.Content,
+				CreatedAt: msg.CreatedAt,
+				User:      nil,
+			})
+		}
+	}
+
+	return response, nil
 }
 
 // CreateMessage saves a new message to the database
 func CreateMessage(c *gin.Context, threadID, userID, content string) (types.Messages, error) {
 	// Verify user is a participant
-	var participant types.ThreadParticipants
-	err := db.Where("thread_id = ? AND user_id = ? AND left_at IS NULL", threadID, userID).
-		First(&participant).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return types.Messages{}, errors.New("access denied: user is not a participant of this thread")
-		}
+	if err := VerifyThreadParticipant(c, threadID, userID); err != nil {
 		return types.Messages{}, err
 	}
 

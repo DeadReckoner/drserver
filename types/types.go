@@ -212,22 +212,22 @@ type Thread struct {
 }
 
 type Messages struct {
-	MessageID string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"message_id"`
-	ThreadID  string    `gorm:"type:uuid" json:"thread_id"`
-	UserID    string    `gorm:"type:uuid" json:"user_id"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	DeletedAt time.Time `json:"deleted_at"`
+	MessageID string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"message_id"`
+	ThreadID  string     `gorm:"type:uuid" json:"thread_id"`
+	UserID    string     `gorm:"type:uuid" json:"user_id"`
+	Content   string     `json:"content"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 type ThreadParticipants struct {
-	ThreadPID string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"thread_p_id"`
-	ThreadID  string    `gorm:"type:uuid" json:"thread_id"`
-	UserID    string    `gorm:"type:uuid" json:"user_id"`
-	JoinedAt  time.Time `json:"joined_at"`
-	LeftAt    time.Time `json:"left_at"`
-	Role      string    `json:"role"`
+	ThreadPID string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"thread_p_id"`
+	ThreadID  string     `gorm:"type:uuid" json:"thread_id"`
+	UserID    string     `gorm:"type:uuid" json:"user_id"`
+	JoinedAt  time.Time  `json:"joined_at"`
+	LeftAt    *time.Time `json:"left_at,omitempty"`
+	Role      string     `json:"role"`
 }
 
 // Response types for messaging API
