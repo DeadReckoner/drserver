@@ -1044,7 +1044,7 @@ func CreateFriendRequest(c *gin.Context, addresseeID string) (types.Friendship, 
 	return friendship, nil
 }
 
-// GetFriendRequests returns all pending friend requests received by the user
+// GetFriendRequests returns all pending friend requests for the user (both sent and received)
 func GetFriendRequests(c *gin.Context) []types.Friendship {
 	var friendships []types.Friendship
 	userID, exists := c.Get("user_id")
@@ -1053,8 +1053,9 @@ func GetFriendRequests(c *gin.Context) []types.Friendship {
 		return []types.Friendship{}
 	}
 
-	result := db.Where("addressee_id = ? AND status = ?", userID, "pending").
+	result := db.Where("(requester_id = ? OR addressee_id = ?) AND status = ?", userID, userID, "pending").
 		Preload("Requester").
+		Preload("Addressee").
 		Order("created_at DESC").
 		Find(&friendships)
 

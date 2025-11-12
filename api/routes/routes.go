@@ -101,6 +101,7 @@ func setupAgentRoutes(rg *gin.RouterGroup) {
 	agent := rg.Group("/agent")
 	{
 		agent.POST("/generate", handlers.AgentGenerate)
+		agent.POST("/generateMilestone/:milestoneid", handlers.AgentGenerateMilestone)
 
 		sessions := agent.Group("/sessions")
 		{
