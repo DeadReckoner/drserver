@@ -1019,6 +1019,15 @@ func CreateFriendRequest(c *gin.Context, addresseeID string) (types.Friendship, 
 
 	requesterIDStr := requesterID.(string)
 
+	// Validate requester exists
+	var requester types.User
+	if err := db.Where("user_id = ?", requesterIDStr).First(&requester).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return types.Friendship{}, errors.New("requester user not found - please create your profile first")
+		}
+		return types.Friendship{}, err
+	}
+
 	// Validate addressee exists
 	var addressee types.User
 	if err := db.Where("user_id = ?", addresseeID).First(&addressee).Error; err != nil {

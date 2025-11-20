@@ -56,6 +56,10 @@ func CreateFriendRequest(c *gin.Context) {
 	friendship, err := database.CreateFriendRequest(c, addresseeID)
 	if err != nil {
 		errMsg := err.Error()
+		if errMsg == "requester user not found - please create your profile first" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
 		if errMsg == "addressee user not found" {
 			utils.NotFoundResponse(c, "User")
 			return
