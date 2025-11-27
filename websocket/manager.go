@@ -4,10 +4,29 @@ import (
 	"context"
 	"dr/server/log"
 	"dr/server/types"
+	"net/http"
 	"sync"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+// Upgrader is the shared WebSocket upgrader configuration used across all handlers
+var Upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		// TODO: Restrict to your frontend domains in production
+		return true
+	},
+}
+
+// UpgradeConnection handles the WebSocket upgrade with error handling
+func UpgradeConnection(c *gin.Context) (*websocket.Conn, error) {
+	conn, err := Upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
 
 type ConnectionManager struct {
 	connections map[string][]*websocket.Conn

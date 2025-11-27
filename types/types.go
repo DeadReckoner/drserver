@@ -89,14 +89,18 @@ type OpenAIResponse struct {
 }
 
 type Roadmap struct {
-	RoadmapID   string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"roadmap_id"`
-	UserID      string    `gorm:"type:uuid" json:"user_id"`
-	Goal        string    `json:"goal"`
-	Description string    `json:"description"`
-	Days        int       `json:"days"`
-	Completed   bool      `json:"completed"`
-	StartDate   time.Time `json:"start_date,omitempty"`
-	Type        string    `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
+	RoadmapID        string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"roadmap_id"`
+	UserID           string    `gorm:"type:uuid" json:"user_id"`
+	Goal             string    `json:"goal"`
+	Description      string    `json:"description"`
+	Days             int       `json:"days"`
+	Completed        bool      `json:"completed"`
+	StartDate        time.Time `json:"start_date,omitempty"`
+	Type             string    `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
+
+	// Async generation tracking
+	JobID            *string   `gorm:"type:uuid;column:job_id" json:"job_id,omitempty"`
+	GenerationStatus string    `gorm:"type:generation_status;column:generation_status;default:'pending'" json:"generation_status"`
 
 	// Link to Macro Map (strategic overview)
 	MacroMap *MacroMap `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"macro_map,omitempty"`

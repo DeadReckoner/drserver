@@ -5,24 +5,19 @@ import (
 	"dr/server/database"
 	"dr/server/log"
 	"dr/server/types"
+	"dr/server/websocket"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
+	gorillaws "github.com/gorilla/websocket"
 )
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
 
 // Thread-specific websocket management
 type ThreadRoom struct {
-	clients   map[*websocket.Conn]*Client
+	clients   map[*gorillaws.Conn]*Client
 	broadcast chan *types.Messages
 	mutex     sync.Mutex
 }
@@ -128,7 +123,7 @@ func getOrCreateRoom(threadID string) *ThreadRoom {
 	room, exists := rooms[threadID]
 	if !exists {
 		room = &ThreadRoom{
-			clients:   make(map[*websocket.Conn]*Client),
+			clients:   make(map[*gorillaws.Conn]*Client),
 			broadcast: make(chan *types.Messages, 256),
 		}
 		rooms[threadID] = room
@@ -160,7 +155,7 @@ func (room *ThreadRoom) handleBroadcast() {
 
 		room.mutex.Lock()
 		for conn := range room.clients {
-			err := conn.WriteMessage(websocket.TextMessage, msgBytes)
+			err := conn.WriteMessage(gorillaws.TextMessage, msgBytes)
 			if err != nil {
 				fmt.Printf("Error sending message to client: %v\n", err)
 				conn.Close()
@@ -198,8 +193,8 @@ func WSHandler(c *gin.Context) {
 		return
 	}
 
-	// Upgrade connection
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	// Upgrade connection using shared upgrader
+	conn, err := websocket.UpgradeConnection(c)
 	if err != nil {
 		fmt.Printf("WebSocket upgrade error: %v\n", err)
 		return
@@ -240,7 +235,7 @@ func WSHandler(c *gin.Context) {
 			// Send error back to client
 			errMsg := map[string]string{"error": "invalid message format"}
 			errBytes, _ := json.Marshal(errMsg)
-			conn.WriteMessage(websocket.TextMessage, errBytes)
+			conn.WriteMessage(gorillaws.TextMessage, errBytes)
 			continue
 		}
 
@@ -249,7 +244,7 @@ func WSHandler(c *gin.Context) {
 			fmt.Printf("Empty message content from user %s\n", userIDStr)
 			errMsg := map[string]string{"error": "message content cannot be empty"}
 			errBytes, _ := json.Marshal(errMsg)
-			conn.WriteMessage(websocket.TextMessage, errBytes)
+			conn.WriteMessage(gorillaws.TextMessage, errBytes)
 			continue
 		}
 
@@ -259,7 +254,7 @@ func WSHandler(c *gin.Context) {
 			fmt.Printf("Error saving message to database (user %s, thread %s): %v\n", userIDStr, threadID, err)
 			errMsg := map[string]string{"error": "failed to save message"}
 			errBytes, _ := json.Marshal(errMsg)
-			conn.WriteMessage(websocket.TextMessage, errBytes)
+			conn.WriteMessage(gorillaws.TextMessage, errBytes)
 			continue
 		}
 

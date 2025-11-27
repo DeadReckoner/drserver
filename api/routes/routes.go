@@ -28,6 +28,7 @@ func setupV1Routes(router *gin.Engine) {
 	setupFriendRoutes(v1)
 	setupRoadmapRoutes(v1)
 	setupAgentRoutes(v1)
+	setupNotificationRoutes(v1)
 	setupMessageThreadRoutes(v1)
 	setupWebSocketRoutes(v1)
 }
@@ -103,12 +104,26 @@ func setupAgentRoutes(rg *gin.RouterGroup) {
 		agent.POST("/generate", handlers.AgentGenerate)
 		agent.POST("/generateMilestone/:milestoneid", handlers.AgentGenerateMilestone)
 
+		agent.POST("/generate-async", handlers.AgentGenerateAsync)
 		sessions := agent.Group("/sessions")
 		{
 			sessions.POST("", handlers.StartAISession)
 			sessions.GET("/:id", utils.ValidateUUID("id"), handlers.GetAISession)
 			sessions.POST("/:id/reply", utils.ValidateUUID("id"), handlers.ReplyAISession)
 		}
+	}
+
+	jobs := rg.Group("/jobs")
+	{
+		jobs.GET("/:jobid/status", utils.ValidateUUID("jobid"), handlers.GetJobStatus)
+	}
+}
+
+func setupNotificationRoutes(rg *gin.RouterGroup){
+	notifications := rg.Group("/notifications")
+	{
+		notifications.GET("", handlers.GetNotifications)
+		notifications.PUT("/:alertid/read", utils.ValidateUUID("alertid"), handlers.MarkNotificationRead)
 	}
 }
 
@@ -125,6 +140,8 @@ func setupWebSocketRoutes(rg *gin.RouterGroup) {
 	{
 		// Thread-specific WebSocket connection
 		ws.GET("/messages/:threadid", utils.ValidateUUID("threadid"), handlers.WSHandler)
+
+		ws.GET("/agent/:jobid", utils.ValidateUUID("jobid"), handlers.WSAgentProgress)
 	}
 }
 

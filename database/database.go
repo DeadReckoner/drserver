@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"errors"
 	"log"
 	"os"
@@ -1573,3 +1574,165 @@ func GetThreadParticipants(c *gin.Context, threadID string) ([]types.User, error
 	return users, nil
 }
 
+
+func CreateBackgroundJob(c *gin.Context, job *types.BackgroundJob) error {
+
+	return db.Create(job).Error
+}
+
+func GetBackgroundJob(c *gin.Context, jobID string, userID string) (*types.BackgroundJob, error){
+	var job types.BackgroundJob
+	err := db.Where("job_id = ? AND user_id = ?", jobID, userID).First(&job).Error
+
+		return &job, err
+}
+
+func UpdateBackgroundJob(ctx context.Context, job *types.BackgroundJob) error{
+	updates := map[string]any{}
+	if job.Progress > 0 {
+		updates["progress"] = job.Progress
+	}
+	if job.Status != ""{
+		updates["status"] = job.Status
+	}
+	if job.Error != "" {
+		updates["error"] = job.Error
+	}
+	if job.StartedAt != nil{
+		updates["started_at"] = job.StartedAt
+	}
+	if job.CompleteAt != nil {
+		updates["completed_at"] = job.CompleteAt
+	}
+	if job.Result != nil {
+		updates["result"] = job.Result
+	}
+	updates["updated_at"] = time.Now()
+	return db.Model(&types.BackgroundJob{}).Where("job_id = ?", job.JobID).Updates(updates).Error
+}
+
+func CreateDraftRoadmap(c *gin.Context, draft *types.Roadmap) error {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return errors.New("missing or invalid user_id")
+	}
+
+	userIDStr := user_id.(string)
+
+	// Ensure user exists in database
+	var existingUser types.User
+	userResult := db.Where("user_id = ?", userIDStr).First(&existingUser)
+	if userResult.Error == gorm.ErrRecordNotFound {
+		user := types.User{
+			UserID:    userIDStr,
+			CreatedAt: time.Now(),
+		}
+		if err := db.Create(&user).Error; err != nil {
+			return errors.New("failed to create user: " + err.Error())
+		}
+	} else if userResult.Error != nil {
+		return errors.New("failed to check user existence: " + userResult.Error.Error())
+	}
+
+	// Set user ID (should already be set, but ensure it)
+	draft.UserID = userIDStr
+
+	// Create the draft roadmap (no nested structures yet)
+	return db.Create(draft).Error
+}
+
+func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) error {
+	// Generate UUIDs for all nested entities (MacroMap, Phases, etc.)
+	// Note: RoadmapID should already be set from the draft
+	if roadmap.MacroMap != nil {
+		roadmap.MacroMap.MacroMapID = uuid.NewString()
+		roadmap.MacroMap.RoadmapID = roadmap.RoadmapID
+
+		for i := range roadmap.MacroMap.Phases {
+			roadmap.MacroMap.Phases[i].PhaseID = uuid.NewString()
+			roadmap.MacroMap.Phases[i].MacroMapID = roadmap.MacroMap.MacroMapID
+
+			for j := range roadmap.MacroMap.Phases[i].MacroMilestones {
+				roadmap.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID = uuid.NewString()
+				roadmap.MacroMap.Phases[i].MacroMilestones[j].PhaseID = roadmap.MacroMap.Phases[i].PhaseID
+
+				for k := range roadmap.MacroMap.Phases[i].MacroMilestones[j].Spikes {
+					roadmap.MacroMap.Phases[i].MacroMilestones[j].Spikes[k].SpikeID = uuid.NewString()
+					roadmap.MacroMap.Phases[i].MacroMilestones[j].Spikes[k].MacroMilestoneID = roadmap.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID
+				}
+
+				for k := range roadmap.MacroMap.Phases[i].MacroMilestones[j].Risks {
+					roadmap.MacroMap.Phases[i].MacroMilestones[j].Risks[k].RiskID = uuid.NewString()
+					roadmap.MacroMap.Phases[i].MacroMilestones[j].Risks[k].MacroMilestoneID = roadmap.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID
+				}
+			}
+		}
+	}
+
+	// Handle milestones if they exist (though async generation currently only creates MacroMap)
+	for i := range roadmap.Milestones {
+		roadmap.Milestones[i].MilestoneID = uuid.NewString()
+		roadmap.Milestones[i].RoadmapID = roadmap.RoadmapID
+		roadmap.Milestones[i].UserID = roadmap.UserID
+
+		for j := range roadmap.Milestones[i].Tasks {
+			roadmap.Milestones[i].Tasks[j].TaskID = uuid.NewString()
+			roadmap.Milestones[i].Tasks[j].MilestoneID = roadmap.Milestones[i].MilestoneID
+			roadmap.Milestones[i].Tasks[j].RoadmapID = roadmap.RoadmapID
+			roadmap.Milestones[i].Tasks[j].UserID = roadmap.UserID
+
+			for k := range roadmap.Milestones[i].Tasks[j].Steps {
+				roadmap.Milestones[i].Tasks[j].Steps[k].StepID = uuid.NewString()
+				roadmap.Milestones[i].Tasks[j].Steps[k].TaskID = roadmap.Milestones[i].Tasks[j].TaskID
+			}
+		}
+	}
+
+	// Update the roadmap with full save of all associations
+	// FullSaveAssociations ensures nested entities (MacroMap, Phases, etc.) are saved
+	return db.Session(&gorm.Session{FullSaveAssociations: true}).Updates(roadmap).Error
+}
+
+func UpdateRoadmapGenerationStatus(ctx context.Context, roadmapID, status string) error {
+    return db.Model(&types.Roadmap{}).
+        Where("roadmap_id = ?", roadmapID).
+        Update("generation_status", status).Error
+}
+
+// Push token management
+func CreateOrUpdatePushToken(ctx context.Context, token *types.PushToken) error {
+    // Upsert logic
+    return db.Save(token).Error
+}
+
+func GetActivePushTokens(ctx context.Context, userID string) []types.PushToken {
+    var tokens []types.PushToken
+    db.Where("user_id = ? AND is_active = ?", userID, true).Find(&tokens)
+    return tokens
+}
+
+func DeactivatePushToken(ctx context.Context, expoToken string) error {
+    return db.Model(&types.PushToken{}).
+        Where("expo_token = ?", expoToken).
+        Update("is_active", false).Error
+}
+
+// Notification management
+func CreateNotification(ctx context.Context, notif *types.Notification) error {
+    return db.Create(notif).Error
+}
+
+func GetUnreadNotifications(c *gin.Context, userID string) []types.Notification {
+    var notifs []types.Notification
+    db.Where("user_id = ? AND read_at IS NULL", userID).
+        Order("created_at DESC").
+        Find(&notifs)
+    return notifs
+}
+
+func MarkNotificationRead(ctx context.Context, notifID string) error {
+    now := time.Now()
+    return db.Model(&types.Notification{}).
+        Where("notification_id = ?", notifID).
+        Update("read_at", now).Error
+}
