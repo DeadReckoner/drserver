@@ -314,3 +314,44 @@ type ProgressUpdate struct {
 	Message  string      `json:"message"`        // Human-readable status
 	Data     interface{} `json:"data,omitempty"` // Additional context (roadmap_id, etc.)
 }
+
+type JobStatus string
+
+const (
+	JobStatusPending    JobStatus = "pending"
+	JobStatusProcessing JobStatus = "processing"
+	JobStatusCompleted  JobStatus = "completed"
+	JobStatusFailed     JobStatus = "failed"
+)
+
+type JobType string
+
+const (
+	JobTypeRoadmap   JobType = "roadmap_generation"
+	JobTypeMilestone JobType = "milestone_generation"
+)
+
+type PlatformType string
+
+const (
+	PlatformTypeIOS     PlatformType = "ios"
+	PlatformTypeAndroid PlatformType = "android"
+)
+
+type NotificationStatus string
+
+const (
+	NotificaitonStatusPending NotificationStatus = "pending"
+	NotificaitonStatusSent    NotificationStatus = "sent"
+	NotificaitonStatusFailed  NotificationStatus = "failed"
+	NotificaitonStatusRead    NotificationStatus = "read"
+)
+
+type GenerationStatus string
+
+const (
+	GenerationStatusPending    GenerationStatus = "pending"
+	GenerationStatusProcessing GenerationStatus = "processing"
+	GenerationStatusCompleted  GenerationStatus = "completed"
+	GenerationStatusFailed     GenerationStatus = "failed"
+)
