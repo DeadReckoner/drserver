@@ -14,13 +14,13 @@ type User struct {
 }
 
 type Friendship struct {
-	ID           string                 `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:id" json:"id"`
-	RequesterID  string                 `gorm:"type:uuid;column:requester_id;not null" json:"requester_id"`
-	AddresseeID  string                 `gorm:"type:uuid;column:addressee_id;not null" json:"addressee_id"`
-	Status       string                 `gorm:"column:status;default:pending" json:"status"`
-	Restrictions map[string]interface{} `gorm:"type:jsonb;column:restrictions" json:"restrictions,omitempty"`
-	CreatedAt    time.Time              `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt    *time.Time             `gorm:"column:updated_at" json:"updated_at,omitempty"`
+	ID           string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:id" json:"id"`
+	RequesterID  string         `gorm:"type:uuid;column:requester_id;not null" json:"requester_id"`
+	AddresseeID  string         `gorm:"type:uuid;column:addressee_id;not null" json:"addressee_id"`
+	Status       string         `gorm:"column:status;default:pending" json:"status"`
+	Restrictions map[string]any `gorm:"type:jsonb;column:restrictions" json:"restrictions,omitempty"`
+	CreatedAt    time.Time      `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt    *time.Time     `gorm:"column:updated_at" json:"updated_at,omitempty"`
 
 	// Relationships for preloading
 	Requester *User `gorm:"foreignKey:RequesterID;references:UserID" json:"requester,omitempty"`
@@ -44,10 +44,10 @@ type UpdateFriendshipStatusRequest struct {
 }
 
 type FriendResponse struct {
-	FriendshipID string                 `json:"friendship_id"`
-	Friend       User                   `json:"friend"`
-	Restrictions map[string]interface{} `json:"restrictions,omitempty"`
-	CreatedAt    time.Time              `json:"created_at"`
+	FriendshipID string         `json:"friendship_id"`
+	Friend       User           `json:"friend"`
+	Restrictions map[string]any `json:"restrictions,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
 }
 
 type FriendProfileResponse struct {
@@ -288,17 +288,17 @@ func (PushToken) TableName() string {
 
 // Notification represents a push notification record
 type Notification struct {
-	NotificationID string                 `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:notification_id" json:"notification_id"`
-	UserID         string                 `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
-	Type           string                 `gorm:"column:type;not null" json:"type"`
-	Title          string                 `gorm:"column:title;not null" json:"title"`
-	Body           string                 `gorm:"column:body;not null" json:"body"`
-	Data           map[string]interface{} `gorm:"type:jsonb;column:data" json:"data,omitempty"`
-	Status         string                 `gorm:"column:status;default:pending" json:"status"` // 'pending', 'sent', 'failed', 'read'
-	SentAt         *time.Time             `gorm:"column:sent_at" json:"sent_at,omitempty"`
-	ReadAt         *time.Time             `gorm:"column:read_at" json:"read_at,omitempty"`
-	Error          string                 `gorm:"column:error" json:"error,omitempty"`
-	CreatedAt      time.Time              `gorm:"column:created_at;default:now()" json:"created_at"`
+	NotificationID string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:notification_id" json:"notification_id"`
+	UserID         string         `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
+	Type           string         `gorm:"column:type;not null" json:"type"`
+	Title          string         `gorm:"column:title;not null" json:"title"`
+	Body           string         `gorm:"column:body;not null" json:"body"`
+	Data           map[string]any `gorm:"type:jsonb;column:data" json:"data,omitempty"`
+	Status         string         `gorm:"column:status;default:pending" json:"status"` // 'pending', 'sent', 'failed', 'read'
+	SentAt         *time.Time     `gorm:"column:sent_at" json:"sent_at,omitempty"`
+	ReadAt         *time.Time     `gorm:"column:read_at" json:"read_at,omitempty"`
+	Error          string         `gorm:"column:error" json:"error,omitempty"`
+	CreatedAt      time.Time      `gorm:"column:created_at;default:now()" json:"created_at"`
 }
 
 func (Notification) TableName() string {
@@ -307,13 +307,20 @@ func (Notification) TableName() string {
 
 // ProgressUpdate represents a WebSocket message for generation progress
 type ProgressUpdate struct {
-	Type     string      `json:"type"` // 'progress', 'status', 'complete', 'error'
-	JobID    string      `json:"job_id"`
-	Progress int         `json:"progress"`       // 0-100
-	Status   string      `json:"status"`         // 'pending', 'processing', 'completed', 'failed'
-	Message  string      `json:"message"`        // Human-readable status
-	Data     interface{} `json:"data,omitempty"` // Additional context (roadmap_id, etc.)
+	Type     string `json:"type"` // 'progress', 'status', 'complete', 'error'
+	JobID    string `json:"job_id"`
+	Progress int    `json:"progress"`       // 0-100
+	Status   string `json:"status"`         // 'pending', 'processing', 'completed', 'failed'
+	Message  string `json:"message"`        // Human-readable status
+	Data     any    `json:"data,omitempty"` // Additional context (roadmap_id, etc.)
 }
+
+type RoadmapType string
+
+const (
+	RoadmapTypeAIGenerated RoadmapType = "ai_generated"
+	RoadmapTypeCustomMade  RoadmapType = "custom_made"
+)
 
 type JobStatus string
 
