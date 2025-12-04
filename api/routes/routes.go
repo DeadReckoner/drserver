@@ -125,6 +125,12 @@ func setupNotificationRoutes(rg *gin.RouterGroup){
 		notifications.GET("", handlers.GetNotifications)
 		notifications.PUT("/:alertid/read", utils.ValidateUUID("alertid"), handlers.MarkNotificationRead)
 	}
+
+	push := rg.Group("/push")
+	{
+		push.POST("/tokens", handlers.RegisterPushToken)
+		push.DELETE("/tokens/:token", handlers.DeactivatePushToken)
+	}
 }
 
 func setupMessageThreadRoutes(rg *gin.RouterGroup) {

@@ -262,8 +262,8 @@ type BackgroundJob struct {
 	Payload    any        `gorm:"type:jsonb;column:payload" json:"payload"`
 	Result     any        `gorm:"type:jsonb;column:result" json:"result,omitempty"`
 	Error      string     `gorm:"column:error" json:"error,omitempty"`
-	StartedAt  *time.Time `gorm:"column:started_at" json:"started_at,omitempty"`
-	CompleteAt *time.Time `gorm:"column:completed_at" json:"completed_at,omitempty"`
+	StartedAt   *time.Time `gorm:"column:started_at" json:"started_at,omitempty"`
+	CompletedAt *time.Time `gorm:"column:completed_at" json:"completed_at,omitempty"`
 	//why not pointer?
 	CreatedAt time.Time `gorm:"column:created_at;default:now()" json:"created_at"`
 	UpdatedAt time.Time `gorm:"column:updated_at;default:now()" json:"updated_at"`
@@ -352,10 +352,10 @@ const (
 type NotificationStatus string
 
 const (
-	NotificaitonStatusPending NotificationStatus = "pending"
-	NotificaitonStatusSent    NotificationStatus = "sent"
-	NotificaitonStatusFailed  NotificationStatus = "failed"
-	NotificaitonStatusRead    NotificationStatus = "read"
+	NotificationStatusPending NotificationStatus = "pending"
+	NotificationStatusSent    NotificationStatus = "sent"
+	NotificationStatusFailed  NotificationStatus = "failed"
+	NotificationStatusRead    NotificationStatus = "read"
 )
 
 type GenerationStatus string

@@ -1601,8 +1601,8 @@ func UpdateBackgroundJob(ctx context.Context, job *types.BackgroundJob) error{
 	if job.StartedAt != nil{
 		updates["started_at"] = job.StartedAt
 	}
-	if job.CompleteAt != nil {
-		updates["completed_at"] = job.CompleteAt
+	if job.CompletedAt != nil {
+		updates["completed_at"] = job.CompletedAt
 	}
 	if job.Result != nil {
 		updates["result"] = job.Result
@@ -1701,8 +1701,27 @@ func UpdateRoadmapGenerationStatus(ctx context.Context, roadmapID, status string
 
 // Push token management
 func CreateOrUpdatePushToken(ctx context.Context, token *types.PushToken) error {
-    // Upsert logic
-    return db.Save(token).Error
+	// Try to find existing token by expo_token (which has unique constraint)
+	var existing types.PushToken
+	result := db.Where("expo_token = ?", token.ExpoToken).First(&existing)
+
+	if result.Error == gorm.ErrRecordNotFound {
+		// Create new token
+		token.TokenID = uuid.NewString()
+		token.CreatedAt = time.Now()
+		token.LastUsedAt = time.Now()
+		token.IsActive = true
+		return db.Create(token).Error
+	} else if result.Error != nil {
+		return result.Error
+	}
+
+	// Update existing token (refresh platform, device_id, last_used_at, reactivate if needed)
+	existing.Platform = token.Platform
+	existing.DeviceID = token.DeviceID
+	existing.IsActive = true
+	existing.LastUsedAt = time.Now()
+	return db.Save(&existing).Error
 }
 
 func GetActivePushTokens(ctx context.Context, userID string) []types.PushToken {
@@ -1735,4 +1754,10 @@ func MarkNotificationRead(ctx context.Context, notifID string) error {
     return db.Model(&types.Notification{}).
         Where("notification_id = ?", notifID).
         Update("read_at", now).Error
+}
+
+func UpdateNotificationStatus(ctx context.Context, notif *types.Notification, updates map[string]any) error {
+    return db.Model(&types.Notification{}).
+        Where("notification_id = ?", notif.NotificationID).
+        Updates(updates).Error
 }
