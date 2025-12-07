@@ -74,6 +74,18 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		// Milestone routes
 		roadmaps.GET("/:roadmapid/milestones", utils.ValidateUUID("roadmapid"), handlers.GetMilestonesByRoadmap)
 		roadmaps.POST("/:roadmapid/milestones", utils.ValidateUUID("roadmapid"), handlers.CreateMilestone)
+
+		// Anchor routes
+		roadmaps.POST("/:roadmapid/anchor-request", utils.ValidateUUID("roadmapid"), handlers.CreateAnchorRequest)
+		roadmaps.DELETE("/:roadmapid/anchor", utils.ValidateUUID("roadmapid"), handlers.RemoveAnchor)
+	}
+
+	// Anchor request routes
+	anchorRequests := rg.Group("/anchor-requests")
+	{
+		anchorRequests.GET("", handlers.GetAnchorRequests)
+		anchorRequests.POST("/:requestid/accept", utils.ValidateUUID("requestid"), handlers.AcceptAnchorRequest)
+		anchorRequests.POST("/:requestid/reject", utils.ValidateUUID("requestid"), handlers.RejectAnchorRequest)
 	}
 
 	milestones := rg.Group("/milestones")

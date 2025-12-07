@@ -55,6 +55,25 @@ type FriendProfileResponse struct {
 	AllowedRoadmaps []Roadmap `json:"allowed_roadmaps"`
 }
 
+type AnchorRequest struct {
+	RequestID   string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:request_id" json:"request_id"`
+	RoadmapID   string     `gorm:"type:uuid;column:roadmap_id;not null" json:"roadmap_id"`
+	RequesterID string     `gorm:"type:uuid;column:requester_id;not null" json:"requester_id"`
+	AnchorID    string     `gorm:"type:uuid;column:anchor_id;not null" json:"anchor_id"`
+	Status      string     `gorm:"column:status;default:pending" json:"status"` // "pending", "accepted", "rejected"
+	CreatedAt   time.Time  `gorm:"column:created_at;default:now()" json:"created_at"`
+	UpdatedAt   *time.Time `gorm:"column:updated_at" json:"updated_at,omitempty"`
+
+	// Relationships for preloading
+	Roadmap   *Roadmap `gorm:"foreignKey:RoadmapID;references:RoadmapID" json:"roadmap,omitempty"`
+	Requester *User    `gorm:"foreignKey:RequesterID;references:UserID" json:"requester,omitempty"`
+	Anchor    *User    `gorm:"foreignKey:AnchorID;references:UserID" json:"anchor,omitempty"`
+}
+
+func (AnchorRequest) TableName() string {
+	return "anchor_requests"
+}
+
 type Prompt struct {
 	UserPrompt string `json:"user_prompt"`
 }
@@ -97,6 +116,7 @@ type Roadmap struct {
 	Completed        bool      `json:"completed"`
 	StartDate        time.Time `json:"start_date,omitempty"`
 	Type             string    `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
+	AnchorID         *string   `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
 
 	// Async generation tracking
 	JobID            *string   `gorm:"type:uuid;column:job_id" json:"job_id,omitempty"`

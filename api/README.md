@@ -361,7 +361,7 @@ curl -H "Authorization: Bearer <token>" \
 ```
 
 ### GET /api/v1/friends/:id/profile
-Get a friend's profile with roadmaps they've allowed you to see.
+Get a friend's profile with roadmaps where you are the accountability partner (anchor).
 
 **URL Parameters:**
 - `id` (UUID) - Friend's user ID
@@ -393,6 +393,7 @@ curl -H "Authorization: Bearer <token>" \
         "days": 90,
         "completed": false,
         "start_date": "2024-01-01T00:00:00Z",
+        "anchor_id": "your-user-uuid",
         "milestones": [...]
       }
     ]
@@ -401,8 +402,8 @@ curl -H "Authorization: Bearer <token>" \
 ```
 
 **Roadmap Visibility Rules:**
-- If `restrictions.allowed_roadmap_ids` is specified, only those roadmaps are returned
-- If `restrictions` is null or empty, all of the friend's roadmaps are returned
+- Friends can only see roadmaps where they are the accountability partner (anchor)
+- This ensures privacy while allowing accountability partners to track progress
 
 **Error Responses:**
 - `403 Forbidden` - You are not friends with this user
@@ -429,6 +430,200 @@ curl -X DELETE \
 
 **Error Responses:**
 - `404 Not Found` - Friendship not found
+
+---
+
+## Anchor Management (Accountability Partners)
+
+Anchors are accountability partners who can view and track progress on a friend's roadmap. This feature enables users to request friends to help keep them accountable on their goals.
+
+### POST /api/v1/roadmaps/:roadmapid/anchor-request
+Send a request to a friend to be an accountability partner (anchor) for a specific roadmap.
+
+**URL Parameters:**
+- `roadmapid` (UUID) - Roadmap ID
+
+**Request Body:**
+```json
+{
+  "anchor_id": "friend-user-uuid"
+}
+```
+
+**Example Request:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"anchor_id": "550e8400-e29b-41d4-a716-446655440001"}' \
+  "http://localhost:8080/api/v1/roadmaps/roadmap-uuid/anchor-request"
+```
+
+**Response (201 Created):**
+```json
+{
+  "data": {
+    "request_id": "request-uuid",
+    "roadmap_id": "roadmap-uuid",
+    "requester_id": "your-user-uuid",
+    "anchor_id": "friend-user-uuid",
+    "status": "pending",
+    "created_at": "2024-01-01T10:00:00Z",
+    "updated_at": null,
+    "roadmap": {
+      "roadmap_id": "roadmap-uuid",
+      "goal": "Learn Web Development",
+      "description": "90-day roadmap",
+      "days": 90,
+      "completed": false,
+      "start_date": "2024-01-01T00:00:00Z"
+    },
+    "requester": {...},
+    "anchor": {...}
+  }
+}
+```
+
+**Error Responses:**
+- `403 Forbidden` - You are not friends with this user
+- `404 Not Found` - Roadmap not found or you don't have permission
+- `409 Conflict` - Anchor request already exists or user is already an anchor
+
+### GET /api/v1/anchor-requests
+Get all pending anchor requests where you are the requested anchor.
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/anchor-requests"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "request_id": "request-uuid",
+      "roadmap_id": "roadmap-uuid",
+      "requester_id": "friend-user-uuid",
+      "anchor_id": "your-user-uuid",
+      "status": "pending",
+      "created_at": "2024-01-01T10:00:00Z",
+      "updated_at": null,
+      "roadmap": {
+        "roadmap_id": "roadmap-uuid",
+        "goal": "Learn Web Development",
+        "description": "90-day roadmap",
+        "days": 90
+      },
+      "requester": {
+        "user_id": "friend-user-uuid",
+        "first_name": "Jane",
+        "last_name": "Smith",
+        "email": "jane.smith@example.com"
+      }
+    }
+  ]
+}
+```
+
+### POST /api/v1/anchor-requests/:requestid/accept
+Accept an anchor request to become an accountability partner.
+
+**URL Parameters:**
+- `requestid` (UUID) - Anchor request ID
+
+**Example Request:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/anchor-requests/request-uuid/accept"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": {
+    "request_id": "request-uuid",
+    "roadmap_id": "roadmap-uuid",
+    "requester_id": "friend-user-uuid",
+    "anchor_id": "your-user-uuid",
+    "status": "accepted",
+    "created_at": "2024-01-01T10:00:00Z",
+    "updated_at": "2024-01-01T10:30:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Anchor request is not pending
+- `403 Forbidden` - Only the anchor can accept this request
+- `404 Not Found` - Anchor request not found
+
+### POST /api/v1/anchor-requests/:requestid/reject
+Reject an anchor request.
+
+**URL Parameters:**
+- `requestid` (UUID) - Anchor request ID
+
+**Example Request:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/anchor-requests/request-uuid/reject"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": {
+    "request_id": "request-uuid",
+    "roadmap_id": "roadmap-uuid",
+    "requester_id": "friend-user-uuid",
+    "anchor_id": "your-user-uuid",
+    "status": "rejected",
+    "created_at": "2024-01-01T10:00:00Z",
+    "updated_at": "2024-01-01T10:30:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Anchor request is not pending
+- `403 Forbidden` - Only the anchor can reject this request
+- `404 Not Found` - Anchor request not found
+
+### DELETE /api/v1/roadmaps/:roadmapid/anchor
+Remove the accountability partner from a roadmap (roadmap owner only).
+
+**URL Parameters:**
+- `roadmapid` (UUID) - Roadmap ID
+
+**Example Request:**
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/roadmaps/roadmap-uuid/anchor"
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Anchor removed successfully"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - No anchor assigned to this roadmap
+- `404 Not Found` - Roadmap not found or you don't have permission
+
+**How Anchor System Works:**
+1. User sends an anchor request to a friend for a specific roadmap
+2. The system verifies they are friends (returns 403 if not)
+3. Friend receives the anchor request in their pending requests
+4. Friend can accept or reject the request
+5. If accepted, the friend can now view that roadmap when visiting the user's profile
+6. The roadmap owner can remove the anchor at any time
 
 ---
 
@@ -1016,6 +1211,64 @@ Generate a roadmap using AI based on a user prompt.
 }
 ```
 
+### POST /api/v1/agent/generate-async
+Generate a roadmap asynchronously with real-time progress updates. Recommended for production use as generation can take 2-3 minutes.
+
+**Request Body:**
+```json
+{
+  "goalName": "Learn Web Development",
+  "goalDescription": "I want to become a full-stack web developer in 90 days",
+  "timeframe": "90 days",
+  "hoursPerDay": 2
+}
+```
+
+**Response (202 Accepted):**
+```json
+{
+  "status": "pending",
+  "job_id": "550e8400-e29b-41d4-a716-446655440010",
+  "roadmap_id": "550e8400-e29b-41d4-a716-446655440011",
+  "message": "Your roadmap is being processed",
+  "ws_url": "ws/agent/550e8400-e29b-41d4-a716-446655440010"
+}
+```
+
+**How it works:**
+1. Server creates a background job and draft roadmap immediately
+2. Returns job_id and roadmap_id to client
+3. Client can:
+   - Connect via WebSocket at `/ws/agent/:jobid` for real-time updates (recommended)
+   - Poll GET `/jobs/:jobid/status` every 2-3 seconds
+   - Receive push notification when complete (if token registered)
+4. When complete, roadmap is fully populated and ready to view
+
+**Progress Updates via WebSocket:**
+```json
+{
+  "type": "progress",
+  "job_id": "550e8400-e29b-41d4-a716-446655440010",
+  "progress": 45,
+  "status": "processing",
+  "message": "Generating strategic roadmap..."
+}
+```
+
+**Completion Message:**
+```json
+{
+  "type": "complete",
+  "job_id": "550e8400-e29b-41d4-a716-446655440010",
+  "progress": 100,
+  "status": "completed",
+  "message": "Your roadmap is ready for review!",
+  "data": {
+    "roadmap_id": "550e8400-e29b-41d4-a716-446655440011"
+  }
+}
+```
+
 ### POST /api/v1/agent/sessions
 Start a new AI session for interactive roadmap generation.
 
@@ -1110,6 +1363,237 @@ WebSocket connection for real-time messaging.
 - Echo functionality (messages are echoed back)
 - Connection includes read/write deadlines and ping/pong handling
 
+### GET /api/v1/ws/agent/:jobid
+WebSocket connection for real-time AI roadmap generation progress updates.
+
+**URL Parameters:**
+- `jobid` (UUID) - Background job ID
+
+**Connection:** Upgrade to WebSocket protocol
+
+**Message Types:**
+Client receives JSON messages with one of these types:
+
+**Status Update (sent immediately on connect):**
+```json
+{
+  "type": "status",
+  "job_id": "550e8400-e29b-41d4-a716-446655440010",
+  "progress": 0,
+  "status": "pending",
+  "message": "Initializing..."
+}
+```
+
+**Progress Update:**
+```json
+{
+  "type": "progress",
+  "job_id": "550e8400-e29b-41d4-a716-446655440010",
+  "progress": 45,
+  "status": "processing",
+  "message": "Generating strategic roadmap..."
+}
+```
+
+**Completion:**
+```json
+{
+  "type": "complete",
+  "job_id": "550e8400-e29b-41d4-a716-446655440010",
+  "progress": 100,
+  "status": "completed",
+  "message": "Your roadmap is ready for review!",
+  "data": {
+    "roadmap_id": "550e8400-e29b-41d4-a716-446655440011"
+  }
+}
+```
+
+**Error:**
+```json
+{
+  "type": "error",
+  "job_id": "550e8400-e29b-41d4-a716-446655440010",
+  "status": "failed",
+  "message": "Failed to generate roadmap",
+  "data": {
+    "error": "OpenAI API error: rate limit exceeded"
+  }
+}
+```
+
+**Ping/Pong:**
+Client can send `{"type": "ping"}` to keep connection alive.
+Server responds with `{"type": "pong"}`.
+
+---
+
+## Background Jobs
+
+### GET /api/v1/jobs/:jobid/status
+Get the status of a background job. Use WebSocket for real-time updates instead of polling.
+
+**URL Parameters:**
+- `jobid` (UUID) - Job ID
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/jobs/550e8400-e29b-41d4-a716-446655440010/status"
+```
+
+**Response (200 OK) - Job in Progress:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440010",
+  "status": "processing",
+  "progress": 45,
+  "created_at": "2024-01-01T10:00:00Z"
+}
+```
+
+**Response (200 OK) - Job Completed:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440010",
+  "status": "completed",
+  "progress": 100,
+  "created_at": "2024-01-01T10:00:00Z",
+  "result": {
+    "roadmap_id": "550e8400-e29b-41d4-a716-446655440011",
+    "macromap_id": "550e8400-e29b-41d4-a716-446655440012"
+  },
+  "completed_at": "2024-01-01T10:03:15Z"
+}
+```
+
+**Response (200 OK) - Job Failed:**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440010",
+  "status": "failed",
+  "progress": 35,
+  "created_at": "2024-01-01T10:00:00Z",
+  "error": "OpenAI API error: rate limit exceeded",
+  "failed_at": "2024-01-01T10:01:45Z"
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Job not found or user not authorized
+
+---
+
+## Push Notifications
+
+### POST /api/v1/push/tokens
+Register or update an Expo push notification token for the current user.
+
+**Request Body:**
+```json
+{
+  "expo_token": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]",
+  "platform": "ios",
+  "device_id": "iPhone14,2"
+}
+```
+
+**Example Request:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"expo_token": "ExponentPushToken[xxx]", "platform": "ios"}' \
+  "http://localhost:8080/api/v1/push/tokens"
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Push token registered successfully",
+  "token_id": "550e8400-e29b-41d4-a716-446655440020"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Invalid request body or platform
+
+### DELETE /api/v1/push/tokens/:token
+Deactivate a push notification token (e.g., on logout or app uninstall).
+
+**URL Parameters:**
+- `token` (string) - Expo push token to deactivate
+
+**Example Request:**
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/push/tokens/ExponentPushToken[xxx]"
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Push token deactivated successfully"
+}
+```
+
+---
+
+## Notifications
+
+### GET /api/v1/notifications
+Get all unread notifications for the current user.
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/notifications"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "notification_id": "550e8400-e29b-41d4-a716-446655440030",
+      "user_id": "550e8400-e29b-41d4-a716-446655440000",
+      "type": "roadmap_complete",
+      "title": "Your roadmap is ready for review!",
+      "body": "Your Learn Web Development roadmap has been generated successfully.",
+      "data": {
+        "roadmap_id": "550e8400-e29b-41d4-a716-446655440011"
+      },
+      "status": "sent",
+      "sent_at": "2024-01-01T10:03:20Z",
+      "read_at": null,
+      "created_at": "2024-01-01T10:03:15Z"
+    }
+  ]
+}
+```
+
+### PUT /api/v1/notifications/:alertid/read
+Mark a notification as read.
+
+**URL Parameters:**
+- `alertid` (UUID) - Notification ID
+
+**Example Request:**
+```bash
+curl -X PUT \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/notifications/550e8400-e29b-41d4-a716-446655440030/read"
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Notification marked as read"
+}
+```
+
 ---
 
 ## Data Models
@@ -1174,6 +1658,22 @@ WebSocket connection for real-time messaging.
 }
 ```
 
+### AnchorRequest
+```json
+{
+  "request_id": "string (UUID)",
+  "roadmap_id": "string (UUID)",
+  "requester_id": "string (UUID) - User who owns the roadmap",
+  "anchor_id": "string (UUID) - User being asked to be the anchor",
+  "status": "string (pending|accepted|rejected)",
+  "created_at": "datetime",
+  "updated_at": "datetime (nullable)",
+  "roadmap": "Roadmap object (when preloaded)",
+  "requester": "User object (when preloaded)",
+  "anchor": "User object (when preloaded)"
+}
+```
+
 ### Roadmap
 ```json
 {
@@ -1184,6 +1684,7 @@ WebSocket connection for real-time messaging.
   "days": "integer",
   "completed": "boolean",
   "start_date": "datetime",
+  "anchor_id": "string (UUID, nullable) - User ID of accountability partner",
   "milestones": "array of Milestone objects"
 }
 ```
@@ -1307,6 +1808,73 @@ WebSocket connection for real-time messaging.
 }
 ```
 
+### BackgroundJob
+```json
+{
+  "job_id": "string (UUID)",
+  "user_id": "string (UUID)",
+  "type": "string (roadmap_generation)",
+  "status": "string (pending|processing|completed|failed)",
+  "progress": "integer (0-100)",
+  "payload": "object - Input data (GoalRequest for roadmap generation)",
+  "result": {
+    "roadmap_id": "string (UUID)",
+    "macromap_id": "string (UUID)"
+  },
+  "error": "string (nullable) - Error message if failed",
+  "started_at": "datetime (nullable)",
+  "completed_at": "datetime (nullable)",
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+### ProgressUpdate
+```json
+{
+  "type": "string (progress|status|complete|error)",
+  "job_id": "string (UUID)",
+  "progress": "integer (0-100)",
+  "status": "string (pending|processing|completed|failed)",
+  "message": "string - Human-readable status message",
+  "data": "object (nullable) - Additional context (roadmap_id on complete, error on failure)"
+}
+```
+
+### PushToken
+```json
+{
+  "token_id": "string (UUID)",
+  "user_id": "string (UUID)",
+  "expo_token": "string - Expo push notification token",
+  "platform": "string (ios|android)",
+  "device_id": "string (nullable)",
+  "is_active": "boolean",
+  "last_used_at": "datetime",
+  "created_at": "datetime"
+}
+```
+
+### Notification
+```json
+{
+  "notification_id": "string (UUID)",
+  "user_id": "string (UUID)",
+  "type": "string (roadmap_complete|roadmap_failed)",
+  "title": "string",
+  "body": "string",
+  "data": {
+    "roadmap_id": "string (UUID)",
+    "error": "string (for failed notifications)"
+  },
+  "status": "string (pending|sent|failed|read)",
+  "sent_at": "datetime (nullable)",
+  "read_at": "datetime (nullable)",
+  "error": "string (nullable) - Error if notification failed to send",
+  "created_at": "datetime"
+}
+```
+
 ---
 
 ## Notes
@@ -1320,10 +1888,17 @@ WebSocket connection for real-time messaging.
 7. Friend management features:
    - Friendships use UUID-based IDs for consistency
    - RLS (Row Level Security) policies control data access
-   - Roadmap sharing is controlled via `restrictions.allowed_roadmap_ids`
+   - Friends can only view roadmaps where they are the accountability partner (anchor)
    - Only the addressee can accept/reject friend requests
    - Either party can remove a friendship
-8. Messaging system features:
+8. Anchor (Accountability Partner) features:
+   - Users can request friends to be accountability partners for specific roadmaps
+   - Friendship is verified before sending anchor requests (returns 403 if not friends)
+   - Only the requested anchor can accept/reject anchor requests
+   - Friends can only view roadmaps where they are the anchor (provides privacy)
+   - Roadmap owners can remove anchors at any time
+   - Anchor requests support three states: pending, accepted, rejected
+9. Messaging system features:
    - Threads are automatically created when friend requests are accepted
    - WebSocket connections are thread-specific with isolated broadcast rooms
    - All messages are persisted to the database before broadcasting

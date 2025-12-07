@@ -1147,53 +1147,17 @@ func GetFriendProfile(c *gin.Context, friendUserID string) (types.User, []types.
 		return types.User{}, nil, err
 	}
 
-	// Get allowed roadmaps
+	// Get roadmaps where the current user is the anchor
+	// Friends can only see roadmaps they are anchoring for accountability
 	var roadmaps []types.Roadmap
-
-	// Check if there are restrictions
-	if friendship.Restrictions != nil {
-		if allowedIDs, ok := friendship.Restrictions["allowed_roadmap_ids"].([]interface{}); ok && len(allowedIDs) > 0 {
-			// Convert interface{} slice to string slice
-			roadmapIDs := make([]string, 0, len(allowedIDs))
-			for _, id := range allowedIDs {
-				if strID, ok := id.(string); ok {
-					roadmapIDs = append(roadmapIDs, strID)
-				}
-			}
-
-			// Get only allowed roadmaps
-			if len(roadmapIDs) > 0 {
-				db.Where("user_id = ? AND roadmap_id IN ?", friendUserID, roadmapIDs).
-					Preload("Milestones", func(db *gorm.DB) *gorm.DB {
-						return db.Order("day ASC")
-					}).
-					Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-						return db.Order("day ASC")
-					}).
-					Find(&roadmaps)
-			}
-		} else {
-			// No allowed_roadmap_ids specified, return all roadmaps
-			db.Where("user_id = ?", friendUserID).
-				Preload("Milestones", func(db *gorm.DB) *gorm.DB {
-					return db.Order("day ASC")
-				}).
-				Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-					return db.Order("day ASC")
-				}).
-				Find(&roadmaps)
-		}
-	} else {
-		// No restrictions, return all roadmaps
-		db.Where("user_id = ?", friendUserID).
-			Preload("Milestones", func(db *gorm.DB) *gorm.DB {
-				return db.Order("day ASC")
-			}).
-			Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-				return db.Order("day ASC")
-			}).
-			Find(&roadmaps)
-	}
+	db.Where("user_id = ? AND anchor_id = ?", friendUserID, userIDStr).
+		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Find(&roadmaps)
 
 	return friendUser, roadmaps, nil
 }
@@ -1760,4 +1724,222 @@ func UpdateNotificationStatus(ctx context.Context, notif *types.Notification, up
     return db.Model(&types.Notification{}).
         Where("notification_id = ?", notif.NotificationID).
         Updates(updates).Error
+}
+
+// Anchor request management
+
+// CheckAreFriends checks if two users are friends (accepted status)
+func CheckAreFriends(userID1, userID2 string) bool {
+	var friendship types.Friendship
+	result := db.Where(
+		"((requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)) AND status = ?",
+		userID1, userID2, userID2, userID1, "accepted",
+	).First(&friendship)
+
+	return result.Error == nil
+}
+
+// CreateAnchorRequest creates a new anchor request for a roadmap
+func CreateAnchorRequest(c *gin.Context, roadmapID string, anchorUserID string) (types.AnchorRequest, error) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return types.AnchorRequest{}, errors.New("missing or invalid user_id")
+	}
+
+	userIDStr := userID.(string)
+
+	// Verify the roadmap exists and belongs to the requester
+	var roadmap types.Roadmap
+	if err := db.Where("roadmap_id = ? AND user_id = ?", roadmapID, userIDStr).First(&roadmap).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return types.AnchorRequest{}, errors.New("roadmap not found or you don't have permission")
+		}
+		return types.AnchorRequest{}, err
+	}
+
+	// Check if they are friends
+	if !CheckAreFriends(userIDStr, anchorUserID) {
+		return types.AnchorRequest{}, errors.New("you are not friends with this user")
+	}
+
+	// Check if there's already a pending request for this roadmap and anchor
+	var existingRequest types.AnchorRequest
+	result := db.Where("roadmap_id = ? AND anchor_id = ? AND status = ?", roadmapID, anchorUserID, "pending").First(&existingRequest)
+	if result.Error == nil {
+		return types.AnchorRequest{}, errors.New("anchor request already exists for this roadmap")
+	}
+
+	// Check if the anchor is already assigned to this roadmap
+	if roadmap.AnchorID != nil && *roadmap.AnchorID == anchorUserID {
+		return types.AnchorRequest{}, errors.New("this user is already an anchor for this roadmap")
+	}
+
+	// Create the anchor request
+	anchorRequest := types.AnchorRequest{
+		RoadmapID:   roadmapID,
+		RequesterID: userIDStr,
+		AnchorID:    anchorUserID,
+		Status:      "pending",
+		CreatedAt:   time.Now(),
+	}
+
+	if err := db.Create(&anchorRequest).Error; err != nil {
+		return types.AnchorRequest{}, err
+	}
+
+	// Preload relationships
+	db.Preload("Roadmap").Preload("Requester").Preload("Anchor").First(&anchorRequest, "request_id = ?", anchorRequest.RequestID)
+
+	return anchorRequest, nil
+}
+
+// GetAnchorRequests gets all pending anchor requests for the current user (as anchor)
+func GetAnchorRequests(c *gin.Context) []types.AnchorRequest {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return []types.AnchorRequest{}
+	}
+
+	var requests []types.AnchorRequest
+	db.Where("anchor_id = ? AND status = ?", userID.(string), "pending").
+		Preload("Roadmap").
+		Preload("Requester").
+		Order("created_at DESC").
+		Find(&requests)
+
+	return requests
+}
+
+// AcceptAnchorRequest accepts an anchor request and updates the roadmap
+func AcceptAnchorRequest(c *gin.Context, requestID string) (types.AnchorRequest, error) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return types.AnchorRequest{}, errors.New("missing or invalid user_id")
+	}
+
+	userIDStr := userID.(string)
+
+	// Fetch the anchor request
+	var anchorRequest types.AnchorRequest
+	if err := db.Where("request_id = ?", requestID).First(&anchorRequest).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return types.AnchorRequest{}, errors.New("anchor request not found")
+		}
+		return types.AnchorRequest{}, err
+	}
+
+	// Verify the current user is the anchor
+	if anchorRequest.AnchorID != userIDStr {
+		return types.AnchorRequest{}, errors.New("only the anchor can accept this request")
+	}
+
+	// Verify the request is pending
+	if anchorRequest.Status != "pending" {
+		return types.AnchorRequest{}, errors.New("anchor request is not pending")
+	}
+
+	// Start a transaction
+	tx := db.Begin()
+
+	// Update the anchor request status
+	now := time.Now()
+	anchorRequest.Status = "accepted"
+	anchorRequest.UpdatedAt = &now
+	if err := tx.Save(&anchorRequest).Error; err != nil {
+		tx.Rollback()
+		return types.AnchorRequest{}, err
+	}
+
+	// Update the roadmap's anchor_id
+	if err := tx.Model(&types.Roadmap{}).
+		Where("roadmap_id = ?", anchorRequest.RoadmapID).
+		Update("anchor_id", userIDStr).Error; err != nil {
+		tx.Rollback()
+		return types.AnchorRequest{}, err
+	}
+
+	// Commit the transaction
+	if err := tx.Commit().Error; err != nil {
+		return types.AnchorRequest{}, err
+	}
+
+	// Reload with relationships
+	db.Preload("Roadmap").Preload("Requester").Preload("Anchor").First(&anchorRequest, "request_id = ?", anchorRequest.RequestID)
+
+	return anchorRequest, nil
+}
+
+// RejectAnchorRequest rejects an anchor request
+func RejectAnchorRequest(c *gin.Context, requestID string) (types.AnchorRequest, error) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return types.AnchorRequest{}, errors.New("missing or invalid user_id")
+	}
+
+	userIDStr := userID.(string)
+
+	// Fetch the anchor request
+	var anchorRequest types.AnchorRequest
+	if err := db.Where("request_id = ?", requestID).First(&anchorRequest).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return types.AnchorRequest{}, errors.New("anchor request not found")
+		}
+		return types.AnchorRequest{}, err
+	}
+
+	// Verify the current user is the anchor
+	if anchorRequest.AnchorID != userIDStr {
+		return types.AnchorRequest{}, errors.New("only the anchor can reject this request")
+	}
+
+	// Verify the request is pending
+	if anchorRequest.Status != "pending" {
+		return types.AnchorRequest{}, errors.New("anchor request is not pending")
+	}
+
+	// Update the status
+	now := time.Now()
+	anchorRequest.Status = "rejected"
+	anchorRequest.UpdatedAt = &now
+	if err := db.Save(&anchorRequest).Error; err != nil {
+		return types.AnchorRequest{}, err
+	}
+
+	// Reload with relationships
+	db.Preload("Roadmap").Preload("Requester").Preload("Anchor").First(&anchorRequest, "request_id = ?", anchorRequest.RequestID)
+
+	return anchorRequest, nil
+}
+
+// RemoveAnchor removes an anchor from a roadmap
+func RemoveAnchor(c *gin.Context, roadmapID string) error {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return errors.New("missing or invalid user_id")
+	}
+
+	userIDStr := userID.(string)
+
+	// Verify the roadmap exists and belongs to the user
+	var roadmap types.Roadmap
+	if err := db.Where("roadmap_id = ? AND user_id = ?", roadmapID, userIDStr).First(&roadmap).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return errors.New("roadmap not found or you don't have permission")
+		}
+		return err
+	}
+
+	// Check if there's an anchor
+	if roadmap.AnchorID == nil {
+		return errors.New("no anchor assigned to this roadmap")
+	}
+
+	// Remove the anchor
+	if err := db.Model(&types.Roadmap{}).
+		Where("roadmap_id = ?", roadmapID).
+		Update("anchor_id", nil).Error; err != nil {
+		return err
+	}
+
+	return nil
 }

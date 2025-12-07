@@ -259,3 +259,122 @@ func GetMacroMap(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusOK, macroMap)
 }
+
+// Anchor handlers
+
+func CreateAnchorRequest(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	var requestBody struct {
+		AnchorID string `json:"anchor_id" binding:"required"`
+	}
+
+	if !utils.BindJSONOrAbort(c, &requestBody) {
+		return
+	}
+
+	anchorRequest, err := database.CreateAnchorRequest(c, roadmapID, requestBody.AnchorID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found or you don't have permission" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		if errMsg == "you are not friends with this user" {
+			utils.ErrorResponse(c, http.StatusForbidden, errMsg)
+			return
+		}
+		if errMsg == "anchor request already exists for this roadmap" || errMsg == "this user is already an anchor for this roadmap" {
+			utils.ConflictResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusCreated, anchorRequest)
+	log.Info(ctx, "Anchor request created successfully")
+}
+
+func GetAnchorRequests(c *gin.Context) {
+	requests := database.GetAnchorRequests(c)
+	utils.DataResponse(c, http.StatusOK, requests)
+}
+
+func AcceptAnchorRequest(c *gin.Context) {
+	ctx := c.Request.Context()
+	requestID := c.Param("requestid")
+
+	anchorRequest, err := database.AcceptAnchorRequest(c, requestID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "anchor request not found" {
+			utils.NotFoundResponse(c, "Anchor Request")
+			return
+		}
+		if errMsg == "only the anchor can accept this request" {
+			utils.ErrorResponse(c, http.StatusForbidden, errMsg)
+			return
+		}
+		if errMsg == "anchor request is not pending" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, anchorRequest)
+	log.Info(ctx, "Anchor request accepted successfully")
+}
+
+func RejectAnchorRequest(c *gin.Context) {
+	ctx := c.Request.Context()
+	requestID := c.Param("requestid")
+
+	anchorRequest, err := database.RejectAnchorRequest(c, requestID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "anchor request not found" {
+			utils.NotFoundResponse(c, "Anchor Request")
+			return
+		}
+		if errMsg == "only the anchor can reject this request" {
+			utils.ErrorResponse(c, http.StatusForbidden, errMsg)
+			return
+		}
+		if errMsg == "anchor request is not pending" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, anchorRequest)
+	log.Info(ctx, "Anchor request rejected successfully")
+}
+
+func RemoveAnchor(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	err := database.RemoveAnchor(c, roadmapID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found or you don't have permission" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		if errMsg == "no anchor assigned to this roadmap" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.MessageResponse(c, http.StatusOK, "Anchor removed successfully")
+	log.Info(ctx, "Anchor removed successfully")
+}

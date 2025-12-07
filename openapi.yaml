@@ -229,8 +229,8 @@ paths:
 
   /api/v1/friends/{id}/profile:
     get:
-      summary: Get friend's profile with allowed roadmaps
-      description: Returns friend's profile and roadmaps they've allowed you to see based on restrictions
+      summary: Get friend's profile with anchored roadmaps
+      description: Returns friend's profile and roadmaps where you are the accountability partner (anchor)
       tags: [Friends]
       parameters:
         - name: id
@@ -967,6 +967,162 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  # Anchor Management (Accountability Partners)
+  /api/v1/roadmaps/{roadmapid}/anchor-request:
+    post:
+      summary: Send accountability partner (anchor) request
+      description: Request a friend to be an accountability partner for this roadmap. Verifies friendship before sending.
+      tags: [Anchors]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - anchor_id
+              properties:
+                anchor_id:
+                  type: string
+                  format: uuid
+                  description: User ID of the friend to be the anchor
+                  example: "123e4567-e89b-12d3-a456-426614174000"
+      responses:
+        '201':
+          description: Anchor request sent successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AnchorRequest'
+        '403':
+          description: You are not friends with this user
+        '404':
+          description: Roadmap not found or you don't have permission
+        '409':
+          description: Anchor request already exists or user is already an anchor
+
+  /api/v1/roadmaps/{roadmapid}/anchor:
+    delete:
+      summary: Remove anchor from roadmap
+      description: Remove the accountability partner from this roadmap (roadmap owner only)
+      tags: [Anchors]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      responses:
+        '200':
+          description: Anchor removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: No anchor assigned to this roadmap
+        '404':
+          description: Roadmap not found or you don't have permission
+
+  /api/v1/anchor-requests:
+    get:
+      summary: Get pending anchor requests
+      description: Get all pending anchor requests where you are the requested anchor
+      tags: [Anchors]
+      responses:
+        '200':
+          description: Anchor requests retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AnchorRequest'
+
+  /api/v1/anchor-requests/{requestid}/accept:
+    post:
+      summary: Accept anchor request
+      description: Accept a request to be an accountability partner for a friend's roadmap
+      tags: [Anchors]
+      parameters:
+        - name: requestid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Anchor request ID
+      responses:
+        '200':
+          description: Anchor request accepted successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AnchorRequest'
+        '400':
+          description: Anchor request is not pending
+        '403':
+          description: Only the anchor can accept this request
+        '404':
+          description: Anchor request not found
+
+  /api/v1/anchor-requests/{requestid}/reject:
+    post:
+      summary: Reject anchor request
+      description: Reject a request to be an accountability partner for a friend's roadmap
+      tags: [Anchors]
+      parameters:
+        - name: requestid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Anchor request ID
+      responses:
+        '200':
+          description: Anchor request rejected successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/AnchorRequest'
+        '400':
+          description: Anchor request is not pending
+        '403':
+          description: Only the anchor can reject this request
+        '404':
+          description: Anchor request not found
+
   # Macro Map Management
   /api/v1/roadmaps/{roadmapid}/macro-map:
     post:
@@ -1061,6 +1217,52 @@ paths:
                             $ref: '#/components/schemas/MacroMap'
                           roadmap:
                             $ref: '#/components/schemas/Roadmap'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/agent/generate-async:
+    post:
+      summary: Generate roadmap asynchronously with real-time progress updates
+      tags: [AI Agent]
+      description: |
+        Starts async roadmap generation that can take 2-3 minutes. Returns immediately with job_id and roadmap_id.
+        Client can:
+        - Connect via WebSocket at /ws/agent/:jobid for real-time progress
+        - Poll GET /jobs/:jobid/status for status updates
+        - Receive push notification when complete (if token registered)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoalRequest'
+      responses:
+        '202':
+          description: Generation started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "pending"
+                  job_id:
+                    type: string
+                    format: uuid
+                    example: "123e4567-e89b-12d3-a456-426614174000"
+                  roadmap_id:
+                    type: string
+                    format: uuid
+                    example: "123e4567-e89b-12d3-a456-426614174001"
+                  message:
+                    type: string
+                    example: "Your roadmap is being processed"
+                  ws_url:
+                    type: string
+                    example: "ws/agent/123e4567-e89b-12d3-a456-426614174000"
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -1169,6 +1371,183 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  # Background Jobs
+  /api/v1/jobs/{jobid}/status:
+    get:
+      summary: Get background job status
+      description: Poll for status of an async roadmap generation job. Use WebSocket for real-time updates instead.
+      tags: [Background Jobs]
+      parameters:
+        - name: jobid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Job ID
+      responses:
+        '200':
+          description: Job status retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [pending, processing, completed, failed]
+                  progress:
+                    type: integer
+                    minimum: 0
+                    maximum: 100
+                  created_at:
+                    type: string
+                    format: date-time
+                  result:
+                    type: object
+                    description: Result data (only when status is completed)
+                    properties:
+                      roadmap_id:
+                        type: string
+                        format: uuid
+                      macromap_id:
+                        type: string
+                        format: uuid
+                  completed_at:
+                    type: string
+                    format: date-time
+                    description: Timestamp when job completed (only when status is completed)
+                  error:
+                    type: string
+                    description: Error message (only when status is failed)
+                  failed_at:
+                    type: string
+                    format: date-time
+                    description: Timestamp when job failed (only when status is failed)
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # Push Notifications
+  /api/v1/push/tokens:
+    post:
+      summary: Register push notification token
+      description: Register or update an Expo push notification token for the user
+      tags: [Push Notifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - expo_token
+                - platform
+              properties:
+                expo_token:
+                  type: string
+                  description: Expo push token from the device
+                  example: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+                platform:
+                  type: string
+                  enum: [ios, android]
+                  description: Device platform
+                device_id:
+                  type: string
+                  description: Optional device identifier
+      responses:
+        '200':
+          description: Push token registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Push token registered successfully"
+                  token_id:
+                    type: string
+                    format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/push/tokens/{token}:
+    delete:
+      summary: Deactivate push notification token
+      description: Deactivate a push notification token when user logs out or uninstalls app
+      tags: [Push Notifications]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Expo push token to deactivate
+      responses:
+        '200':
+          description: Push token deactivated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Push token deactivated successfully"
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # Notifications
+  /api/v1/notifications:
+    get:
+      summary: Get unread notifications
+      description: Retrieve all unread notifications for the current user
+      tags: [Notifications]
+      responses:
+        '200':
+          description: Notifications retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Notification'
+
+  /api/v1/notifications/{alertid}/read:
+    put:
+      summary: Mark notification as read
+      description: Mark a specific notification as read
+      tags: [Notifications]
+      parameters:
+        - name: alertid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Notification ID
+      responses:
+        '200':
+          description: Notification marked as read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Notification marked as read"
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   # Messaging - Threads
   /api/v1/threads:
     get:
@@ -1257,6 +1636,60 @@ paths:
         '403':
           description: Forbidden - user is not a participant of this thread
         '400':
+          description: Failed to upgrade to WebSocket
+
+  /api/v1/ws/agent/{jobid}:
+    get:
+      summary: WebSocket endpoint for AI generation progress updates
+      tags: [WebSocket, AI Agent]
+      parameters:
+        - name: jobid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Background job ID
+      description: |
+        Upgrade to WebSocket connection for real-time roadmap generation progress updates.
+
+        **Connection Flow:**
+        1. Client connects to websocket with job ID
+        2. Server verifies job exists and belongs to user
+        3. Server immediately sends current job status
+        4. Connection remains open for progress updates
+
+        **Receiving Progress Updates:**
+        Receive JSON messages with format:
+        ```json
+        {
+          "type": "progress|status|complete|error",
+          "job_id": "uuid",
+          "progress": 0-100,
+          "status": "pending|processing|completed|failed",
+          "message": "Human-readable status message",
+          "data": {} // Additional context (e.g., roadmap_id when complete)
+        }
+        ```
+
+        **Message Types:**
+        - `status`: Initial status upon connection
+        - `progress`: Progress update during generation (0-100%)
+        - `complete`: Generation completed successfully (includes roadmap_id in data)
+        - `error`: Generation failed (includes error message in data)
+
+        **Ping/Pong:**
+        Client can send `{"type": "ping"}` to keep connection alive.
+        Server responds with `{"type": "pong"}`.
+
+      responses:
+        '101':
+          description: WebSocket connection established
+        '401':
+          description: Unauthorized - missing or invalid authentication
+        '404':
+          description: Job not found or user not authorized
+        '500':
           description: Failed to upgrade to WebSocket
 
 components:
@@ -1481,7 +1914,53 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Roadmap'
-          description: Roadmaps this friend has allowed you to see
+          description: Roadmaps where you are the accountability partner (anchor)
+
+    # Anchor Management
+    AnchorRequest:
+      type: object
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        roadmap_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        requester_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+          description: User ID of the roadmap owner who sent the request
+        anchor_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174001"
+          description: User ID of the friend being asked to be the accountability partner
+        status:
+          type: string
+          enum: [pending, accepted, rejected]
+          example: "pending"
+          description: Status of the anchor request
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T10:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2024-01-01T10:30:00Z"
+        roadmap:
+          $ref: '#/components/schemas/Roadmap'
+          description: Associated roadmap details (when preloaded)
+        requester:
+          $ref: '#/components/schemas/User'
+          description: Requester user details (when preloaded)
+        anchor:
+          $ref: '#/components/schemas/User'
+          description: Anchor user details (when preloaded)
 
     # Roadmap Management
     Roadmap:
@@ -1520,6 +1999,12 @@ components:
             - `ai_generated`: Created by AI agent (always includes macro map)
             - `custom_made`: Manually created by user
           example: "ai_generated"
+        anchor_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: User ID of the accountability partner (anchor) for this roadmap
+          example: "123e4567-e89b-12d3-a456-426614174000"
         macro_map:
           $ref: '#/components/schemas/MacroMap'
           description: Strategic overview of the roadmap (only present in ai_generated roadmaps)
@@ -2033,6 +2518,185 @@ components:
           type: string
           example: "What kind of goal would you like to achieve?"
 
+    # Background Jobs & Async Processing
+    BackgroundJob:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        type:
+          type: string
+          enum: [roadmap_generation]
+          description: Type of background job
+          example: "roadmap_generation"
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+          description: Current status of the job
+          example: "processing"
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Progress percentage (0-100)
+          example: 45
+        payload:
+          type: object
+          description: Input data for the job (GoalRequest for roadmap generation)
+        result:
+          type: object
+          nullable: true
+          description: Result data when job is completed
+          properties:
+            roadmap_id:
+              type: string
+              format: uuid
+            macromap_id:
+              type: string
+              format: uuid
+        error:
+          type: string
+          nullable: true
+          description: Error message if job failed
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ProgressUpdate:
+      type: object
+      description: WebSocket message for real-time progress updates
+      properties:
+        type:
+          type: string
+          enum: [progress, status, complete, error]
+          description: Type of update message
+          example: "progress"
+        job_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Progress percentage
+          example: 65
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+          example: "processing"
+        message:
+          type: string
+          description: Human-readable status message
+          example: "Generating strategic roadmap..."
+        data:
+          type: object
+          nullable: true
+          description: Additional context (roadmap_id on complete, error on failure)
+
+    # Push Notifications
+    PushToken:
+      type: object
+      properties:
+        token_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        expo_token:
+          type: string
+          description: Expo push notification token
+          example: "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+        platform:
+          type: string
+          enum: [ios, android]
+          example: "ios"
+        device_id:
+          type: string
+          nullable: true
+          description: Optional device identifier
+        is_active:
+          type: boolean
+          description: Whether the token is currently active
+          example: true
+        last_used_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      properties:
+        notification_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        type:
+          type: string
+          description: Notification type
+          example: "roadmap_complete"
+          enum: [roadmap_complete, roadmap_failed]
+        title:
+          type: string
+          example: "Your roadmap is ready for review!"
+        body:
+          type: string
+          example: "Your Learn Web Development roadmap has been generated successfully."
+        data:
+          type: object
+          nullable: true
+          description: Additional payload for navigation
+          properties:
+            roadmap_id:
+              type: string
+              format: uuid
+        status:
+          type: string
+          enum: [pending, sent, failed, read]
+          description: Notification delivery and read status
+          example: "sent"
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          type: string
+          nullable: true
+          description: Error message if notification failed to send
+        created_at:
+          type: string
+          format: date-time
+
     # Messaging
     Thread:
       type: object
@@ -2096,6 +2760,8 @@ tags:
     description: User management operations
   - name: Friends
     description: Friend management and social features (search, requests, profile sharing)
+  - name: Anchors
+    description: Accountability partner (anchor) management for roadmaps
   - name: Roadmaps
     description: Roadmap management operations
   - name: Macro Map
@@ -2108,5 +2774,11 @@ tags:
     description: Step management operations
   - name: AI Agent
     description: AI-powered goal and roadmap generation with two-step macro/milestone map creation
+  - name: Background Jobs
+    description: Async job status tracking and polling
+  - name: Push Notifications
+    description: Push notification token management for Expo
+  - name: Notifications
+    description: User notification management (read/unread status)
   - name: WebSocket
     description: Real-time communication endpoints
