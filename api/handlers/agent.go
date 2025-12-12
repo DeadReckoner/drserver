@@ -184,20 +184,34 @@ func GetJobStatus(c *gin.Context) {
 func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID string, req types.GoalRequest) {
 	updateJobProgress(jobID, 5, string(types.JobStatusProcessing), "Initializing AI generation...")
 
-	updateJobProgress(jobID, 10, string(types.JobStatusProcessing), "Generating macro map")
+	updateJobProgress(jobID, 10, string(types.JobStatusProcessing), "Generating strategic roadmap (macro map)...")
 
-	generated, err := agent.GenerateGoalFromStructure(ctx, req)
+	// Step 1: Generate macro map (strategic view)
+	macroMap, err := agent.GenerateMacroMapFromGoalRequest(ctx, req)
 	if err != nil {
 		handleGenerationError(jobID, roadmapID, userID, err)
 		return
 	}
+
+	updateJobProgress(jobID, 50, string(types.JobStatusProcessing), "Macro map complete! Generating detailed milestone plan...")
+
+	// Step 2: Generate milestone map (tactical view) using the macro map as context
+	roadmap, err := agent.GenerateMilestoneMapFromGoalRequest(ctx, req, macroMap)
+	if err != nil {
+		handleGenerationError(jobID, roadmapID, userID, err)
+		return
+	}
+
 	updateJobProgress(jobID, 80, string(types.JobStatusProcessing), "Saving roadmap data...")
 
-	generated.Roadmap.RoadmapID = roadmapID
-	generated.Roadmap.UserID = userID
-	generated.Roadmap.Type = string(types.RoadmapTypeAIGenerated)
+	roadmap.RoadmapID = roadmapID
+	roadmap.UserID = userID
+	roadmap.Type = string(types.RoadmapTypeAIGenerated)
 
-	if err := database.UpdateRoadmapWithGeneration(ctx, generated.Roadmap); err != nil {
+	// Attach the MacroMap to the Roadmap before saving
+	roadmap.MacroMap = macroMap
+
+	if err := database.UpdateRoadmapWithGeneration(ctx, roadmap); err != nil {
 		handleGenerationError(jobID, roadmapID, userID, err)
 		return
 	}
@@ -212,7 +226,7 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 		CompletedAt: &now,
 		Result: map[string]any{
 			"roadmap_id": roadmapID,
-			"macromap_id": generated.MacroMap.MacroMapID,
+			"macromap_id": macroMap.MacroMapID,
 		},
 	}
 	database.UpdateBackgroundJob(ctx, &job)

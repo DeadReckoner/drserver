@@ -1576,7 +1576,8 @@ func UpdateBackgroundJob(ctx context.Context, job *types.BackgroundJob) error{
 		if err != nil {
 			return fmt.Errorf("failed to marshal result: %w", err)
 		}
-		updates["result"] = resultJSON
+		// Use gorm.Expr to tell PostgreSQL to cast the JSON string to JSONB type
+		updates["result"] = gorm.Expr("?::jsonb", string(resultJSON))
 	}
 	updates["updated_at"] = time.Now()
 	return db.Model(&types.BackgroundJob{}).Where("job_id = ?", job.JobID).Updates(updates).Error

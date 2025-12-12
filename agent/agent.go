@@ -66,12 +66,9 @@ type GeneratedRoadmap struct {
 	Roadmap  *types.Roadmap  `json:"roadmap"`   // Tactical execution layer
 }
 
-// GenerateGoalFromStructure is the main entry point when the user provides structured goal data
-// (via a form with fields like goal name, time commitment, skill level, etc.)
-// It converts the structured data into a natural language prompt and calls the generation pipeline
-func GenerateGoalFromStructure(ctx context.Context, goalReq types.GoalRequest) (*GeneratedRoadmap, error) {
-	// Convert structured fields into a natural language prompt for the AI
-	prompt := fmt.Sprintf(`
+// buildGoalPrompt converts structured goal request into natural language prompt
+func buildGoalPrompt(goalReq types.GoalRequest) string {
+	return fmt.Sprintf(`
 Based on the following goal information, create a detailed roadmap:
 
 Goal: %s
@@ -87,9 +84,56 @@ Please create a comprehensive roadmap with milestones, tasks, and actionable ste
 `, goalReq.GoalName, goalReq.GoalDescription, goalReq.GoalImportance,
 		goalReq.TargetCompletionDate, goalReq.WeeklyTimeCommitment,
 		goalReq.WorkFrequency, goalReq.Constraints, goalReq.CurrentSkillLevel)
+}
 
-	// Pass the constructed prompt to the main generation pipeline
+// GenerateGoalFromStructure is the main entry point when the user provides structured goal data
+// (via a form with fields like goal name, time commitment, skill level, etc.)
+// It converts the structured data into a natural language prompt and calls the generation pipeline
+func GenerateGoalFromStructure(ctx context.Context, goalReq types.GoalRequest) (*GeneratedRoadmap, error) {
+	prompt := buildGoalPrompt(goalReq)
 	return generateRoadmapFromPrompt(ctx, prompt)
+}
+
+// GenerateMacroMapFromGoalRequest generates only the macro map (strategic view) from a goal request
+// This allows for progress tracking between macro and milestone generation
+func GenerateMacroMapFromGoalRequest(ctx context.Context, goalReq types.GoalRequest) (*types.MacroMap, error) {
+	prompt := buildGoalPrompt(goalReq)
+	log.Info(ctx, "User Prompt", prompt)
+
+	// Generate macro map
+	macroMapResp, err := generateMacroMap(ctx, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate macro map: %w", err)
+	}
+
+	// Parse the raw JSON response
+	var macroMapData types.MacroMap
+	if err := parseMacroMapResponse(macroMapResp, &macroMapData); err != nil {
+		return nil, fmt.Errorf("failed to parse macro map: %w", err)
+	}
+
+	log.Info(ctx, "Macro Map", macroMapData)
+	return &macroMapData, nil
+}
+
+// GenerateMilestoneMapFromGoalRequest generates the milestone map (tactical view) using an existing macro map
+// This allows for progress tracking between macro and milestone generation
+func GenerateMilestoneMapFromGoalRequest(ctx context.Context, goalReq types.GoalRequest, macroMap *types.MacroMap) (*types.Roadmap, error) {
+	prompt := buildGoalPrompt(goalReq)
+
+	// Generate milestone map using the macro map as context
+	milestoneMapResp, err := generateMilestoneMap(ctx, prompt, macroMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate milestone map: %w", err)
+	}
+
+	// Parse the milestone map response
+	roadmap, err := ParseRoadmap(milestoneMapResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse roadmap: %w", err)
+	}
+
+	return roadmap, nil
 }
 
 // generateRoadmapFromPrompt is the core orchestrator for the two-step generation process
