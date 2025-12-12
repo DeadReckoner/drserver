@@ -2,7 +2,9 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -1569,7 +1571,12 @@ func UpdateBackgroundJob(ctx context.Context, job *types.BackgroundJob) error{
 		updates["completed_at"] = job.CompletedAt
 	}
 	if job.Result != nil {
-		updates["result"] = job.Result
+		// Manually serialize to JSON for JSONB column since Updates() doesn't use serializer tags
+		resultJSON, err := json.Marshal(job.Result)
+		if err != nil {
+			return fmt.Errorf("failed to marshal result: %w", err)
+		}
+		updates["result"] = resultJSON
 	}
 	updates["updated_at"] = time.Now()
 	return db.Model(&types.BackgroundJob{}).Where("job_id = ?", job.JobID).Updates(updates).Error

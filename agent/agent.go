@@ -612,6 +612,9 @@ func makeOpenAIRequest(ctx context.Context, reqBody AIRequest) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	// Log the request for debugging
+	log.Info(ctx, "OpenAI Request Payload", string(bodyBytes))
+
 	// Create HTTP POST request to OpenAI
 	req, err := http.NewRequestWithContext(ctx, "POST", openAIURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
@@ -619,7 +622,9 @@ func makeOpenAIRequest(ctx context.Context, reqBody AIRequest) ([]byte, error) {
 	}
 
 	// Set required headers (API key from environment variable)
-	req.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	log.Info(ctx, "OpenAI API Key", fmt.Sprintf("Using API key: %s...%s", apiKey[:10], apiKey[len(apiKey)-5:]))
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	// Execute request with 3-minute timeout (AI generation can take time)
@@ -635,6 +640,9 @@ func makeOpenAIRequest(ctx context.Context, reqBody AIRequest) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
+
+	// Log the response for debugging
+	log.Info(ctx, fmt.Sprintf("OpenAI Response Status: %d", resp.StatusCode), string(respBytes))
 
 	// Check for HTTP errors (4xx, 5xx status codes)
 	if resp.StatusCode >= 400 {

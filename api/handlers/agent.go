@@ -57,10 +57,7 @@ func AgentGenerate(c *gin.Context) {
 }
 
 func AgentGenerateAsync(c *gin.Context) {
-	ctx := c.Request.Context()
 	userID := c.GetString("user_id")
-
-
 
 	var req types.GoalRequest
 	if err := c.ShouldBindJSON(&req); err != nil{
@@ -97,7 +94,8 @@ func AgentGenerateAsync(c *gin.Context) {
 		return
 	}
 
-	go processRoadmapGeneration(ctx, job.JobID, draft.RoadmapID, userID, req)
+	// Use background context for the goroutine so it doesn't get cancelled when the HTTP request completes
+	go processRoadmapGeneration(context.Background(), job.JobID, draft.RoadmapID, userID, req)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"status": job.Status,

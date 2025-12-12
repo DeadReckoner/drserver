@@ -157,8 +157,8 @@ type MacroMilestone struct {
 	DurationDaysMax  int    `json:"duration_days_max"`
 	OrderIndex       int    `json:"order_index"`
 
-	// Resources forecast stored as JSONB
-	ResourcesForecast *string `gorm:"type:jsonb" json:"resources_forecast,omitempty"`
+	// Resources forecast stored as JSON string (text)
+	ResourcesForecast *string `gorm:"type:text" json:"resources_forecast,omitempty"`
 
 	// Related spikes and risks
 	Spikes []Spike `gorm:"foreignKey:MacroMilestoneID;constraint:OnDelete:CASCADE;" json:"spikes,omitempty"`
@@ -211,7 +211,7 @@ type Task struct {
 	// New fields from Milestone Map spec
 	Rationale    string  `json:"rationale,omitempty"`
 	EstMinutes   int     `json:"est_minutes,omitempty"`
-	Dependencies *string `gorm:"type:jsonb" json:"dependencies,omitempty"`
+	Dependencies *string `gorm:"type:text" json:"dependencies,omitempty"`
 	Confidence   string  `json:"confidence,omitempty"`
 
 	Day       int       `json:"day"`
@@ -279,8 +279,8 @@ type BackgroundJob struct {
 	Type       string     `gorm:"column:type;not null" json:"type"`
 	Status     string     `gorm:"column:status;default:pending" json:"status"`
 	Progress   int        `gorm:"column:progress;default:0" json:"progress"`
-	Payload    any        `gorm:"type:jsonb;column:payload" json:"payload"`
-	Result     any        `gorm:"type:jsonb;column:result" json:"result,omitempty"`
+	Payload    any        `gorm:"type:jsonb;column:payload;serializer:json" json:"payload"`
+	Result     any        `gorm:"type:jsonb;column:result;serializer:json" json:"result,omitempty"`
 	Error      string     `gorm:"column:error" json:"error,omitempty"`
 	StartedAt   *time.Time `gorm:"column:started_at" json:"started_at,omitempty"`
 	CompletedAt *time.Time `gorm:"column:completed_at" json:"completed_at,omitempty"`
