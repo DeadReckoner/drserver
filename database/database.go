@@ -1402,6 +1402,19 @@ func CreateThread(c *gin.Context, userID1, userID2 string) (types.Thread, error)
 	return thread, nil
 }
 
+// GetThreadBetweenUsers returns the thread_id between two users, or empty string if none exists
+func GetThreadBetweenUsers(c *gin.Context, userID1, userID2 string) string {
+	var participant types.ThreadParticipants
+	err := db.Where("user_id = ? AND left_at IS NULL", userID1).
+		Joins("JOIN thread_participants tp2 ON thread_participants.thread_id = tp2.thread_id AND tp2.user_id = ? AND tp2.left_at IS NULL", userID2).
+		First(&participant).Error
+
+	if err == nil {
+		return participant.ThreadID
+	}
+	return ""
+}
+
 // GetThreadsByUser returns all threads for a given user
 func GetThreadsByUser(c *gin.Context, userID string) ([]types.Thread, error) {
 	var threads []types.Thread

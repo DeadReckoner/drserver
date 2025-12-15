@@ -53,6 +53,7 @@ type FriendResponse struct {
 type FriendProfileResponse struct {
 	User            User      `json:"user"`
 	AllowedRoadmaps []Roadmap `json:"allowed_roadmaps"`
+	ThreadID        string    `json:"thread_id"`
 }
 
 type AnchorRequest struct {

@@ -138,9 +138,14 @@ func GetFriendProfile(c *gin.Context) {
 		return
 	}
 
+	// Get thread_id between the two users
+	userID, _ := c.Get("user_id")
+	threadID := database.GetThreadBetweenUsers(c, userID.(string), friendUserID)
+
 	response := types.FriendProfileResponse{
 		User:            friendUser,
 		AllowedRoadmaps: roadmaps,
+		ThreadID:        threadID,
 	}
 
 	utils.DataResponse(c, http.StatusOK, response)
