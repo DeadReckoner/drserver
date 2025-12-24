@@ -1964,3 +1964,14 @@ func RemoveAnchor(c *gin.Context, roadmapID string) error {
 
 	return nil
 }
+
+func GetHabit(c *gin.Context, habitID string) types.Habit{
+
+
+	var habit types.Habit
+
+
+
+
+	return habit
+}

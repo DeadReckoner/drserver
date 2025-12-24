@@ -221,6 +221,16 @@ type Task struct {
 	Steps     []Step    `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps,omitempty"`
 }
 
+type Habit struct {
+	HabitID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"habit_id"`
+	UserID      string `gorm:"type:uuid" json:"user_id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+
+	Completed bool      `json:"completed"`
+	Date      time.Time `json:"date"`
+}
+
 type Step struct {
 	StepID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"step_id"`
 	TaskID      string `gorm:"type:uuid" json:"task_id"`

@@ -110,6 +110,16 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 	}
 }
 
+func setupHabitRoutes(rg *gin.RouterGroup){
+	habits := rg.Group("/habits")
+
+	{
+		habits.GET("/:habitid", utils.ValidateUUID("habitid"), handlers.GetHabit)
+	}
+
+
+}
+
 func setupAgentRoutes(rg *gin.RouterGroup) {
 	agent := rg.Group("/agent")
 	{
