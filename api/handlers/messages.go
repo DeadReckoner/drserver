@@ -268,6 +268,9 @@ func WSHandler(c *gin.Context) {
 		// Broadcast persisted message to all clients in this thread room
 		fmt.Printf("Broadcasting saved message %s in thread %s from user %s\n", savedMessage.MessageID, threadID, userIDStr)
 		room.broadcast <- &savedMessage
+
+		// Send push notifications to other thread participants
+		go sendMessageNotifications(threadID, userIDStr, savedMessage.MessageID, inMsg.Content)
 	}
 
 	fmt.Printf("WebSocket disconnected: user %s left thread %s\n", userIDStr, threadID)
@@ -315,4 +318,49 @@ func GetMessageById(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusOK, message)
 	log.Info(ctx, fmt.Sprintf("Retrieved message %s for user %s", messageID, userID))
+}
+
+// sendMessageNotifications sends push notifications to all thread participants except the sender
+func sendMessageNotifications(threadID, senderID, messageID, content string) {
+	ctx := &gin.Context{}
+
+	// Get all thread participants
+	participants, err := database.GetThreadParticipants(ctx, threadID)
+	if err != nil {
+		fmt.Printf("Failed to get thread participants for notifications: %v\n", err)
+		return
+	}
+
+	// Get sender's name
+	sender, err := database.GetUserByID(senderID)
+	if err != nil {
+		fmt.Printf("Failed to get sender info for notification: %v\n", err)
+		return
+	}
+
+	senderName := sender.FirstName + " " + sender.LastName
+
+	// Send notification to all participants except the sender
+	for _, participant := range participants {
+		if participant.UserID == senderID {
+			continue // Don't notify the sender
+		}
+
+		// Truncate content if too long
+		displayContent := content
+		if len(content) > 100 {
+			displayContent = content[:100] + "..."
+		}
+
+		utils.SendPushNotification(
+			participant.UserID,
+			"message_new",
+			senderName,
+			displayContent,
+			map[string]any{
+				"thread_id":  threadID,
+				"message_id": messageID,
+			},
+		)
+	}
 }

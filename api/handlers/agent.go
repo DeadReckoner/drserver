@@ -1,16 +1,13 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"dr/server/agent"
 	"dr/server/database"
 	"dr/server/log"
 	"dr/server/types"
 	"dr/server/websocket"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -240,7 +237,7 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 		},
 	})
 
-	sendPushNotification(userID, "roadmap_complete",
+	utils.SendPushNotification(userID, "roadmap_complete",
 		"Your roadmap is ready for review!", fmt.Sprintf("Your %s roadmap has been generated successfully.", req.GoalName),
 		map[string]any{
 			"roadmap_id": roadmapID,
@@ -295,7 +292,7 @@ func handleGenerationError(jobID, roadmapID, userID string, err error) {
 		Data:    map[string]string{"error": err.Error()},
 	})
 
-	sendPushNotification(userID, "roadmap_failed",
+	utils.SendPushNotification(userID, "roadmap_failed",
 		"Roadmap Generation Failed",
 		"We encountered an issue. Please try again.",
 		map[string]any{
@@ -322,124 +319,6 @@ func getProgressMessage(status string, progress int) string {
 		return "Saving roadmap..."
 	}
 	return "Finalizing..."
-}
-
-func sendPushNotification(userID, notificationType, title, body string, data map[string]any) {
-
-	tokens := database.GetActivePushTokens(context.Background(), userID)
-	if len(tokens) == 0 {
-		log.Info(context.Background(), "No active push tokens", userID)
-		return
-	}
-
-	alert := types.Notification{
-		NotificationID: uuid.NewString(),
-		UserID:         userID,
-		Type:           notificationType,
-		Title:          title,
-		Body:           body,
-		Data:           data,
-		Status:         string(types.NotificationStatusPending),
-	}
-
-	database.CreateNotification(context.Background(), &alert)
-
-	for _, token := range tokens {
-		go sendExpoNotification(token.ExpoToken, title, body, data, alert.NotificationID)
-	}
-}
-
-func sendExpoNotification(expoToken, title, body string, data map[string]any, notificationID string) {
-	ctx := context.Background()
-
-	// Prepare Expo Push notification payload
-	pushMessage := map[string]any{
-		"to":       expoToken,
-		"title":    title,
-		"body":     body,
-		"data":     data,
-		"sound":    "default",
-		"priority": "high",
-	}
-
-	payload, err := json.Marshal(pushMessage)
-	if err != nil {
-		log.Info(ctx, "Failed to marshal push notification payload", err)
-		updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), err.Error())
-		return
-	}
-
-	// Send to Expo Push API
-	resp, err := http.Post(
-		"https://exp.host/--/api/v2/push/send",
-		"application/json",
-		bytes.NewBuffer(payload),
-	)
-	if err != nil {
-		log.Info(ctx, "Failed to send push notification", err)
-		updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), err.Error())
-		return
-	}
-	defer resp.Body.Close()
-
-	// Read response
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Info(ctx, "Failed to read push notification response", err)
-		updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), err.Error())
-		return
-	}
-
-	// Check if successful
-	if resp.StatusCode != http.StatusOK {
-		log.Info(ctx, "Expo push notification failed", string(responseBody))
-		updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), string(responseBody))
-		return
-	}
-
-	// Parse response to check for errors
-	var expoResponse struct {
-		Data []struct {
-			Status  string `json:"status"`
-			Message string `json:"message"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(responseBody, &expoResponse); err == nil {
-		if len(expoResponse.Data) > 0 && expoResponse.Data[0].Status == "error" {
-			log.Info(ctx, "Expo returned error", expoResponse.Data[0].Message)
-			updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), expoResponse.Data[0].Message)
-			return
-		}
-	}
-
-	// Success!
-	updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusSent), "")
-	log.Info(ctx, "Push notification sent successfully", notificationID)
-}
-
-func updateNotificationStatus(ctx context.Context, notificationID, status, errorMsg string) {
-	updates := map[string]any{
-		"status": status,
-	}
-
-	if status == string(types.NotificationStatusSent) {
-		now := time.Now()
-		updates["sent_at"] = now
-	}
-
-	if errorMsg != "" {
-		updates["error"] = errorMsg
-	}
-
-	// Update notification status in database
-	notification := types.Notification{
-		NotificationID: notificationID,
-	}
-
-	if err := database.UpdateNotificationStatus(ctx, &notification, updates); err != nil {
-		log.Info(ctx, "Failed to update notification status", err)
-	}
 }
 
 func AgentGenerateMilestone(c *gin.Context) {

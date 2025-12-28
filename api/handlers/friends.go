@@ -78,6 +78,9 @@ func CreateFriendRequest(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusCreated, friendship)
 	log.Info(ctx, "Friend request created successfully")
+
+	// Send push notification to the addressee
+	go sendFriendRequestNotification(friendship)
 }
 
 func GetFriendRequests(c *gin.Context) {
@@ -210,4 +213,66 @@ func UpdateFriendRequestStatus(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusOK, friendship)
 	log.Info(ctx, "Friend request status updated to: "+req.Status)
+
+	// Send push notification to the requester
+	go sendFriendStatusNotification(friendship, req.Status)
+}
+
+// sendFriendRequestNotification sends a notification when a friend request is created
+func sendFriendRequestNotification(friendship types.Friendship) {
+	// Get requester's name
+	requester, err := database.GetUserByID(friendship.RequesterID)
+	if err != nil {
+		log.Info(nil, "Failed to get requester info for notification:", err)
+		return
+	}
+
+	requesterName := requester.FirstName + " " + requester.LastName
+
+	utils.SendPushNotification(
+		friendship.AddresseeID,
+		"friend_request",
+		"New Friend Request",
+		requesterName+" wants to connect with you",
+		map[string]any{
+			"friendship_id": friendship.ID,
+			"requester_id":  friendship.RequesterID,
+		},
+	)
+}
+
+// sendFriendStatusNotification sends a notification when a friend request is accepted or rejected
+func sendFriendStatusNotification(friendship types.Friendship, status string) {
+	// Get addressee's name (the person who accepted/rejected)
+	addressee, err := database.GetUserByID(friendship.AddresseeID)
+	if err != nil {
+		log.Info(nil, "Failed to get addressee info for notification:", err)
+		return
+	}
+
+	addresseeName := addressee.FirstName + " " + addressee.LastName
+
+	var notificationType, title, body string
+	if status == "accepted" {
+		notificationType = "friend_accepted"
+		title = "Friend Request Accepted"
+		body = addresseeName + " accepted your friend request"
+	} else if status == "rejected" {
+		notificationType = "friend_rejected"
+		title = "Friend Request Declined"
+		body = addresseeName + " declined your friend request"
+	} else {
+		return // Unknown status
+	}
+
+	utils.SendPushNotification(
+		friendship.RequesterID,
+		notificationType,
+		title,
+		body,
+		map[string]any{
+			"friendship_id": friendship.ID,
+			"addressee_id":  friendship.AddresseeID,
+		},
+	)
 }

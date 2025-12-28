@@ -295,6 +295,9 @@ func CreateAnchorRequest(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusCreated, anchorRequest)
 	log.Info(ctx, "Anchor request created successfully")
+
+	// Send push notification to the anchor
+	go sendAnchorRequestNotification(anchorRequest)
 }
 
 func GetAnchorRequests(c *gin.Context) {
@@ -327,6 +330,9 @@ func AcceptAnchorRequest(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusOK, anchorRequest)
 	log.Info(ctx, "Anchor request accepted successfully")
+
+	// Send push notification to the requester
+	go sendAnchorStatusNotification(anchorRequest, "accepted")
 }
 
 func RejectAnchorRequest(c *gin.Context) {
@@ -354,6 +360,9 @@ func RejectAnchorRequest(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusOK, anchorRequest)
 	log.Info(ctx, "Anchor request rejected successfully")
+
+	// Send push notification to the requester
+	go sendAnchorStatusNotification(anchorRequest, "rejected")
 }
 
 func RemoveAnchor(c *gin.Context) {
@@ -377,4 +386,63 @@ func RemoveAnchor(c *gin.Context) {
 
 	utils.MessageResponse(c, http.StatusOK, "Anchor removed successfully")
 	log.Info(ctx, "Anchor removed successfully")
+}
+
+// sendAnchorRequestNotification sends a notification when an anchor request is created
+func sendAnchorRequestNotification(anchorRequest types.AnchorRequest) {
+	// Get requester's name
+	requester, err := database.GetUserByID(anchorRequest.RequesterID)
+	if err != nil {
+		log.Info(nil, "Failed to get requester info for notification:", err)
+		return
+	}
+
+	requesterName := requester.FirstName + " " + requester.LastName
+
+	utils.SendPushNotification(
+		anchorRequest.AnchorID,
+		"anchor_request",
+		"New Anchor Request",
+		requesterName+" wants you to be their anchor",
+		map[string]any{
+			"request_id": anchorRequest.RequestID,
+			"roadmap_id": anchorRequest.RoadmapID,
+		},
+	)
+}
+
+// sendAnchorStatusNotification sends a notification when an anchor request is accepted or rejected
+func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status string) {
+	// Get anchor's name (the person who accepted/rejected)
+	anchor, err := database.GetUserByID(anchorRequest.AnchorID)
+	if err != nil {
+		log.Info(nil, "Failed to get anchor info for notification:", err)
+		return
+	}
+
+	anchorName := anchor.FirstName + " " + anchor.LastName
+
+	var notificationType, title, body string
+	if status == "accepted" {
+		notificationType = "anchor_accepted"
+		title = "Anchor Request Accepted"
+		body = anchorName + " accepted your anchor request"
+	} else if status == "rejected" {
+		notificationType = "anchor_rejected"
+		title = "Anchor Request Declined"
+		body = anchorName + " declined your anchor request"
+	} else {
+		return // Unknown status
+	}
+
+	utils.SendPushNotification(
+		anchorRequest.RequesterID,
+		notificationType,
+		title,
+		body,
+		map[string]any{
+			"request_id": anchorRequest.RequestID,
+			"roadmap_id": anchorRequest.RoadmapID,
+		},
+	)
 }

@@ -96,3 +96,13 @@ func SearchUsersByEmail(email string) []types.User {
 
 	return users
 }
+
+// GetUserByID retrieves a user by their ID
+func GetUserByID(userID string) (types.User, error) {
+	var user types.User
+	result := db.Where("user_id = ?", userID).First(&user)
+	if result.Error != nil {
+		return types.User{}, result.Error
+	}
+	return user, nil
+}
