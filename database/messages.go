@@ -120,6 +120,23 @@ func GetThreadsByUser(c *gin.Context, userID string) ([]types.Thread, error) {
 
 	log.Printf("DEBUG: Found %d threads for user %s", len(threads), userID)
 
+	// Calculate unread counts for each thread
+	for i := range threads {
+		count, err := CalculateUnreadCount(c, threads[i].ThreadID, userID)
+		if err != nil {
+			log.Printf("Warning: Failed to calculate unread count for thread %s: %v", threads[i].ThreadID, err)
+			count = 0
+		}
+		threads[i].TotalUnread = count
+
+		// Update DB in background
+		go func(threadID string, unreadCount int) {
+			db.Model(&types.Thread{}).
+				Where("thread_id = ?", threadID).
+				Update("total_unread", unreadCount)
+		}(threads[i].ThreadID, count)
+	}
+
 	return threads, nil
 }
 
@@ -165,6 +182,7 @@ func GetThreadMessages(c *gin.Context, threadID, userID string) ([]types.Message
 				ThreadID:  msg.ThreadID,
 				UserID:    msg.UserID,
 				Content:   msg.Content,
+				Read:      msg.Read,
 				CreatedAt: msg.CreatedAt,
 				User:      &user,
 			})
@@ -175,13 +193,49 @@ func GetThreadMessages(c *gin.Context, threadID, userID string) ([]types.Message
 				ThreadID:  msg.ThreadID,
 				UserID:    msg.UserID,
 				Content:   msg.Content,
+				Read:      msg.Read,
 				CreatedAt: msg.CreatedAt,
 				User:      nil,
 			})
 		}
 	}
 
+	// Mark messages as read after retrieving them
+	if err := MarkMessagesAsRead(c, threadID, userID); err != nil {
+		log.Printf("Warning: Failed to mark messages as read for thread %s, user %s: %v", threadID, userID, err)
+	}
+
 	return response, nil
+}
+
+// MarkMessagesAsRead marks all messages from OTHER users as read in a thread
+func MarkMessagesAsRead(c *gin.Context, threadID, userID string) error {
+	result := db.Model(&types.Messages{}).
+		Where("thread_id = ? AND user_id != ? AND read = ?", threadID, userID, false).
+		Update("read", true)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	log.Printf("Marked %d messages as read in thread %s for user %s", result.RowsAffected, threadID, userID)
+	return nil
+}
+
+// CalculateUnreadCount counts unread messages from other users in a thread
+func CalculateUnreadCount(c *gin.Context, threadID, userID string) (int, error) {
+	var count int64
+
+	err := db.Model(&types.Messages{}).
+		Where("thread_id = ? AND user_id != ? AND read = ? AND deleted_at IS NULL",
+			threadID, userID, false).
+		Count(&count).Error
+
+	if err != nil {
+		return 0, err
+	}
+
+	return int(count), nil
 }
 
 // CreateMessage saves a new message to the database
@@ -208,6 +262,11 @@ func CreateMessage(c *gin.Context, threadID, userID, content string) (types.Mess
 	// Update thread's updated_at timestamp
 	db.Model(&types.Thread{}).Where("thread_id = ?", threadID).Update("updated_at", time.Now())
 
+	// Update last sent message
+	if err := updateLastSent(threadID, &message.MessageID); err != nil {
+		log.Printf("Warning: Failed to update last_sent_message for thread %s: %v", threadID, err)
+	}
+
 	return message, nil
 }
 
@@ -228,7 +287,8 @@ func GetThreadParticipants(c *gin.Context, threadID string) ([]types.User, error
 	return users, nil
 }
 
-func updateLastSent(threadID string, messageID string) error {
-
-	return nil
+func updateLastSent(threadID string, messageID *string) error {
+	return db.Model(&types.Thread{}).
+		Where("thread_id = ?", threadID).
+		Update("last_sent_message", messageID).Error
 }

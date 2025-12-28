@@ -243,7 +243,7 @@ type Thread struct {
 	ThreadID        string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"thread_id"`
 	Name            string    `json:"name"`
 	TotalUnread     int       `json:"total_unread"`
-	LastSentMessage string    `gorm:"type:uuid" json:"last_sent_message"`
+	LastSentMessage *string   `gorm:"type:uuid" json:"last_sent_message,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -271,11 +271,13 @@ type ThreadParticipants struct {
 // Response types for messaging API
 
 type ThreadWithParticipants struct {
-	ThreadID     string    `json:"thread_id"`
-	Name         string    `json:"name"`
-	Participants []User    `json:"participants"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ThreadID        string    `json:"thread_id"`
+	Name            string    `json:"name"`
+	Participants    []User    `json:"participants"`
+	TotalUnread     int       `json:"total_unread"`
+	LastSentMessage string    `json:"last_sent_message,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type MessageResponse struct {
@@ -283,6 +285,7 @@ type MessageResponse struct {
 	ThreadID  string    `json:"thread_id"`
 	UserID    string    `json:"user_id"`
 	Content   string    `json:"content"`
+	Read      bool      `json:"read"`
 	CreatedAt time.Time `json:"created_at"`
 	User      *User     `json:"user,omitempty"`
 }

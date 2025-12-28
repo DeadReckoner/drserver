@@ -73,12 +73,19 @@ func GetThreads(c *gin.Context) {
 			continue
 		}
 
+		lastSentMessage := ""
+		if thread.LastSentMessage != nil {
+			lastSentMessage = *thread.LastSentMessage
+		}
+
 		response = append(response, types.ThreadWithParticipants{
-			ThreadID:     thread.ThreadID,
-			Name:         thread.Name,
-			Participants: participants,
-			CreatedAt:    thread.CreatedAt,
-			UpdatedAt:    thread.UpdatedAt,
+			ThreadID:        thread.ThreadID,
+			Name:            thread.Name,
+			Participants:    participants,
+			TotalUnread:     thread.TotalUnread,
+			LastSentMessage: lastSentMessage,
+			CreatedAt:       thread.CreatedAt,
+			UpdatedAt:       thread.UpdatedAt,
 		})
 	}
 
