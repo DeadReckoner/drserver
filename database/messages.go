@@ -238,6 +238,23 @@ func CalculateUnreadCount(c *gin.Context, threadID, userID string) (int, error) 
 	return int(count), nil
 }
 
+// CalculateTotalUnreadCount counts all unread messages from other users across all threads
+func CalculateTotalUnreadCount(c *gin.Context, userID string) (int, error) {
+	var count int64
+
+	err := db.Model(&types.Messages{}).
+		Joins("INNER JOIN thread_participants tp ON messages.thread_id = tp.thread_id").
+		Where("tp.user_id = ? AND tp.left_at IS NULL AND messages.user_id != ? AND messages.read = ? AND messages.deleted_at IS NULL",
+			userID, userID, false).
+		Count(&count).Error
+
+	if err != nil {
+		return 0, err
+	}
+
+	return int(count), nil
+}
+
 // CreateMessage saves a new message to the database
 func CreateMessage(c *gin.Context, threadID, userID, content string) (types.Messages, error) {
 	// Verify user is a participant

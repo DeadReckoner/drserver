@@ -161,6 +161,7 @@ func setupMessageThreadRoutes(rg *gin.RouterGroup) {
 	{
 		threads.GET("", handlers.GetThreads)
 		threads.GET("/:threadid/messages", utils.ValidateUUID("threadid"), handlers.GetMessages)
+		threads.GET("/unread", handlers.GetTotalUnreadCount)
 	}
 }
 

@@ -273,3 +273,17 @@ func WSHandler(c *gin.Context) {
 	fmt.Printf("WebSocket disconnected: user %s left thread %s\n", userIDStr, threadID)
 	log.Info(ctx, fmt.Sprintf("WebSocket disconnected: user %s left thread %s", userIDStr, threadID))
 }
+
+
+func GetTotalUnreadCount(c *gin.Context){
+
+	userID, exists := c.Get("user_id")
+	if !exists || userID == ""{
+		return
+	}
+
+	totalUnreadCount, _ := database.CalculateTotalUnreadCount(c, userID)
+
+
+	utils.DataResponse(c, http.StatusOK, totalUnreadCount)
+}
