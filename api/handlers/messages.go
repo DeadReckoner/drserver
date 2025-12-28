@@ -287,3 +287,32 @@ func GetTotalUnreadCount(c *gin.Context){
 
 	utils.DataResponse(c, http.StatusOK, totalUnreadCount)
 }
+
+// GetMessageById returns a single message by its ID
+func GetMessageById(c *gin.Context) {
+	ctx := c.Request.Context()
+	messageID := c.Param("messageid")
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		utils.BadRequestResponse(c, "missing or invalid user_id")
+		return
+	}
+
+	message, err := database.GetMessageByID(c, messageID, userID.(string))
+	if err != nil {
+		if err.Error() == "message not found" {
+			utils.NotFoundResponse(c, "Message not found")
+			return
+		}
+		if err.Error() == "access denied: user is not a participant of this thread" {
+			utils.ForbiddenResponse(c, "You are not a participant of this thread")
+			return
+		}
+		fmt.Printf("Failed to get message %s for user %s: %v\n", messageID, userID, err)
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, message)
+	log.Info(ctx, fmt.Sprintf("Retrieved message %s for user %s", messageID, userID))
+}

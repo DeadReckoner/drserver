@@ -309,3 +309,53 @@ func updateLastSent(threadID string, messageID *string) error {
 		Where("thread_id = ?", threadID).
 		Update("last_sent_message", messageID).Error
 }
+
+// GetMessageByID retrieves a single message by its ID
+// Verifies the user is a participant of the thread before returning the message
+func GetMessageByID(c *gin.Context, messageID, userID string) (*types.MessageResponse, error) {
+	// First get the message to find which thread it belongs to
+	var message types.Messages
+	err := db.Where("message_id = ? AND deleted_at IS NULL", messageID).
+		First(&message).Error
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, errors.New("message not found")
+		}
+		return nil, err
+	}
+
+	// Verify user is a participant of the thread
+	if err := VerifyThreadParticipant(c, message.ThreadID, userID); err != nil {
+		return nil, err
+	}
+
+	// Get user information
+	var user types.User
+	var response types.MessageResponse
+
+	if err := db.Where("user_id = ?", message.UserID).First(&user).Error; err == nil {
+		response = types.MessageResponse{
+			MessageID: message.MessageID,
+			ThreadID:  message.ThreadID,
+			UserID:    message.UserID,
+			Content:   message.Content,
+			Read:      message.Read,
+			CreatedAt: message.CreatedAt,
+			User:      &user,
+		}
+	} else {
+		// If user not found, still return message but without user object
+		response = types.MessageResponse{
+			MessageID: message.MessageID,
+			ThreadID:  message.ThreadID,
+			UserID:    message.UserID,
+			Content:   message.Content,
+			Read:      message.Read,
+			CreatedAt: message.CreatedAt,
+			User:      nil,
+		}
+	}
+
+	return &response, nil
+}
