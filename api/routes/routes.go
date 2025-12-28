@@ -114,7 +114,9 @@ func setupHabitRoutes(rg *gin.RouterGroup){
 	habits := rg.Group("/habits")
 
 	{
+		habits.POST("", handlers.CreateHabit)
 		habits.GET("/:habitid", utils.ValidateUUID("habitid"), handlers.GetHabit)
+		habits.PATCH(":habitid", utils.ValidateUUID("habitid"), handlers.UpdateHabit)
 	}
 
 
