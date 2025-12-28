@@ -10,10 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-
-
-
-func GetHabit(c *gin.Context){
+func GetHabit(c *gin.Context) {
 	habitID := c.Param("habitid")
 	habit := database.GetHabit(c, habitID)
 
@@ -25,27 +22,25 @@ func GetHabit(c *gin.Context){
 	utils.DataResponse(c, http.StatusOK, habit)
 }
 
-
-func CreateHabit(c *gin.Context){
+func CreateHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 	var habit types.Habit
-	if !utils.BindJSONOrAbort(c, &habit){
+	if !utils.BindJSONOrAbort(c, &habit) {
 		//TODO Need to handle error
 		return
 	}
 
 	createdHabit, err := database.CreateHabit(c, habit)
-	
-	if err != nil{
-		return 
+
+	if err != nil {
+		return
 	}
 
 	utils.DataResponse(c, http.StatusOK, createdHabit)
 	log.Info(ctx, "Habit Created Successfully")
 }
 
-
-func UpdateHabit(c *gin.Context){
+func UpdateHabit(c *gin.Context) {
 	// habitID := c.Param("habitid")
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
@@ -56,10 +51,7 @@ func UpdateHabit(c *gin.Context){
 	// habit := database.UpdateHabit(c, habitID)
 }
 
-
-func DeleteHabit(c *gin.Context){
+func DeleteHabit(c *gin.Context) {
 	// habitID := c.Param("habitid")
-
-
 
 }

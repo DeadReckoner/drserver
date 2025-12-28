@@ -19,11 +19,11 @@ func init() {
 
 func TestHealthEndpoint(t *testing.T) {
 	router := NewRouter()
-	
+
 	req, _ := http.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	
+
 	assert.Equal(t, http.StatusOK, w.Code)
 	var response map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &response)
@@ -33,11 +33,11 @@ func TestHealthEndpoint(t *testing.T) {
 
 func TestHealthzEndpoint(t *testing.T) {
 	router := NewRouter()
-	
+
 	req, _ := http.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	
+
 	assert.Equal(t, http.StatusOK, w.Code)
 	var response map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &response)
@@ -98,7 +98,7 @@ func TestBindingUtilities(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
-		
+
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
@@ -108,22 +108,22 @@ func TestBindingUtilities(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
-		
+
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }
 
 func TestResponseUtilities(t *testing.T) {
 	router := gin.New()
-	
+
 	router.GET("/error", func(c *gin.Context) {
 		utils.ErrorResponse(c, http.StatusNotFound, "Resource not found")
 	})
-	
+
 	router.GET("/success", func(c *gin.Context) {
 		utils.SuccessResponse(c, http.StatusOK, "Operation successful", gin.H{"id": 123})
 	})
-	
+
 	router.GET("/data", func(c *gin.Context) {
 		utils.DataResponse(c, http.StatusOK, gin.H{"items": []string{"a", "b", "c"}})
 	})
@@ -132,7 +132,7 @@ func TestResponseUtilities(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/error", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
-		
+
 		assert.Equal(t, http.StatusNotFound, w.Code)
 		var response map[string]interface{}
 		json.Unmarshal(w.Body.Bytes(), &response)
@@ -144,7 +144,7 @@ func TestResponseUtilities(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/success", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
-		
+
 		assert.Equal(t, http.StatusOK, w.Code)
 		var response map[string]interface{}
 		json.Unmarshal(w.Body.Bytes(), &response)
@@ -156,7 +156,7 @@ func TestResponseUtilities(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/data", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
-		
+
 		assert.Equal(t, http.StatusOK, w.Code)
 		var response map[string]interface{}
 		json.Unmarshal(w.Body.Bytes(), &response)

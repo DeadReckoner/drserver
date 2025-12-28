@@ -110,7 +110,7 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 	}
 }
 
-func setupHabitRoutes(rg *gin.RouterGroup){
+func setupHabitRoutes(rg *gin.RouterGroup) {
 	habits := rg.Group("/habits")
 
 	{
@@ -118,7 +118,6 @@ func setupHabitRoutes(rg *gin.RouterGroup){
 		habits.GET("/:habitid", utils.ValidateUUID("habitid"), handlers.GetHabit)
 		habits.PATCH(":habitid", utils.ValidateUUID("habitid"), handlers.UpdateHabit)
 	}
-
 
 }
 
@@ -143,7 +142,7 @@ func setupAgentRoutes(rg *gin.RouterGroup) {
 	}
 }
 
-func setupNotificationRoutes(rg *gin.RouterGroup){
+func setupNotificationRoutes(rg *gin.RouterGroup) {
 	notifications := rg.Group("/notifications")
 	{
 		notifications.GET("", handlers.GetNotifications)

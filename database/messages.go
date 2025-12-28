@@ -227,3 +227,8 @@ func GetThreadParticipants(c *gin.Context, threadID string) ([]types.User, error
 
 	return users, nil
 }
+
+func updateLastSent(threadID string, messageID string) error {
+
+	return nil
+}

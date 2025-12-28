@@ -60,36 +60,36 @@ func AgentGenerateAsync(c *gin.Context) {
 	userID := c.GetString("user_id")
 
 	var req types.GoalRequest
-	if err := c.ShouldBindJSON(&req); err != nil{
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	job := types.BackgroundJob{
-		JobID: uuid.NewString(),
-		UserID: userID,
-		Type: string(types.JobTypeRoadmap),
-		Status: string(types.JobStatusPending),
+		JobID:    uuid.NewString(),
+		UserID:   userID,
+		Type:     string(types.JobTypeRoadmap),
+		Status:   string(types.JobStatusPending),
 		Progress: 0,
-		Payload: req,
+		Payload:  req,
 	}
 
-	if err := database.CreateBackgroundJob(c, &job); err != nil{
+	if err := database.CreateBackgroundJob(c, &job); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job"})
 		return
 	}
 
-	draft := types.Roadmap {
-		RoadmapID: uuid.NewString(),
-		UserID: userID,
-		Goal: req.GoalName,
-		Description: req.GoalDescription,
-		Type: string(types.RoadmapTypeAIGenerated),
-		JobID: &job.JobID,
+	draft := types.Roadmap{
+		RoadmapID:        uuid.NewString(),
+		UserID:           userID,
+		Goal:             req.GoalName,
+		Description:      req.GoalDescription,
+		Type:             string(types.RoadmapTypeAIGenerated),
+		JobID:            &job.JobID,
 		GenerationStatus: string(types.GenerationStatusProcessing),
 	}
 
-	if err := database.CreateDraftRoadmap(c, &draft); err != nil{
+	if err := database.CreateDraftRoadmap(c, &draft); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create draft"})
 		return
 	}
@@ -98,21 +98,19 @@ func AgentGenerateAsync(c *gin.Context) {
 	go processRoadmapGeneration(context.Background(), job.JobID, draft.RoadmapID, userID, req)
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"status": job.Status,
-		"job_id": job.JobID,
+		"status":     job.Status,
+		"job_id":     job.JobID,
 		"roadmap_id": draft.RoadmapID,
-		"message": "Your roadmap is being processed",
-		"ws_url": fmt.Sprintf("ws/agent/%s", job.JobID),
+		"message":    "Your roadmap is being processed",
+		"ws_url":     fmt.Sprintf("ws/agent/%s", job.JobID),
 	})
 
 }
 
-
-func WSAgentProgress(c *gin.Context){
+func WSAgentProgress(c *gin.Context) {
 	ctx := c.Request.Context()
 	jobID := c.Param("jobid")
 	userID := c.GetString("user_id")
-
 
 	// Verify job exists and user is authorized
 	job, err := database.GetBackgroundJob(c, jobID, userID)
@@ -133,11 +131,11 @@ func WSAgentProgress(c *gin.Context){
 	defer websocket.Manager.RemoveConnection(ctx, jobID, conn)
 
 	conn.WriteJSON(types.ProgressUpdate{
-		Type: "status",
-		JobID: job.JobID,
+		Type:     "status",
+		JobID:    job.JobID,
 		Progress: job.Progress,
-		Status: job.Status,
-		Message: getProgressMessage(job.Status, job.Progress),
+		Status:   job.Status,
+		Message:  getProgressMessage(job.Status, job.Progress),
 	})
 
 	for {
@@ -165,16 +163,16 @@ func GetJobStatus(c *gin.Context) {
 	}
 
 	response := gin.H{
-		"job_id": job.JobID, 
-		"status": job.Status,
-		"progress": job.Progress,
+		"job_id":     job.JobID,
+		"status":     job.Status,
+		"progress":   job.Progress,
 		"created_at": job.CreatedAt,
 	}
 
 	if job.Status == string(types.JobStatusCompleted) && job.Result != nil {
 		response["result"] = job.Result
 		response["completed_at"] = job.CompletedAt
-	} else if job.Status == string(types.JobStatusFailed){
+	} else if job.Status == string(types.JobStatusFailed) {
 		response["error"] = job.Error
 		response["failed_at"] = job.CompletedAt
 	}
@@ -220,45 +218,45 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 
 	now := time.Now()
 	job := types.BackgroundJob{
-		JobID: jobID,
-		Status: string(types.JobStatusCompleted),
-		Progress: 100,
+		JobID:       jobID,
+		Status:      string(types.JobStatusCompleted),
+		Progress:    100,
 		CompletedAt: &now,
 		Result: map[string]any{
-			"roadmap_id": roadmapID,
+			"roadmap_id":  roadmapID,
 			"macromap_id": macroMap.MacroMapID,
 		},
 	}
 	database.UpdateBackgroundJob(ctx, &job)
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
-		Type: "complete",
-		JobID: jobID,
+		Type:     "complete",
+		JobID:    jobID,
 		Progress: 100,
-		Status: string(types.JobStatusCompleted),
-		Message: "Your roadmap is ready for review...",
+		Status:   string(types.JobStatusCompleted),
+		Message:  "Your roadmap is ready for review...",
 		Data: map[string]any{
 			"roadmap_id": roadmapID,
 		},
 	})
 
 	sendPushNotification(userID, "roadmap_complete",
-		"Your roadmap is ready for review!", fmt.Sprintf("Your %s roadmap has been generated successfully.", req.GoalName), 
+		"Your roadmap is ready for review!", fmt.Sprintf("Your %s roadmap has been generated successfully.", req.GoalName),
 		map[string]any{
-		"roadmap_id": roadmapID,
-	})
+			"roadmap_id": roadmapID,
+		})
 }
 
-func updateJobProgress(jobID string, progress int, status, message string){
+func updateJobProgress(jobID string, progress int, status, message string) {
 	ctx := context.Background()
 
 	// Update db
 	job := types.BackgroundJob{
-		JobID: jobID,
+		JobID:    jobID,
 		Progress: progress,
-		Status: status,
+		Status:   status,
 	}
-	if status == string(types.JobStatusProcessing) && progress == 5{
+	if status == string(types.JobStatusProcessing) && progress == 5 {
 		now := time.Now()
 		job.StartedAt = &now
 	}
@@ -266,11 +264,11 @@ func updateJobProgress(jobID string, progress int, status, message string){
 	database.UpdateBackgroundJob(ctx, &job)
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
-		Type: "progress",
-		JobID: jobID,
+		Type:     "progress",
+		JobID:    jobID,
 		Progress: progress,
-		Status: status,
-		Message: message,
+		Status:   status,
+		Message:  message,
 	})
 }
 
@@ -279,9 +277,9 @@ func handleGenerationError(jobID, roadmapID, userID string, err error) {
 	now := time.Now()
 
 	job := types.BackgroundJob{
-		JobID: jobID,
-		Status: string(types.JobStatusFailed),
-		Error: err.Error(),
+		JobID:       jobID,
+		Status:      string(types.JobStatusFailed),
+		Error:       err.Error(),
 		CompletedAt: &now,
 	}
 
@@ -290,19 +288,19 @@ func handleGenerationError(jobID, roadmapID, userID string, err error) {
 	database.UpdateRoadmapGenerationStatus(ctx, roadmapID, string(types.GenerationStatusFailed))
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
-		Type: "error",
-		JobID: jobID,
-		Status: string(types.JobStatusFailed), 
+		Type:    "error",
+		JobID:   jobID,
+		Status:  string(types.JobStatusFailed),
 		Message: "Failed to generate roadmap",
-		Data: map[string]string{"error": err.Error()},
+		Data:    map[string]string{"error": err.Error()},
 	})
 
 	sendPushNotification(userID, "roadmap_failed",
-		"Roadmap Generation Failed", 
-		"We encountered an issue. Please try again.", 
+		"Roadmap Generation Failed",
+		"We encountered an issue. Please try again.",
 		map[string]any{
 			"roadmap_id": roadmapID,
-			"error": err.Error(),
+			"error":      err.Error(),
 		})
 
 }
@@ -336,12 +334,12 @@ func sendPushNotification(userID, notificationType, title, body string, data map
 
 	alert := types.Notification{
 		NotificationID: uuid.NewString(),
-		UserID: userID,
-		Type: notificationType,
-		Title: title,
-		Body: body,
-		Data: data,
-		Status: string(types.NotificationStatusPending),
+		UserID:         userID,
+		Type:           notificationType,
+		Title:          title,
+		Body:           body,
+		Data:           data,
+		Status:         string(types.NotificationStatusPending),
 	}
 
 	database.CreateNotification(context.Background(), &alert)

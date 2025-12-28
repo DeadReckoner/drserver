@@ -9,4 +9,3 @@ import (
 func NewRouter() *gin.Engine {
 	return routes.SetupRoutes()
 }
-

@@ -10,13 +10,13 @@ import (
 func ValidateUUID(paramName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		paramValue := c.Param(paramName)
-		
+
 		if _, err := uuid.Parse(paramValue); err != nil {
 			ErrorResponse(c, http.StatusBadRequest, "Invalid "+paramName+": must be a valid UUID")
 			c.Abort()
 			return
 		}
-		
+
 		c.Next()
 	}
 }
@@ -30,7 +30,7 @@ func ValidateMultipleUUIDs(paramNames ...string) gin.HandlerFunc {
 				c.Abort()
 				return
 			}
-			
+
 			if _, err := uuid.Parse(paramValue); err != nil {
 				ErrorResponse(c, http.StatusBadRequest, "Invalid "+paramName+": must be a valid UUID")
 				c.Abort()

@@ -109,19 +109,19 @@ type OpenAIResponse struct {
 }
 
 type Roadmap struct {
-	RoadmapID        string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"roadmap_id"`
-	UserID           string    `gorm:"type:uuid" json:"user_id"`
-	Goal             string    `json:"goal"`
-	Description      string    `json:"description"`
-	Days             int       `json:"days"`
-	Completed        bool      `json:"completed"`
-	StartDate        time.Time `json:"start_date,omitempty"`
-	Type             string    `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
-	AnchorID         *string   `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
+	RoadmapID   string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"roadmap_id"`
+	UserID      string    `gorm:"type:uuid" json:"user_id"`
+	Goal        string    `json:"goal"`
+	Description string    `json:"description"`
+	Days        int       `json:"days"`
+	Completed   bool      `json:"completed"`
+	StartDate   time.Time `json:"start_date,omitempty"`
+	Type        string    `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
+	AnchorID    *string   `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
 
 	// Async generation tracking
-	JobID            *string   `gorm:"type:uuid;column:job_id" json:"job_id,omitempty"`
-	GenerationStatus string    `gorm:"type:generation_status;column:generation_status;default:'pending'" json:"generation_status"`
+	JobID            *string `gorm:"type:uuid;column:job_id" json:"job_id,omitempty"`
+	GenerationStatus string  `gorm:"type:generation_status;column:generation_status;default:'pending'" json:"generation_status"`
 
 	// Link to Macro Map (strategic overview)
 	MacroMap *MacroMap `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"macro_map,omitempty"`
@@ -222,7 +222,7 @@ type Task struct {
 }
 
 type Habit struct {
-	HabitID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"habit_id"`
+	HabitID     string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"habit_id"`
 	UserID      string `gorm:"type:uuid" json:"user_id"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
@@ -240,10 +240,12 @@ type Step struct {
 }
 
 type Thread struct {
-	ThreadID  string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"thread_id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ThreadID        string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"thread_id"`
+	Name            string    `json:"name"`
+	TotalUnread     int       `json:"total_unread"`
+	LastSentMessage string    `gorm:"type:uuid" json:"last_sent_message"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type Messages struct {
@@ -251,6 +253,7 @@ type Messages struct {
 	ThreadID  string     `gorm:"type:uuid" json:"thread_id"`
 	UserID    string     `gorm:"type:uuid" json:"user_id"`
 	Content   string     `json:"content"`
+	Read      bool       `json:"read"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	DeletedAt *time.Time `json:"deleted_at,omitempty"`
@@ -285,14 +288,14 @@ type MessageResponse struct {
 }
 
 type BackgroundJob struct {
-	JobID      string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:job_id" json:"job_id"`
-	UserID     string     `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
-	Type       string     `gorm:"column:type;not null" json:"type"`
-	Status     string     `gorm:"column:status;default:pending" json:"status"`
-	Progress   int        `gorm:"column:progress;default:0" json:"progress"`
-	Payload    any        `gorm:"type:jsonb;column:payload;serializer:json" json:"payload"`
-	Result     any        `gorm:"type:jsonb;column:result;serializer:json" json:"result,omitempty"`
-	Error      string     `gorm:"column:error" json:"error,omitempty"`
+	JobID       string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:job_id" json:"job_id"`
+	UserID      string     `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
+	Type        string     `gorm:"column:type;not null" json:"type"`
+	Status      string     `gorm:"column:status;default:pending" json:"status"`
+	Progress    int        `gorm:"column:progress;default:0" json:"progress"`
+	Payload     any        `gorm:"type:jsonb;column:payload;serializer:json" json:"payload"`
+	Result      any        `gorm:"type:jsonb;column:result;serializer:json" json:"result,omitempty"`
+	Error       string     `gorm:"column:error" json:"error,omitempty"`
 	StartedAt   *time.Time `gorm:"column:started_at" json:"started_at,omitempty"`
 	CompletedAt *time.Time `gorm:"column:completed_at" json:"completed_at,omitempty"`
 	//why not pointer?

@@ -22,7 +22,6 @@ func CreateHabit(c *gin.Context, habit types.Habit) (types.Habit, error) {
 
 	habit.UserID = user_id.(string)
 
-
 	tx := db.Create(&habit)
 	if tx.Error != nil {
 		return types.Habit{}, tx.Error

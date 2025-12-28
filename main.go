@@ -16,7 +16,6 @@ func main() {
 
 	database.Database()
 
-
 	router := api.NewRouter()
 
 	srv := &http.Server{
@@ -24,8 +23,7 @@ func main() {
 		Handler: router,
 	}
 
-
-	go func(){
+	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %s\n", err)
 		}
