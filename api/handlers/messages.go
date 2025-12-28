@@ -282,7 +282,7 @@ func GetTotalUnreadCount(c *gin.Context){
 		return
 	}
 
-	totalUnreadCount, _ := database.CalculateTotalUnreadCount(c, userID)
+	totalUnreadCount, _ := database.CalculateTotalUnreadCount(c, userID.(string))
 
 
 	utils.DataResponse(c, http.StatusOK, totalUnreadCount)
