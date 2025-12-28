@@ -80,7 +80,7 @@ func CreateThread(c *gin.Context, userID1, userID2 string) (types.Thread, error)
 // GetThreadBetweenUsers returns the thread_id between two users, or empty string if none exists
 func GetThreadBetweenUsers(c *gin.Context, userID1, userID2 string) string {
 	var participant types.ThreadParticipants
-	err := db.Where("user_id = ? AND left_at IS NULL", userID1).
+	err := db.Where("thread_participants.user_id = ? AND thread_participants.left_at IS NULL", userID1).
 		Joins("JOIN thread_participants tp2 ON thread_participants.thread_id = tp2.thread_id AND tp2.user_id = ? AND tp2.left_at IS NULL", userID2).
 		First(&participant).Error
 
