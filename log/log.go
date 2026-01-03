@@ -65,4 +65,3 @@ func (l *Logger) Warn(msg string, args ...interface{}) {
 func (l *Logger) Error(msg string, args ...interface{}) {
 	l.logger.Printf("[%s] ERROR: %s %v", l.requestID, msg, args)
 }
-

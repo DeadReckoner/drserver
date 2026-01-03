@@ -74,8 +74,13 @@ func GetThreads(c *gin.Context) {
 		}
 
 		lastSentMessage := ""
+		var lastMessage *types.MessageResponse
 		if thread.LastSentMessage != nil {
 			lastSentMessage = *thread.LastSentMessage
+			lastMessage, err = database.GetMessageByID(c, lastSentMessage, userID.(string))
+			if err != nil {
+				log.Error(c, err.Error())
+			}
 		}
 
 		response = append(response, types.ThreadWithParticipants{
@@ -86,6 +91,7 @@ func GetThreads(c *gin.Context) {
 			LastSentMessage: lastSentMessage,
 			CreatedAt:       thread.CreatedAt,
 			UpdatedAt:       thread.UpdatedAt,
+			LastMessage:     lastMessage,
 		})
 	}
 
@@ -277,16 +283,14 @@ func WSHandler(c *gin.Context) {
 	log.Info(ctx, fmt.Sprintf("WebSocket disconnected: user %s left thread %s", userIDStr, threadID))
 }
 
-
-func GetTotalUnreadCount(c *gin.Context){
+func GetTotalUnreadCount(c *gin.Context) {
 
 	userID, exists := c.Get("user_id")
-	if !exists || userID == ""{
+	if !exists || userID == "" {
 		return
 	}
 
 	totalUnreadCount, _ := database.CalculateTotalUnreadCount(c, userID.(string))
-
 
 	utils.DataResponse(c, http.StatusOK, totalUnreadCount)
 }

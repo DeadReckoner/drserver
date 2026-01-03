@@ -278,6 +278,7 @@ type ThreadWithParticipants struct {
 	LastSentMessage string    `json:"last_sent_message,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+	LastMessage     *MessageResponse
 }
 
 type MessageResponse struct {
