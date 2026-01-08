@@ -27,6 +27,7 @@ func setupV1Routes(router *gin.Engine) {
 	setupUserRoutes(v1)
 	setupFriendRoutes(v1)
 	setupRoadmapRoutes(v1)
+	setupHabitRoutes(v1)
 	setupAgentRoutes(v1)
 	setupNotificationRoutes(v1)
 	setupMessageThreadRoutes(v1)
@@ -112,13 +113,26 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 
 func setupHabitRoutes(rg *gin.RouterGroup) {
 	habits := rg.Group("/habits")
-
 	{
+		// Habit CRUD operations
 		habits.POST("", handlers.CreateHabit)
+		habits.GET("", handlers.GetHabits)
+		habits.GET("/today", handlers.GetTodaysHabits)
+		habits.GET("/date/:date", handlers.GetHabitsForDate)
+		habits.GET("/range", handlers.GetHabitsForRange)
 		habits.GET("/:habitid", utils.ValidateUUID("habitid"), handlers.GetHabit)
-		habits.PATCH(":habitid", utils.ValidateUUID("habitid"), handlers.UpdateHabit)
-	}
+		habits.PATCH("/:habitid", utils.ValidateUUID("habitid"), handlers.UpdateHabit)
+		habits.DELETE("/:habitid", utils.ValidateUUID("habitid"), handlers.DeleteHabit)
+		habits.POST("/:habitid/archive", utils.ValidateUUID("habitid"), handlers.ArchiveHabit)
 
+		// Completion operations
+		habits.POST("/:habitid/complete", utils.ValidateUUID("habitid"), handlers.CompleteHabit)
+		habits.DELETE("/:habitid/complete", utils.ValidateUUID("habitid"), handlers.UncompleteHabit)
+		habits.GET("/:habitid/completions", utils.ValidateUUID("habitid"), handlers.GetCompletions)
+
+		// Statistics
+		habits.GET("/:habitid/stats", utils.ValidateUUID("habitid"), handlers.GetHabitStats)
+	}
 }
 
 func setupAgentRoutes(rg *gin.RouterGroup) {

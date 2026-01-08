@@ -221,15 +221,263 @@ type Task struct {
 	Steps     []Step    `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps,omitempty"`
 }
 
-type Habit struct {
-	HabitID     string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"habit_id"`
-	UserID      string `gorm:"type:uuid" json:"user_id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
+// =============================================================================
+// HABIT SYSTEM TYPES
+// =============================================================================
 
-	Completed bool      `json:"completed"`
-	Date      time.Time `json:"date"`
+// RecurrenceType defines how a habit recurs
+type RecurrenceType string
+
+const (
+	RecurrenceNone    RecurrenceType = "none"    // One-time todo
+	RecurrenceDaily   RecurrenceType = "daily"   // Every day
+	RecurrenceWeekly  RecurrenceType = "weekly"  // Specific days of week
+	RecurrenceMonthly RecurrenceType = "monthly" // Specific day of month
+)
+
+// Validate checks if the recurrence type is valid
+func (r RecurrenceType) Validate() bool {
+	switch r {
+	case RecurrenceNone, RecurrenceDaily, RecurrenceWeekly, RecurrenceMonthly:
+		return true
+	}
+	return false
 }
+
+// DayOfWeek represents a bitmask for days of the week
+type DayOfWeek int
+
+const (
+	Sunday    DayOfWeek = 1 << 0 // 1
+	Monday    DayOfWeek = 1 << 1 // 2
+	Tuesday   DayOfWeek = 1 << 2 // 4
+	Wednesday DayOfWeek = 1 << 3 // 8
+	Thursday  DayOfWeek = 1 << 4 // 16
+	Friday    DayOfWeek = 1 << 5 // 32
+	Saturday  DayOfWeek = 1 << 6 // 64
+)
+
+// Common day presets for convenience
+const (
+	Weekdays DayOfWeek = Monday | Tuesday | Wednesday | Thursday | Friday       // 62
+	Weekends DayOfWeek = Saturday | Sunday                                       // 65
+	EveryDay DayOfWeek = Sunday | Monday | Tuesday | Wednesday | Thursday | Friday | Saturday // 127
+)
+
+// DayOfWeekFromTime converts time.Weekday to our DayOfWeek bitmask value
+func DayOfWeekFromTime(w time.Weekday) DayOfWeek {
+	return 1 << DayOfWeek(w)
+}
+
+// Contains checks if a specific day is set in the bitmask
+func (d DayOfWeek) Contains(day time.Weekday) bool {
+	return d&DayOfWeekFromTime(day) != 0
+}
+
+// Days returns a slice of time.Weekday values that are set in the bitmask
+func (d DayOfWeek) Days() []time.Weekday {
+	var days []time.Weekday
+	for i := time.Sunday; i <= time.Saturday; i++ {
+		if d.Contains(i) {
+			days = append(days, i)
+		}
+	}
+	return days
+}
+
+// Habit represents a recurring or one-time todo/habit
+type Habit struct {
+	// Identity
+	HabitID string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"habit_id"`
+	UserID  string `gorm:"type:uuid;index;not null" json:"user_id"`
+
+	// Content
+	Title       string `gorm:"not null" json:"title"`
+	Description string `json:"description,omitempty"`
+
+	// Scheduling - determines when this habit is due
+	RecurrenceType RecurrenceType `gorm:"type:varchar(20);not null;default:'none'" json:"recurrence_type"`
+	DaysOfWeek     int            `gorm:"default:0" json:"days_of_week,omitempty"`  // Bitmask for weekly recurrence
+	DayOfMonth     *int           `json:"day_of_month,omitempty"`                   // 1-31 for monthly recurrence
+	DueDate        *time.Time     `json:"due_date,omitempty"`                       // For one-time todos
+
+	// Active period - when this habit is active
+	StartDate time.Time  `gorm:"not null" json:"start_date"`
+	EndDate   *time.Time `json:"end_date,omitempty"`
+
+	// Status
+	Archived bool `gorm:"default:false" json:"archived"`
+
+	// Metadata
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+
+	// Relationships (optional - for eager loading)
+	Completions []HabitCompletion `gorm:"foreignKey:HabitID" json:"completions,omitempty"`
+}
+
+// TableName specifies the table name for GORM
+func (Habit) TableName() string {
+	return "habits"
+}
+
+// IsDueOn checks if the habit is scheduled for a given date
+func (h *Habit) IsDueOn(date time.Time) bool {
+	// Check if date is within active period
+	if date.Before(h.StartDate) {
+		return false
+	}
+	if h.EndDate != nil && date.After(*h.EndDate) {
+		return false
+	}
+
+	switch h.RecurrenceType {
+	case RecurrenceNone:
+		return h.DueDate != nil && sameDay(*h.DueDate, date)
+	case RecurrenceDaily:
+		return true
+	case RecurrenceWeekly:
+		return DayOfWeek(h.DaysOfWeek).Contains(date.Weekday())
+	case RecurrenceMonthly:
+		return h.DayOfMonth != nil && date.Day() == *h.DayOfMonth
+	}
+	return false
+}
+
+// IsActive checks if the habit is currently active (not archived, within date range)
+func (h *Habit) IsActive(date time.Time) bool {
+	if h.Archived {
+		return false
+	}
+	if date.Before(h.StartDate) {
+		return false
+	}
+	if h.EndDate != nil && date.After(*h.EndDate) {
+		return false
+	}
+	return true
+}
+
+// sameDay checks if two times represent the same calendar day
+func sameDay(a, b time.Time) bool {
+	y1, m1, d1 := a.Date()
+	y2, m2, d2 := b.Date()
+	return y1 == y2 && m1 == m2 && d1 == d2
+}
+
+// HabitCompletion tracks when a habit was completed
+type HabitCompletion struct {
+	CompletionID string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"completion_id"`
+	HabitID      string `gorm:"type:uuid;index;not null" json:"habit_id"`
+	UserID       string `gorm:"type:uuid;index;not null" json:"user_id"` // Denormalized for easier queries
+
+	CompletedAt time.Time `gorm:"not null" json:"completed_at"`   // When they marked it complete
+	Date        time.Time `gorm:"type:date;not null" json:"date"` // The date this completion is "for"
+	Notes       string    `json:"notes,omitempty"`                // Optional notes
+
+	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
+}
+
+// TableName specifies the table name for GORM
+func (HabitCompletion) TableName() string {
+	return "habit_completions"
+}
+
+// =============================================================================
+// HABIT REQUEST/RESPONSE TYPES
+// =============================================================================
+
+// CreateHabitRequest is the payload for creating a new habit
+type CreateHabitRequest struct {
+	Title          string         `json:"title" binding:"required"`
+	Description    string         `json:"description"`
+	RecurrenceType RecurrenceType `json:"recurrence_type" binding:"required"`
+	DaysOfWeek     int            `json:"days_of_week"`
+	DayOfMonth     *int           `json:"day_of_month"`
+	DueDate        *time.Time     `json:"due_date"`
+	StartDate      *time.Time     `json:"start_date"` // Defaults to today if not provided
+	EndDate        *time.Time     `json:"end_date"`
+}
+
+// Validate checks if the CreateHabitRequest is valid
+func (r *CreateHabitRequest) Validate() error {
+	if !r.RecurrenceType.Validate() {
+		return ErrInvalidRecurrenceType
+	}
+
+	switch r.RecurrenceType {
+	case RecurrenceNone:
+		if r.DueDate == nil {
+			return ErrDueDateRequired
+		}
+	case RecurrenceWeekly:
+		if r.DaysOfWeek == 0 || r.DaysOfWeek > 127 {
+			return ErrInvalidDaysOfWeek
+		}
+	case RecurrenceMonthly:
+		if r.DayOfMonth == nil || *r.DayOfMonth < 1 || *r.DayOfMonth > 31 {
+			return ErrInvalidDayOfMonth
+		}
+	}
+
+	return nil
+}
+
+// UpdateHabitRequest is the payload for updating a habit (all fields optional)
+type UpdateHabitRequest struct {
+	Title          *string         `json:"title,omitempty"`
+	Description    *string         `json:"description,omitempty"`
+	RecurrenceType *RecurrenceType `json:"recurrence_type,omitempty"`
+	DaysOfWeek     *int            `json:"days_of_week,omitempty"`
+	DayOfMonth     *int            `json:"day_of_month,omitempty"`
+	DueDate        *time.Time      `json:"due_date,omitempty"`
+	StartDate      *time.Time      `json:"start_date,omitempty"`
+	EndDate        *time.Time      `json:"end_date,omitempty"`
+	Archived       *bool           `json:"archived,omitempty"`
+}
+
+// CompleteHabitRequest is the payload for marking a habit complete
+type CompleteHabitRequest struct {
+	Date  *time.Time `json:"date"`  // Defaults to today if not provided
+	Notes string     `json:"notes"`
+}
+
+// HabitWithStatus represents a habit with its completion status for a specific date
+type HabitWithStatus struct {
+	Habit
+	IsCompleted bool       `json:"is_completed"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// HabitStatsResponse contains statistics for a habit
+type HabitStatsResponse struct {
+	CurrentStreak      int     `json:"current_streak"`
+	CompletionRate7d   float64 `json:"completion_rate_7d"`
+	CompletionRate30d  float64 `json:"completion_rate_30d"`
+	TotalCompletions   int     `json:"total_completions"`
+}
+
+// =============================================================================
+// HABIT ERRORS
+// =============================================================================
+
+// HabitError represents a habit-specific error
+type HabitError struct {
+	Message string
+}
+
+func (e HabitError) Error() string {
+	return e.Message
+}
+
+var (
+	ErrInvalidRecurrenceType = HabitError{"invalid recurrence type"}
+	ErrDueDateRequired       = HabitError{"due_date is required for non-recurring habits"}
+	ErrInvalidDaysOfWeek     = HabitError{"days_of_week must be between 1 and 127"}
+	ErrInvalidDayOfMonth     = HabitError{"day_of_month must be between 1 and 31"}
+	ErrHabitNotFound         = HabitError{"habit not found"}
+	ErrAlreadyCompleted      = HabitError{"habit already completed for this date"}
+)
 
 type Step struct {
 	StepID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"step_id"`

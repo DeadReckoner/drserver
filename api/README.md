@@ -1179,6 +1179,487 @@ Delete a task.
 
 ---
 
+## Habits Management
+
+The habits system provides comprehensive tracking for recurring habits and one-time todos with flexible scheduling, completion tracking, statistics (streaks and completion rates), and calendar views.
+
+### Features
+- **One-time todos**: Tasks with a specific due date
+- **Recurring habits**: Daily, weekly (with day-of-week selection), or monthly patterns
+- **Completion tracking**: Mark habits complete for specific dates with optional notes
+- **Statistics**: Track current streaks, 7-day and 30-day completion rates
+- **Calendar views**: Query habits for specific dates or date ranges
+- **Archiving**: Soft-archive habits without deleting history
+
+### Recurrence Types
+- **`none`**: One-time todo with a `due_date`
+- **`daily`**: Repeats every day
+- **`weekly`**: Repeats on specific days of the week (uses bitmask)
+- **`monthly`**: Repeats on a specific day of the month
+
+### Days of Week Bitmask
+For weekly recurring habits, use a bitmask to represent which days the habit repeats:
+- `1` = Sunday, `2` = Monday, `4` = Tuesday, `8` = Wednesday
+- `16` = Thursday, `32` = Friday, `64` = Saturday
+- **Common values**: `62` (weekdays), `65` (weekends), `127` (every day)
+
+### POST /api/v1/habits
+Create a new habit or todo.
+
+**Request Body (Daily Habit):**
+```json
+{
+  "title": "Morning meditation",
+  "description": "10 minutes of mindfulness",
+  "recurrence_type": "daily",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+**Request Body (Weekly Habit - Weekdays):**
+```json
+{
+  "title": "Gym workout",
+  "recurrence_type": "weekly",
+  "days_of_week": 62,
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+**Request Body (Monthly Habit):**
+```json
+{
+  "title": "Monthly review",
+  "recurrence_type": "monthly",
+  "day_of_month": 1,
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+**Request Body (One-time Todo):**
+```json
+{
+  "title": "Submit tax returns",
+  "recurrence_type": "none",
+  "due_date": "2024-04-15T00:00:00Z",
+  "start_date": "2024-01-01T00:00:00Z"
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "data": {
+    "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "title": "Morning meditation",
+    "description": "10 minutes of mindfulness",
+    "recurrence_type": "daily",
+    "days_of_week": 0,
+    "day_of_month": null,
+    "due_date": null,
+    "start_date": "2024-01-01T00:00:00Z",
+    "end_date": null,
+    "archived": false,
+    "created_at": "2024-01-01T10:00:00Z",
+    "updated_at": "2024-01-01T10:00:00Z"
+  }
+}
+```
+
+**Validation Rules:**
+- Weekly recurrence requires `days_of_week` (1-127)
+- Monthly recurrence requires `day_of_month` (1-31)
+- One-time todos require `due_date`
+
+### GET /api/v1/habits
+Get all habits for the current user.
+
+**Query Parameters:**
+- `include_archived` (optional, boolean) - Include archived habits (default: false)
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/habits?include_archived=false"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+      "user_id": "550e8400-e29b-41d4-a716-446655440000",
+      "title": "Morning meditation",
+      "description": "10 minutes of mindfulness",
+      "recurrence_type": "daily",
+      "days_of_week": 0,
+      "day_of_month": null,
+      "due_date": null,
+      "start_date": "2024-01-01T00:00:00Z",
+      "end_date": null,
+      "archived": false,
+      "created_at": "2024-01-01T10:00:00Z",
+      "updated_at": "2024-01-01T10:00:00Z"
+    }
+  ]
+}
+```
+
+### GET /api/v1/habits/today
+Get today's habits with completion status.
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/habits/today"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+      "user_id": "550e8400-e29b-41d4-a716-446655440000",
+      "title": "Morning meditation",
+      "description": "10 minutes of mindfulness",
+      "recurrence_type": "daily",
+      "days_of_week": 0,
+      "day_of_month": null,
+      "due_date": null,
+      "start_date": "2024-01-01T00:00:00Z",
+      "end_date": null,
+      "archived": false,
+      "created_at": "2024-01-01T10:00:00Z",
+      "updated_at": "2024-01-01T10:00:00Z",
+      "is_completed": true,
+      "completed_at": "2024-01-15T08:30:00Z"
+    }
+  ]
+}
+```
+
+### GET /api/v1/habits/date/:date
+Get habits for a specific date with completion status.
+
+**URL Parameters:**
+- `date` (required) - Date in YYYY-MM-DD format
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/habits/date/2024-01-15"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+      "title": "Morning meditation",
+      "recurrence_type": "daily",
+      "is_completed": false,
+      "completed_at": null
+    }
+  ]
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Invalid date format
+
+### GET /api/v1/habits/range
+Get habits for a date range (calendar view).
+
+**Query Parameters:**
+- `start` (required) - Start date in YYYY-MM-DD format
+- `end` (required) - End date in YYYY-MM-DD format (max 90 days from start)
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/habits/range?start=2024-01-01&end=2024-01-31"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": {
+    "2024-01-01": [
+      {
+        "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+        "title": "Morning meditation",
+        "recurrence_type": "daily",
+        "is_completed": true,
+        "completed_at": "2024-01-01T08:00:00Z"
+      }
+    ],
+    "2024-01-02": [
+      {
+        "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+        "title": "Morning meditation",
+        "recurrence_type": "daily",
+        "is_completed": false,
+        "completed_at": null
+      }
+    ]
+  }
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Invalid date format or range exceeds 90 days
+
+### GET /api/v1/habits/:habitid
+Get a specific habit by ID.
+
+**URL Parameters:**
+- `habitid` (UUID) - Habit ID
+
+**Response (200 OK):**
+```json
+{
+  "data": {
+    "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "title": "Morning meditation",
+    "description": "10 minutes of mindfulness",
+    "recurrence_type": "daily",
+    "days_of_week": 0,
+    "day_of_month": null,
+    "due_date": null,
+    "start_date": "2024-01-01T00:00:00Z",
+    "end_date": null,
+    "archived": false,
+    "created_at": "2024-01-01T10:00:00Z",
+    "updated_at": "2024-01-01T10:00:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Habit not found
+
+### PATCH /api/v1/habits/:habitid
+Update a habit (all fields optional).
+
+**URL Parameters:**
+- `habitid` (UUID) - Habit ID
+
+**Request Body:**
+```json
+{
+  "title": "Evening meditation",
+  "description": "15 minutes of mindfulness",
+  "end_date": "2024-12-31T23:59:59Z"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": {
+    "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "title": "Evening meditation",
+    "description": "15 minutes of mindfulness",
+    "recurrence_type": "daily",
+    "days_of_week": 0,
+    "day_of_month": null,
+    "due_date": null,
+    "start_date": "2024-01-01T00:00:00Z",
+    "end_date": "2024-12-31T23:59:59Z",
+    "archived": false,
+    "created_at": "2024-01-01T10:00:00Z",
+    "updated_at": "2024-01-15T14:30:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Habit not found
+
+### DELETE /api/v1/habits/:habitid
+Delete a habit permanently (cascades to completions).
+
+**URL Parameters:**
+- `habitid` (UUID) - Habit ID
+
+**Response (200 OK):**
+```json
+{
+  "message": "Habit deleted successfully"
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Habit not found
+
+### POST /api/v1/habits/:habitid/archive
+Archive a habit (soft delete, preserves history).
+
+**URL Parameters:**
+- `habitid` (UUID) - Habit ID
+
+**Example Request:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/habits/550e8400-e29b-41d4-a716-446655440001/archive"
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Habit archived successfully"
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Habit not found
+
+### POST /api/v1/habits/:habitid/complete
+Mark a habit complete for a specific date.
+
+**URL Parameters:**
+- `habitid` (UUID) - Habit ID
+
+**Request Body (Complete for Today):**
+```json
+{
+  "notes": "Felt great today!"
+}
+```
+
+**Request Body (Complete for Specific Date):**
+```json
+{
+  "date": "2024-01-15T00:00:00Z",
+  "notes": "Made up for yesterday"
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "data": {
+    "completion_id": "550e8400-e29b-41d4-a716-446655440010",
+    "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "completed_at": "2024-01-15T08:30:00Z",
+    "date": "2024-01-15",
+    "notes": "Felt great today!",
+    "created_at": "2024-01-15T08:30:00Z"
+  }
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Habit already completed for this date
+- `404 Not Found` - Habit not found
+
+### DELETE /api/v1/habits/:habitid/complete
+Remove a completion (uncomplete a habit).
+
+**URL Parameters:**
+- `habitid` (UUID) - Habit ID
+
+**Query Parameters:**
+- `date` (optional) - Date to remove completion for (YYYY-MM-DD format, defaults to today)
+
+**Example Request:**
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/habits/550e8400-e29b-41d4-a716-446655440001/complete?date=2024-01-15"
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "Completion removed successfully"
+}
+```
+
+### GET /api/v1/habits/:habitid/completions
+Get completion history for a habit.
+
+**URL Parameters:**
+- `habitid` (UUID) - Habit ID
+
+**Query Parameters:**
+- `limit` (optional, integer) - Maximum number of completions to return (default: 30)
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/habits/550e8400-e29b-41d4-a716-446655440001/completions?limit=30"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "completion_id": "550e8400-e29b-41d4-a716-446655440010",
+      "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+      "user_id": "550e8400-e29b-41d4-a716-446655440000",
+      "completed_at": "2024-01-15T08:30:00Z",
+      "date": "2024-01-15",
+      "notes": "Felt great today!",
+      "created_at": "2024-01-15T08:30:00Z"
+    },
+    {
+      "completion_id": "550e8400-e29b-41d4-a716-446655440011",
+      "habit_id": "550e8400-e29b-41d4-a716-446655440001",
+      "user_id": "550e8400-e29b-41d4-a716-446655440000",
+      "completed_at": "2024-01-14T09:00:00Z",
+      "date": "2024-01-14",
+      "notes": null,
+      "created_at": "2024-01-14T09:00:00Z"
+    }
+  ]
+}
+```
+
+### GET /api/v1/habits/:habitid/stats
+Get statistics for a habit including streaks and completion rates.
+
+**URL Parameters:**
+- `habitid` (UUID) - Habit ID
+
+**Example Request:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/habits/550e8400-e29b-41d4-a716-446655440001/stats"
+```
+
+**Response (200 OK):**
+```json
+{
+  "data": {
+    "current_streak": 7,
+    "completion_rate_7d": 0.857,
+    "completion_rate_30d": 0.733,
+    "total_completions": 42
+  }
+}
+```
+
+**Statistics Explained:**
+- **current_streak**: Number of consecutive days the habit has been completed
+- **completion_rate_7d**: Completion rate over the last 7 days (0.0 to 1.0)
+- **completion_rate_30d**: Completion rate over the last 30 days (0.0 to 1.0)
+- **total_completions**: Total number of times the habit has been completed
+
+**Error Responses:**
+- `404 Not Found` - Habit not found
+
+---
+
 ## AI Agent Endpoints
 
 ### POST /api/v1/agent/generate
@@ -1772,6 +2253,69 @@ curl -X PUT \
   "content": "string",
   "created_at": "datetime",
   "user": "User object (nullable)"
+}
+```
+
+### Habit
+```json
+{
+  "habit_id": "string (UUID)",
+  "user_id": "string (UUID)",
+  "title": "string",
+  "description": "string (nullable)",
+  "recurrence_type": "string (none|daily|weekly|monthly)",
+  "days_of_week": "integer (0-127) - Bitmask for weekly recurrence",
+  "day_of_month": "integer (1-31, nullable) - Day for monthly recurrence",
+  "due_date": "datetime (nullable) - For one-time todos",
+  "start_date": "datetime - When habit becomes active",
+  "end_date": "datetime (nullable) - When habit ends",
+  "archived": "boolean",
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+### HabitCompletion
+```json
+{
+  "completion_id": "string (UUID)",
+  "habit_id": "string (UUID)",
+  "user_id": "string (UUID)",
+  "completed_at": "datetime - When marked complete",
+  "date": "date - Calendar date this completion counts for",
+  "notes": "string (nullable) - Optional notes",
+  "created_at": "datetime"
+}
+```
+
+### HabitWithStatus
+```json
+{
+  "habit_id": "string (UUID)",
+  "user_id": "string (UUID)",
+  "title": "string",
+  "description": "string (nullable)",
+  "recurrence_type": "string (none|daily|weekly|monthly)",
+  "days_of_week": "integer (0-127)",
+  "day_of_month": "integer (1-31, nullable)",
+  "due_date": "datetime (nullable)",
+  "start_date": "datetime",
+  "end_date": "datetime (nullable)",
+  "archived": "boolean",
+  "created_at": "datetime",
+  "updated_at": "datetime",
+  "is_completed": "boolean - Whether completed for queried date",
+  "completed_at": "datetime (nullable) - When completed (null if not)"
+}
+```
+
+### HabitStats
+```json
+{
+  "current_streak": "integer - Consecutive days completed",
+  "completion_rate_7d": "float (0.0-1.0) - 7-day completion rate",
+  "completion_rate_30d": "float (0.0-1.0) - 30-day completion rate",
+  "total_completions": "integer - Total times completed"
 }
 ```
 

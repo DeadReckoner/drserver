@@ -967,6 +967,383 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  # Habits Management
+  /api/v1/habits:
+    post:
+      summary: Create a new habit
+      tags: [Habits]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateHabitRequest'
+      responses:
+        '201':
+          description: Habit created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Habit'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    get:
+      summary: Get all habits for current user
+      tags: [Habits]
+      parameters:
+        - name: include_archived
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Include archived habits in results
+      responses:
+        '200':
+          description: Habits retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Habit'
+
+  /api/v1/habits/today:
+    get:
+      summary: Get today's habits with completion status
+      tags: [Habits]
+      responses:
+        '200':
+          description: Today's habits retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/HabitWithStatus'
+
+  /api/v1/habits/date/{date}:
+    get:
+      summary: Get habits for a specific date
+      tags: [Habits]
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Date in YYYY-MM-DD format
+          example: "2024-01-15"
+      responses:
+        '200':
+          description: Habits for date retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/HabitWithStatus'
+        '400':
+          description: Invalid date format
+
+  /api/v1/habits/range:
+    get:
+      summary: Get habits for a date range (calendar view)
+      tags: [Habits]
+      parameters:
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Start date in YYYY-MM-DD format
+          example: "2024-01-01"
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: End date in YYYY-MM-DD format
+          example: "2024-01-31"
+      responses:
+        '200':
+          description: Habits for date range retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/HabitWithStatus'
+                        description: Map of date strings (YYYY-MM-DD) to arrays of habits for that date
+        '400':
+          description: Invalid date format or range exceeds 90 days
+
+  /api/v1/habits/{habitid}:
+    get:
+      summary: Get specific habit
+      tags: [Habits]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+      responses:
+        '200':
+          description: Habit retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Habit'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update habit
+      tags: [Habits]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateHabitRequest'
+      responses:
+        '200':
+          description: Habit updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Habit'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Delete habit
+      tags: [Habits]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+      responses:
+        '200':
+          description: Habit deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/habits/{habitid}/archive:
+    post:
+      summary: Archive habit
+      tags: [Habits]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+      responses:
+        '200':
+          description: Habit archived successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/habits/{habitid}/complete:
+    post:
+      summary: Complete habit for a date
+      tags: [Habits]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                date:
+                  type: string
+                  format: date-time
+                  description: Date to complete habit for (defaults to today)
+                notes:
+                  type: string
+                  description: Optional notes about completion
+      responses:
+        '201':
+          description: Habit completed successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/HabitCompletion'
+        '400':
+          description: Habit already completed for this date
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Uncomplete habit (remove completion)
+      tags: [Habits]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Date to remove completion for (defaults to today)
+          example: "2024-01-15"
+      responses:
+        '200':
+          description: Completion removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /api/v1/habits/{habitid}/completions:
+    get:
+      summary: Get completion history for habit
+      tags: [Habits]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 30
+          description: Maximum number of completions to return
+      responses:
+        '200':
+          description: Completions retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/HabitCompletion'
+
+  /api/v1/habits/{habitid}/stats:
+    get:
+      summary: Get habit statistics
+      tags: [Habits]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+      responses:
+        '200':
+          description: Statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/HabitStats'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # Anchor Management (Accountability Partners)
   /api/v1/roadmaps/{roadmapid}/anchor-request:
     post:
@@ -2753,6 +3130,240 @@ components:
           nullable: true
           example: null
 
+    # Habits Management
+    Habit:
+      type: object
+      properties:
+        habit_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        title:
+          type: string
+          example: "Morning meditation"
+        description:
+          type: string
+          nullable: true
+          example: "10 minutes of mindfulness"
+        recurrence_type:
+          type: string
+          enum: [none, daily, weekly, monthly]
+          description: |
+            Recurrence pattern:
+            - `none`: One-time todo with due_date
+            - `daily`: Repeats every day
+            - `weekly`: Repeats on specific days of the week
+            - `monthly`: Repeats on a specific day of the month
+          example: "daily"
+        days_of_week:
+          type: integer
+          minimum: 0
+          maximum: 127
+          description: |
+            Bitmask for days of the week (used for weekly recurrence):
+            - 1 = Sunday, 2 = Monday, 4 = Tuesday, 8 = Wednesday,
+            - 16 = Thursday, 32 = Friday, 64 = Saturday
+            - Common values: 62 (weekdays), 65 (weekends), 127 (every day)
+          example: 62
+        day_of_month:
+          type: integer
+          minimum: 1
+          maximum: 31
+          nullable: true
+          description: Day of month (1-31) for monthly recurrence
+          example: 15
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+          description: Due date for one-time todos (recurrence_type=none)
+          example: "2024-04-15T00:00:00Z"
+        start_date:
+          type: string
+          format: date-time
+          description: When the habit becomes active
+          example: "2024-01-01T00:00:00Z"
+        end_date:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the habit ends (optional)
+          example: null
+        archived:
+          type: boolean
+          description: Whether the habit is archived
+          example: false
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00Z"
+
+    CreateHabitRequest:
+      type: object
+      required:
+        - title
+        - recurrence_type
+        - start_date
+      properties:
+        title:
+          type: string
+          example: "Morning meditation"
+        description:
+          type: string
+          example: "10 minutes of mindfulness"
+        recurrence_type:
+          type: string
+          enum: [none, daily, weekly, monthly]
+          description: Type of recurrence (none for one-time todo)
+          example: "daily"
+        days_of_week:
+          type: integer
+          minimum: 1
+          maximum: 127
+          description: Required for weekly recurrence (bitmask 1-127)
+          example: 62
+        day_of_month:
+          type: integer
+          minimum: 1
+          maximum: 31
+          description: Required for monthly recurrence (1-31)
+          example: 1
+        due_date:
+          type: string
+          format: date-time
+          description: Required for one-time todos (recurrence_type=none)
+          example: "2024-04-15T00:00:00Z"
+        start_date:
+          type: string
+          format: date-time
+          description: When the habit becomes active
+          example: "2024-01-01T00:00:00Z"
+        end_date:
+          type: string
+          format: date-time
+          description: Optional end date for the habit
+          example: null
+
+    UpdateHabitRequest:
+      type: object
+      description: All fields are optional for updates
+      properties:
+        title:
+          type: string
+          example: "Evening meditation"
+        description:
+          type: string
+          example: "15 minutes of mindfulness"
+        recurrence_type:
+          type: string
+          enum: [none, daily, weekly, monthly]
+          example: "daily"
+        days_of_week:
+          type: integer
+          minimum: 0
+          maximum: 127
+          example: 127
+        day_of_month:
+          type: integer
+          minimum: 1
+          maximum: 31
+          example: 15
+        due_date:
+          type: string
+          format: date-time
+          example: "2024-05-01T00:00:00Z"
+        start_date:
+          type: string
+          format: date-time
+          example: "2024-01-01T00:00:00Z"
+        end_date:
+          type: string
+          format: date-time
+          example: "2024-12-31T23:59:59Z"
+
+    HabitCompletion:
+      type: object
+      properties:
+        completion_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        habit_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        user_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        completed_at:
+          type: string
+          format: date-time
+          description: Timestamp when the habit was marked complete
+          example: "2024-01-15T08:30:00Z"
+        date:
+          type: string
+          format: date
+          description: The calendar date this completion counts for
+          example: "2024-01-15"
+        notes:
+          type: string
+          nullable: true
+          description: Optional notes about the completion
+          example: "Felt great today!"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-01-15T08:30:00Z"
+
+    HabitWithStatus:
+      type: object
+      description: Habit with completion status for a specific date
+      allOf:
+        - $ref: '#/components/schemas/Habit'
+        - type: object
+          properties:
+            is_completed:
+              type: boolean
+              description: Whether the habit is completed for the queried date
+              example: true
+            completed_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: Timestamp when completed (null if not completed)
+              example: "2024-01-15T08:30:00Z"
+
+    HabitStats:
+      type: object
+      properties:
+        current_streak:
+          type: integer
+          description: Current consecutive days the habit has been completed
+          example: 7
+        completion_rate_7d:
+          type: number
+          format: float
+          description: Completion rate over the last 7 days (0.0 to 1.0)
+          example: 0.857
+        completion_rate_30d:
+          type: number
+          format: float
+          description: Completion rate over the last 30 days (0.0 to 1.0)
+          example: 0.733
+        total_completions:
+          type: integer
+          description: Total number of times the habit has been completed
+          example: 42
+
 tags:
   - name: Health
     description: Health check endpoints
@@ -2772,6 +3383,8 @@ tags:
     description: Task management operations
   - name: Steps
     description: Step management operations
+  - name: Habits
+    description: Habit tracking and recurring todos with completion tracking, streaks, and statistics
   - name: AI Agent
     description: AI-powered goal and roadmap generation with two-step macro/milestone map creation
   - name: Background Jobs
