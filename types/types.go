@@ -583,7 +583,7 @@ type Notification struct {
 	Type           string         `gorm:"column:type;not null" json:"type"`
 	Title          string         `gorm:"column:title;not null" json:"title"`
 	Body           string         `gorm:"column:body;not null" json:"body"`
-	Data           map[string]any `gorm:"type:jsonb;column:data" json:"data,omitempty"`
+	Data           map[string]any `gorm:"type:jsonb;column:data;serializer:json" json:"data,omitempty"`
 	Status         string         `gorm:"column:status;default:pending" json:"status"` // 'pending', 'sent', 'failed', 'read'
 	SentAt         *time.Time     `gorm:"column:sent_at" json:"sent_at,omitempty"`
 	ReadAt         *time.Time     `gorm:"column:read_at" json:"read_at,omitempty"`

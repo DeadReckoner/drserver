@@ -51,17 +51,36 @@ func Error(ctx context.Context, msg string, args ...interface{}) {
 }
 
 func (l *Logger) Info(msg string, args ...interface{}) {
-	l.logger.Printf("[%s] INFO: %s %v", l.requestID, msg, args)
+	l.logWithArgs("INFO", msg, args...)
 }
 
 func (l *Logger) Debug(msg string, args ...interface{}) {
-	l.logger.Printf("[%s] DEBUG: %s %v", l.requestID, msg, args)
+	l.logWithArgs("DEBUG", msg, args...)
 }
 
 func (l *Logger) Warn(msg string, args ...interface{}) {
-	l.logger.Printf("[%s] WARN: %s %v", l.requestID, msg, args)
+	l.logWithArgs("WARN", msg, args...)
 }
 
 func (l *Logger) Error(msg string, args ...interface{}) {
-	l.logger.Printf("[%s] ERROR: %s %v", l.requestID, msg, args)
+	l.logWithArgs("ERROR", msg, args...)
+}
+
+// logWithArgs formats and logs a message with contextual arguments
+func (l *Logger) logWithArgs(level, msg string, args ...interface{}) {
+	if len(args) == 0 {
+		l.logger.Printf("[%s] %s: %s", l.requestID, level, msg)
+		return
+	}
+
+	// If there's exactly one arg and it's a string, append it directly
+	if len(args) == 1 {
+		if str, ok := args[0].(string); ok {
+			l.logger.Printf("[%s] %s: %s [%s]", l.requestID, level, msg, str)
+			return
+		}
+	}
+
+	// Otherwise format all args
+	l.logger.Printf("[%s] %s: %s %v", l.requestID, level, msg, args)
 }

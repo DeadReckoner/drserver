@@ -95,7 +95,9 @@ func AgentGenerateAsync(c *gin.Context) {
 	}
 
 	// Use background context for the goroutine so it doesn't get cancelled when the HTTP request completes
-	go processRoadmapGeneration(context.Background(), job.JobID, draft.RoadmapID, userID, req)
+	// Create logger with JobID as correlation ID for tracking
+	bgCtx := log.WithLogger(context.Background(), log.NewLogger(job.JobID))
+	go processRoadmapGeneration(bgCtx, job.JobID, draft.RoadmapID, userID, req)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"status":     job.Status,
@@ -258,7 +260,7 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 }
 
 func updateJobProgress(jobID string, progress int, status, message string) {
-	ctx := context.Background()
+	ctx := log.WithLogger(context.Background(), log.NewLogger(jobID))
 
 	// Update db
 	job := types.BackgroundJob{
@@ -283,7 +285,7 @@ func updateJobProgress(jobID string, progress int, status, message string) {
 }
 
 func handleGenerationError(jobID, roadmapID, userID string, err error) {
-	ctx := context.Background()
+	ctx := log.WithLogger(context.Background(), log.NewLogger(jobID))
 	log.Info(ctx, "Handling roadmap generation error", fmt.Sprintf("JobID: %s, RoadmapID: %s, Error: %v", jobID, roadmapID, err))
 	now := time.Now()
 

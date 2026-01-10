@@ -16,9 +16,12 @@ import (
 
 // SendPushNotification creates a notification record and sends push notifications to all active devices
 func SendPushNotification(userID, notificationType, title, body string, data map[string]any) {
-	tokens := database.GetActivePushTokens(context.Background(), userID)
+	// Create context with logger using userID as correlation ID
+	ctx := log.WithLogger(context.Background(), log.NewLogger(userID))
+
+	tokens := database.GetActivePushTokens(ctx, userID)
 	if len(tokens) == 0 {
-		log.Info(context.Background(), "No active push tokens", userID)
+		log.Info(ctx, "No active push tokens", userID)
 		return
 	}
 
@@ -32,16 +35,17 @@ func SendPushNotification(userID, notificationType, title, body string, data map
 		Status:         string(types.NotificationStatusPending),
 	}
 
-	database.CreateNotification(context.Background(), &alert)
+	database.CreateNotification(ctx, &alert)
 
 	for _, token := range tokens {
-		go sendExpoNotification(token.ExpoToken, title, body, data, alert.NotificationID)
+		// Pass the notification ID as correlation ID for tracking
+		notifCtx := log.WithLogger(context.Background(), log.NewLogger(alert.NotificationID))
+		go sendExpoNotification(notifCtx, token.ExpoToken, title, body, data, alert.NotificationID)
 	}
 }
 
 // sendExpoNotification sends a push notification via Expo's push service
-func sendExpoNotification(expoToken, title, body string, data map[string]any, notificationID string) {
-	ctx := context.Background()
+func sendExpoNotification(ctx context.Context, expoToken, title, body string, data map[string]any, notificationID string) {
 
 	// Prepare Expo Push notification payload
 	pushMessage := map[string]any{
