@@ -97,21 +97,27 @@ func GenerateGoalFromStructure(ctx context.Context, goalReq types.GoalRequest) (
 // GenerateMacroMapFromGoalRequest generates only the macro map (strategic view) from a goal request
 // This allows for progress tracking between macro and milestone generation
 func GenerateMacroMapFromGoalRequest(ctx context.Context, goalReq types.GoalRequest) (*types.MacroMap, error) {
+	log.Info(ctx, "Starting macro map generation", fmt.Sprintf("Goal: %s", goalReq.GoalName))
 	prompt := buildGoalPrompt(goalReq)
 	log.Info(ctx, "User Prompt", prompt)
 
 	// Generate macro map
+	log.Info(ctx, "Calling OpenAI API for macro map generation", "")
 	macroMapResp, err := generateMacroMap(ctx, prompt)
 	if err != nil {
+		log.Info(ctx, "Macro map API call failed", fmt.Sprintf("Error: %v", err))
 		return nil, fmt.Errorf("failed to generate macro map: %w", err)
 	}
+	log.Info(ctx, "Macro map API call successful", fmt.Sprintf("Response size: %d bytes", len(macroMapResp)))
 
 	// Parse the raw JSON response
 	var macroMapData types.MacroMap
 	if err := parseMacroMapResponse(macroMapResp, &macroMapData); err != nil {
+		log.Info(ctx, "Macro map parsing failed", fmt.Sprintf("Error: %v", err))
 		return nil, fmt.Errorf("failed to parse macro map: %w", err)
 	}
 
+	log.Info(ctx, "Macro map parsed successfully", fmt.Sprintf("Phases: %d", len(macroMapData.Phases)))
 	log.Info(ctx, "Macro Map", macroMapData)
 	return &macroMapData, nil
 }
@@ -119,20 +125,26 @@ func GenerateMacroMapFromGoalRequest(ctx context.Context, goalReq types.GoalRequ
 // GenerateMilestoneMapFromGoalRequest generates the milestone map (tactical view) using an existing macro map
 // This allows for progress tracking between macro and milestone generation
 func GenerateMilestoneMapFromGoalRequest(ctx context.Context, goalReq types.GoalRequest, macroMap *types.MacroMap) (*types.Roadmap, error) {
+	log.Info(ctx, "Starting milestone map generation", fmt.Sprintf("Goal: %s, Phases: %d", goalReq.GoalName, len(macroMap.Phases)))
 	prompt := buildGoalPrompt(goalReq)
 
 	// Generate milestone map using the macro map as context
+	log.Info(ctx, "Calling OpenAI API for milestone map generation", "")
 	milestoneMapResp, err := generateMilestoneMap(ctx, prompt, macroMap)
 	if err != nil {
+		log.Info(ctx, "Milestone map API call failed", fmt.Sprintf("Error: %v", err))
 		return nil, fmt.Errorf("failed to generate milestone map: %w", err)
 	}
+	log.Info(ctx, "Milestone map API call successful", fmt.Sprintf("Response size: %d bytes", len(milestoneMapResp)))
 
 	// Parse the milestone map response
 	roadmap, err := ParseRoadmap(milestoneMapResp)
 	if err != nil {
+		log.Info(ctx, "Milestone map parsing failed", fmt.Sprintf("Error: %v", err))
 		return nil, fmt.Errorf("failed to parse roadmap: %w", err)
 	}
 
+	log.Info(ctx, "Milestone map parsed successfully", fmt.Sprintf("Milestones: %d", len(roadmap.Milestones)))
 	return roadmap, nil
 }
 

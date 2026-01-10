@@ -54,6 +54,7 @@ func AgentGenerate(c *gin.Context) {
 }
 
 func AgentGenerateAsync(c *gin.Context) {
+	ctx := c.Request.Context()
 	userID := c.GetString("user_id")
 
 	var req types.GoalRequest
@@ -61,6 +62,8 @@ func AgentGenerateAsync(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	log.Info(ctx, "Roadmap generation request received", fmt.Sprintf("UserID: %s, Goal: %s", userID, req.GoalName))
 
 	job := types.BackgroundJob{
 		JobID:    uuid.NewString(),
@@ -177,25 +180,33 @@ func GetJobStatus(c *gin.Context) {
 }
 
 func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID string, req types.GoalRequest) {
+	log.Info(ctx, "Starting roadmap generation process", fmt.Sprintf("JobID: %s, RoadmapID: %s, UserID: %s", jobID, roadmapID, userID))
+
 	updateJobProgress(jobID, 5, string(types.JobStatusProcessing), "Initializing AI generation...")
 
 	updateJobProgress(jobID, 10, string(types.JobStatusProcessing), "Generating strategic roadmap (macro map)...")
+	log.Info(ctx, "Processing macro map generation", fmt.Sprintf("JobID: %s, RoadmapID: %s", jobID, roadmapID))
 
 	// Step 1: Generate macro map (strategic view)
 	macroMap, err := agent.GenerateMacroMapFromGoalRequest(ctx, req)
 	if err != nil {
+		log.Info(ctx, "Macro map generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
 		handleGenerationError(jobID, roadmapID, userID, err)
 		return
 	}
+	log.Info(ctx, "Macro map generation completed", fmt.Sprintf("JobID: %s, Phases: %d", jobID, len(macroMap.Phases)))
 
 	updateJobProgress(jobID, 50, string(types.JobStatusProcessing), "Macro map complete! Generating detailed milestone plan...")
+	log.Info(ctx, "Processing detailed milestone map", fmt.Sprintf("JobID: %s, RoadmapID: %s", jobID, roadmapID))
 
 	// Step 2: Generate milestone map (tactical view) using the macro map as context
 	roadmap, err := agent.GenerateMilestoneMapFromGoalRequest(ctx, req, macroMap)
 	if err != nil {
+		log.Info(ctx, "Milestone map generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
 		handleGenerationError(jobID, roadmapID, userID, err)
 		return
 	}
+	log.Info(ctx, "Milestone map generation completed", fmt.Sprintf("JobID: %s, Milestones: %d", jobID, len(roadmap.Milestones)))
 
 	updateJobProgress(jobID, 80, string(types.JobStatusProcessing), "Saving roadmap data...")
 
@@ -237,11 +248,13 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 		},
 	})
 
+	log.Info(ctx, "Sending roadmap completion push notification", fmt.Sprintf("UserID: %s, RoadmapID: %s", userID, roadmapID))
 	utils.SendPushNotification(userID, "roadmap_complete",
 		"Your roadmap is ready for review!", fmt.Sprintf("Your %s roadmap has been generated successfully.", req.GoalName),
 		map[string]any{
 			"roadmap_id": roadmapID,
 		})
+	log.Info(ctx, "Push notification sent successfully", fmt.Sprintf("UserID: %s, Type: roadmap_complete", userID))
 }
 
 func updateJobProgress(jobID string, progress int, status, message string) {
@@ -271,6 +284,7 @@ func updateJobProgress(jobID string, progress int, status, message string) {
 
 func handleGenerationError(jobID, roadmapID, userID string, err error) {
 	ctx := context.Background()
+	log.Info(ctx, "Handling roadmap generation error", fmt.Sprintf("JobID: %s, RoadmapID: %s, Error: %v", jobID, roadmapID, err))
 	now := time.Now()
 
 	job := types.BackgroundJob{
@@ -292,6 +306,7 @@ func handleGenerationError(jobID, roadmapID, userID string, err error) {
 		Data:    map[string]string{"error": err.Error()},
 	})
 
+	log.Info(ctx, "Sending roadmap failure push notification", fmt.Sprintf("UserID: %s, RoadmapID: %s", userID, roadmapID))
 	utils.SendPushNotification(userID, "roadmap_failed",
 		"Roadmap Generation Failed",
 		"We encountered an issue. Please try again.",
@@ -299,6 +314,7 @@ func handleGenerationError(jobID, roadmapID, userID string, err error) {
 			"roadmap_id": roadmapID,
 			"error":      err.Error(),
 		})
+	log.Info(ctx, "Push notification sent successfully", fmt.Sprintf("UserID: %s, Type: roadmap_failed", userID))
 
 }
 
