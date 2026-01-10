@@ -118,7 +118,6 @@ func GenerateMacroMapFromGoalRequest(ctx context.Context, goalReq types.GoalRequ
 	}
 
 	log.Info(ctx, "Macro map parsed successfully", fmt.Sprintf("Phases: %d", len(macroMapData.Phases)))
-	log.Info(ctx, "Macro Map", macroMapData)
 	return &macroMapData, nil
 }
 
@@ -173,7 +172,6 @@ func generateRoadmapFromPrompt(ctx context.Context, userPrompt string) (*Generat
 		return nil, fmt.Errorf("failed to parse macro map: %w", err)
 	}
 
-	log.Info(ctx, "Macro Map", macroMapData)
 	// STEP 2: Generate Milestone Map (Tactical View) based on the macro map
 	// This creates detailed tasks aligned with the strategic plan from step 1
 	milestoneMapResp, err := generateMilestoneMap(ctx, userPrompt, &macroMapData)
@@ -318,6 +316,8 @@ func generateMacroMap(ctx context.Context, userPrompt string) ([]byte, error) {
 				Generate a high-level strategic roadmap (macro map) with 2-4 major phases representing the journey from current state to goal achievement.
 
 				For each phase, create 2-5 macro milestones that represent significant achievements. Each macro milestone must include:
+				- The title should be short and concise
+				- Description should be informative but not overly descriptive
 				- Clear acceptance test (how to know it's complete)
 				- Duration estimates (min/max days, accounting for learning curves)
 				- Resources forecast (tools, materials, courses needed as JSON string)
@@ -509,6 +509,7 @@ func generateMilestoneMap(ctx context.Context, userPrompt string, macroMap *type
 									Generate EXACTLY 1 detailed milestone representing the FIRST actionable phase (typically 1-2 weeks) that aligns with the first macro milestone above.
 
 									MILESTONE REQUIREMENTS:
+									- The Title of the milestone should be short and concise
 									- Create 10-14 specific, actionable tasks that build toward the milestone goal
 									- Tasks should progress logically - each building on previous work
 									- Mix learning tasks with practice/application tasks
@@ -668,8 +669,6 @@ func makeOpenAIRequest(ctx context.Context, reqBody AIRequest) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Log the request for debugging
-	log.Info(ctx, "OpenAI Request Payload", string(bodyBytes))
 
 	// Create HTTP POST request to OpenAI
 	req, err := http.NewRequestWithContext(ctx, "POST", openAIURL, bytes.NewBuffer(bodyBytes))
@@ -698,11 +697,11 @@ func makeOpenAIRequest(ctx context.Context, reqBody AIRequest) ([]byte, error) {
 	}
 
 	// Log the response for debugging
-	log.Info(ctx, fmt.Sprintf("OpenAI Response Status: %d", resp.StatusCode), string(respBytes))
+	log.Info(ctx, fmt.Sprintf("OpenAI Response Status: %d", resp.StatusCode))
 
 	// Check for HTTP errors (4xx, 5xx status codes)
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("OpenAI error (status %d): %s", resp.StatusCode, string(respBytes))
+		return nil, fmt.Errorf("OpenAI error (status %d): %s", resp.StatusCode)
 	}
 
 	// Return raw response bytes for parsing by caller
