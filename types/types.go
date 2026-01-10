@@ -333,7 +333,14 @@ func (h *Habit) IsDueOn(date time.Time) bool {
 
 	switch h.RecurrenceType {
 	case RecurrenceNone:
-		return h.DueDate != nil && sameDay(*h.DueDate, date)
+		// One-time todos should appear from start_date until due_date
+		// This allows users to see upcoming tasks before they're due
+		if h.DueDate == nil {
+			return false
+		}
+		// Normalize due date to start of day for comparison
+		dueDay := time.Date(h.DueDate.Year(), h.DueDate.Month(), h.DueDate.Day(), 0, 0, 0, 0, h.DueDate.Location())
+		return !date.After(dueDay)
 	case RecurrenceDaily:
 		return true
 	case RecurrenceWeekly:
