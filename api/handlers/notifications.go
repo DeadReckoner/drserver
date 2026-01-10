@@ -11,7 +11,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// GetNotifications returns all unread notifications for the current user
+// GetNotifications returns all notifications for the current user
+// Supports ?unread=true query parameter to filter to only unread notifications
 func GetNotifications(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
@@ -19,7 +20,10 @@ func GetNotifications(c *gin.Context) {
 		return
 	}
 
-	notifications := database.GetUnreadNotifications(c, userID.(string))
+	// Check for unread query parameter
+	unreadOnly := c.Query("unread") == "true"
+
+	notifications := database.GetNotifications(c, userID.(string), unreadOnly)
 	utils.DataResponse(c, http.StatusOK, notifications)
 }
 

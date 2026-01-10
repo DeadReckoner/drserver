@@ -53,11 +53,15 @@ func CreateNotification(ctx context.Context, notif *types.Notification) error {
 	return db.Create(notif).Error
 }
 
-func GetUnreadNotifications(c *gin.Context, userID string) []types.Notification {
+func GetNotifications(c *gin.Context, userID string, unreadOnly bool) []types.Notification {
 	var notifs []types.Notification
-	db.Where("user_id = ? AND read_at IS NULL", userID).
-		Order("created_at DESC").
-		Find(&notifs)
+	query := db.Where("user_id = ?", userID)
+
+	if unreadOnly {
+		query = query.Where("read_at IS NULL")
+	}
+
+	query.Order("created_at DESC").Find(&notifs)
 	return notifs
 }
 

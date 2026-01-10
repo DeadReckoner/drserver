@@ -1880,9 +1880,18 @@ paths:
   # Notifications
   /api/v1/notifications:
     get:
-      summary: Get unread notifications
-      description: Retrieve all unread notifications for the current user
+      summary: Get notifications
+      description: Retrieve all notifications for the current user. By default returns all notifications (read and unread). Use ?unread=true to filter for unread notifications only.
       tags: [Notifications]
+      parameters:
+        - name: unread
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: If true, only return unread notifications. If false or omitted, return all notifications.
+          example: true
       responses:
         '200':
           description: Notifications retrieved successfully

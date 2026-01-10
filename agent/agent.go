@@ -316,7 +316,7 @@ func generateMacroMap(ctx context.Context, userPrompt string) ([]byte, error) {
 				Generate a high-level strategic roadmap (macro map) with 2-4 major phases representing the journey from current state to goal achievement.
 
 				For each phase, create 2-5 macro milestones that represent significant achievements. Each macro milestone must include:
-				- The title should be short and concise
+				- The title should be short and concise (no more than 5 words)
 				- Description should be informative but not overly descriptive
 				- Clear acceptance test (how to know it's complete)
 				- Duration estimates (min/max days, accounting for learning curves)
@@ -509,7 +509,7 @@ func generateMilestoneMap(ctx context.Context, userPrompt string, macroMap *type
 									Generate EXACTLY 1 detailed milestone representing the FIRST actionable phase (typically 1-2 weeks) that aligns with the first macro milestone above.
 
 									MILESTONE REQUIREMENTS:
-									- The Title of the milestone should be short and concise
+									- The title of the milestone should be short and concise (no more than 8 words)
 									- Create 10-14 specific, actionable tasks that build toward the milestone goal
 									- Tasks should progress logically - each building on previous work
 									- Mix learning tasks with practice/application tasks

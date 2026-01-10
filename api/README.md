@@ -2025,12 +2025,20 @@ curl -X DELETE \
 ## Notifications
 
 ### GET /api/v1/notifications
-Get all unread notifications for the current user.
+Get all notifications for the current user.
 
-**Example Request:**
+**Query Parameters:**
+- `unread` (optional, boolean) - If set to `true`, only returns unread notifications. Defaults to returning all notifications.
+
+**Example Requests:**
 ```bash
+# Get all notifications (read and unread)
 curl -H "Authorization: Bearer <token>" \
   "http://localhost:8080/api/v1/notifications"
+
+# Get only unread notifications
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/notifications?unread=true"
 ```
 
 **Response (200 OK):**
