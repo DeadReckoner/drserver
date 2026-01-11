@@ -216,8 +216,8 @@ func GetHabitsForDate(c *gin.Context, date time.Time) ([]types.HabitWithStatus, 
 		return nil, types.ErrHabitNotFound
 	}
 
-	// Normalize date to start of day
-	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	// Normalize date to start of day in UTC
+	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 
 	log.Info(ctx, "Getting habits for date", dateOnly.Format("2006-01-02"))
 
@@ -345,8 +345,8 @@ func CompleteHabit(c *gin.Context, habitID string, date time.Time, notes string)
 		return nil, types.ErrHabitNotFound
 	}
 
-	// Normalize date to start of day
-	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	// Normalize date to start of day in UTC
+	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 
 	log.Info(ctx, "Completing habit", habitID, "for date", dateOnly.Format("2006-01-02"))
 
@@ -387,8 +387,8 @@ func UncompleteHabit(c *gin.Context, habitID string, date time.Time) error {
 		return types.ErrHabitNotFound
 	}
 
-	// Normalize date to start of day
-	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	// Normalize date to start of day in UTC
+	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 
 	log.Info(ctx, "Uncompleting habit", habitID, "for date", dateOnly.Format("2006-01-02"))
 
