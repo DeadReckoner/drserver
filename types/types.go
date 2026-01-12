@@ -323,12 +323,19 @@ func (Habit) TableName() string {
 
 // IsDueOn checks if the habit is scheduled for a given date
 func (h *Habit) IsDueOn(date time.Time) bool {
+	// Normalize input date and habit dates to start of day in UTC for comparison
+	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	startDateOnly := time.Date(h.StartDate.Year(), h.StartDate.Month(), h.StartDate.Day(), 0, 0, 0, 0, time.UTC)
+	
 	// Check if date is within active period
-	if date.Before(h.StartDate) {
+	if dateOnly.Before(startDateOnly) {
 		return false
 	}
-	if h.EndDate != nil && date.After(*h.EndDate) {
-		return false
+	if h.EndDate != nil {
+		endDateOnly := time.Date(h.EndDate.Year(), h.EndDate.Month(), h.EndDate.Day(), 0, 0, 0, 0, time.UTC)
+		if dateOnly.After(endDateOnly) {
+			return false
+		}
 	}
 
 	switch h.RecurrenceType {
@@ -339,8 +346,8 @@ func (h *Habit) IsDueOn(date time.Time) bool {
 			return false
 		}
 		// Normalize due date to start of day for comparison
-		dueDay := time.Date(h.DueDate.Year(), h.DueDate.Month(), h.DueDate.Day(), 0, 0, 0, 0, h.DueDate.Location())
-		return !date.After(dueDay)
+		dueDay := time.Date(h.DueDate.Year(), h.DueDate.Month(), h.DueDate.Day(), 0, 0, 0, 0, time.UTC)
+		return !dateOnly.After(dueDay)
 	case RecurrenceDaily:
 		return true
 	case RecurrenceWeekly:

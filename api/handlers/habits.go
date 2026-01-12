@@ -115,7 +115,11 @@ func GetTodaysHabits(c *gin.Context) {
 
 	log.Info(ctx, "GetTodaysHabits: retrieving habits for today")
 
-	habits, err := database.GetHabitsForDate(c, time.Now())
+	// Normalize to UTC at start of day to ensure consistent date matching
+	now := time.Now().UTC()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	habits, err := database.GetHabitsForDate(c, todayStart)
 	if err != nil {
 		log.Error(ctx, "GetTodaysHabits: failed to retrieve habits", err)
 		utils.InternalErrorResponse(c, err)
