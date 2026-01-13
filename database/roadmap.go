@@ -261,6 +261,9 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 	if rm.StartDate != roadmap.StartDate {
 		updateMap["start_date"] = rm.StartDate
 	}
+	if rm.CurrentSkillLevel != "" {
+		updateMap["current_skill_level"] = rm.CurrentSkillLevel
+	}
 	// if !rm.StartDate.IsZero() {
 	// 	updateMap["start_date"] = rm.StartDate
 	// }
@@ -284,6 +287,8 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 				roadmap.Completed = value.(bool)
 			case "start_date":
 				roadmap.StartDate = value.(time.Time)
+			case "current_skill_level":
+				roadmap.CurrentSkillLevel = value.(string)
 			}
 		}
 	}

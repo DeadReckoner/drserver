@@ -109,15 +109,16 @@ type OpenAIResponse struct {
 }
 
 type Roadmap struct {
-	RoadmapID   string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"roadmap_id"`
-	UserID      string    `gorm:"type:uuid" json:"user_id"`
-	Goal        string    `json:"goal"`
-	Description string    `json:"description"`
-	Days        int       `json:"days"`
-	Completed   bool      `json:"completed"`
-	StartDate   time.Time `json:"start_date,omitempty"`
-	Type        string    `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
-	AnchorID    *string   `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
+	RoadmapID         string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"roadmap_id"`
+	UserID            string    `gorm:"type:uuid" json:"user_id"`
+	Goal              string    `json:"goal"`
+	Description       string    `json:"description"`
+	Days              int       `json:"days"`
+	Completed         bool      `json:"completed"`
+	StartDate         time.Time `json:"start_date,omitempty"`
+	Type              string    `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
+	AnchorID          *string   `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
+	CurrentSkillLevel string    `gorm:"column:current_skill_level" json:"current_skill_level,omitempty"`
 
 	// Async generation tracking
 	JobID            *string `gorm:"type:uuid;column:job_id" json:"job_id,omitempty"`

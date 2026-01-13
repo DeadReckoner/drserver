@@ -2391,6 +2391,10 @@ components:
           nullable: true
           description: User ID of the accountability partner (anchor) for this roadmap
           example: "123e4567-e89b-12d3-a456-426614174000"
+        current_skill_level:
+          type: string
+          description: User's current skill level for this roadmap goal
+          example: "Beginner"
         macro_map:
           $ref: '#/components/schemas/MacroMap'
           description: Strategic overview of the roadmap (only present in ai_generated roadmaps)
