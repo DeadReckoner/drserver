@@ -40,12 +40,18 @@ func SendPushNotification(userID, notificationType, title, body string, data map
 	for _, token := range tokens {
 		// Pass the notification ID as correlation ID for tracking
 		notifCtx := log.WithLogger(context.Background(), log.NewLogger(alert.NotificationID))
-		go sendExpoNotification(notifCtx, token.ExpoToken, title, body, data, alert.NotificationID)
+		go sendExpoNotification(notifCtx, token.ExpoToken, notificationType, title, body, data, alert.NotificationID)
 	}
 }
 
 // sendExpoNotification sends a push notification via Expo's push service
-func sendExpoNotification(ctx context.Context, expoToken, title, body string, data map[string]any, notificationID string) {
+func sendExpoNotification(ctx context.Context, expoToken, notificationType, title, body string, data map[string]any, notificationID string) {
+
+	// Ensure data map exists and add type field
+	if data == nil {
+		data = make(map[string]any)
+	}
+	data["type"] = notificationType
 
 	// Prepare Expo Push notification payload
 	pushMessage := map[string]any{
