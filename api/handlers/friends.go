@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"dr/server/api/utils"
 	"dr/server/database"
 	"dr/server/log"
@@ -214,6 +215,9 @@ func UpdateFriendRequestStatus(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, friendship)
 	log.Info(ctx, "Friend request status updated to: "+req.Status)
 
+	// Clean up the original friend_request notification for the addressee
+	go cleanupFriendRequestNotification(ctx, friendship)
+
 	// Send push notification to the requester
 	go sendFriendStatusNotification(friendship, req.Status)
 }
@@ -275,4 +279,19 @@ func sendFriendStatusNotification(friendship types.Friendship, status string) {
 			"addressee_id":  friendship.AddresseeID,
 		},
 	)
+}
+
+// cleanupFriendRequestNotification removes the original friend_request notification
+// when a friend request is accepted or rejected to prevent duplicate notifications
+func cleanupFriendRequestNotification(ctx context.Context, friendship types.Friendship) {
+	err := database.DeleteNotificationsByTypeAndData(
+		ctx,
+		friendship.AddresseeID,
+		"friend_request",
+		"friendship_id",
+		friendship.ID,
+	)
+	if err != nil {
+		log.Info(ctx, "Failed to cleanup friend request notification:", err)
+	}
 }

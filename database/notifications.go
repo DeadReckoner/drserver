@@ -77,3 +77,22 @@ func UpdateNotificationStatus(ctx context.Context, notif *types.Notification, up
 		Where("notification_id = ?", notif.NotificationID).
 		Updates(updates).Error
 }
+
+// DeleteNotificationsByTypeAndData deletes notifications matching a type and data field
+// This is used to clean up request notifications when requests are accepted/rejected
+func DeleteNotificationsByTypeAndData(ctx context.Context, userID string, notifType string, dataKey string, dataValue string) error {
+	// Use raw SQL with JSON query since GORM doesn't handle JSONB queries well
+	return db.Exec(
+		`DELETE FROM notifications WHERE user_id = ? AND type = ? AND data->>? = ?`,
+		userID, notifType, dataKey, dataValue,
+	).Error
+}
+
+// DeleteNotificationsByTypeAndMultipleDataKeys deletes notifications matching type and multiple data fields
+func DeleteNotificationsByTypeAndMultipleDataKeys(ctx context.Context, userID string, notifType string, dataConditions map[string]string) error {
+	query := db.Where("user_id = ? AND type = ?", userID, notifType)
+	for key, value := range dataConditions {
+		query = query.Where("data->>? = ?", key, value)
+	}
+	return query.Delete(&types.Notification{}).Error
+}

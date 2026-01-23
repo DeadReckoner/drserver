@@ -62,16 +62,24 @@ func CreateFriendRequest(c *gin.Context, addresseeID string) (types.Friendship, 
 	// Check if friendship already exists (in either direction)
 	var existingFriendship types.Friendship
 	result := db.Where(
-		"((requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)) AND status IN (?, ?)",
-		requesterIDStr, addresseeID, addresseeID, requesterIDStr, "pending", "accepted",
+		"((requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?))",
+		requesterIDStr, addresseeID, addresseeID, requesterIDStr,
 	).First(&existingFriendship)
 
 	if result.Error == nil {
-		// Friendship already exists
+		// Friendship record exists
 		if existingFriendship.Status == "accepted" {
 			return types.Friendship{}, errors.New("users are already friends")
 		}
-		return types.Friendship{}, errors.New("friend request already exists")
+		if existingFriendship.Status == "pending" {
+			return types.Friendship{}, errors.New("friend request already exists")
+		}
+		// If rejected, delete the old record to allow a fresh request
+		if existingFriendship.Status == "rejected" {
+			if err := db.Delete(&existingFriendship).Error; err != nil {
+				return types.Friendship{}, err
+			}
+		}
 	}
 
 	// Create new friend request
@@ -242,13 +250,14 @@ func UpdateFriendshipStatus(c *gin.Context, friendshipID string, newStatus strin
 		return types.Friendship{}, errors.New("friend request is not pending")
 	}
 
-	// If rejected, delete the friendship
+	// If rejected, update the status (keep record for audit trail)
 	if newStatus == "rejected" {
-		if err := db.Delete(&friendship).Error; err != nil {
+		now := time.Now()
+		friendship.Status = "rejected"
+		friendship.UpdatedAt = &now
+		if err := db.Save(&friendship).Error; err != nil {
 			return types.Friendship{}, err
 		}
-		// Return the friendship with rejected status for the response
-		friendship.Status = "rejected"
 		return friendship, nil
 	}
 
@@ -308,11 +317,19 @@ func CreateAnchorRequest(c *gin.Context, roadmapID string, anchorUserID string) 
 		return types.AnchorRequest{}, errors.New("you are not friends with this user")
 	}
 
-	// Check if there's already a pending request for this roadmap and anchor
+	// Check if there's already a request for this roadmap and anchor
 	var existingRequest types.AnchorRequest
-	result := db.Where("roadmap_id = ? AND anchor_id = ? AND status = ?", roadmapID, anchorUserID, "pending").First(&existingRequest)
+	result := db.Where("roadmap_id = ? AND anchor_id = ?", roadmapID, anchorUserID).First(&existingRequest)
 	if result.Error == nil {
-		return types.AnchorRequest{}, errors.New("anchor request already exists for this roadmap")
+		if existingRequest.Status == "pending" {
+			return types.AnchorRequest{}, errors.New("anchor request already exists for this roadmap")
+		}
+		// If rejected, delete the old record to allow a fresh request
+		if existingRequest.Status == "rejected" {
+			if err := db.Delete(&existingRequest).Error; err != nil {
+				return types.AnchorRequest{}, err
+			}
+		}
 	}
 
 	// Check if the anchor is already assigned to this roadmap

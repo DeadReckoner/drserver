@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"dr/server/database"
 	"dr/server/log"
 	"dr/server/types"
@@ -331,6 +332,9 @@ func AcceptAnchorRequest(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, anchorRequest)
 	log.Info(ctx, "Anchor request accepted successfully")
 
+	// Clean up the original anchor_request notification for the anchor
+	go cleanupAnchorRequestNotification(ctx, anchorRequest)
+
 	// Send push notification to the requester
 	go sendAnchorStatusNotification(anchorRequest, "accepted")
 }
@@ -360,6 +364,9 @@ func RejectAnchorRequest(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusOK, anchorRequest)
 	log.Info(ctx, "Anchor request rejected successfully")
+
+	// Clean up the original anchor_request notification for the anchor
+	go cleanupAnchorRequestNotification(ctx, anchorRequest)
 
 	// Send push notification to the requester
 	go sendAnchorStatusNotification(anchorRequest, "rejected")
@@ -445,4 +452,19 @@ func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status stri
 			"roadmap_id": anchorRequest.RoadmapID,
 		},
 	)
+}
+
+// cleanupAnchorRequestNotification removes the original anchor_request notification
+// when an anchor request is accepted or rejected to prevent duplicate notifications
+func cleanupAnchorRequestNotification(ctx context.Context, anchorRequest types.AnchorRequest) {
+	err := database.DeleteNotificationsByTypeAndData(
+		ctx,
+		anchorRequest.AnchorID,
+		"anchor_request",
+		"request_id",
+		anchorRequest.RequestID,
+	)
+	if err != nil {
+		log.Info(ctx, "Failed to cleanup anchor request notification:", err)
+	}
 }
