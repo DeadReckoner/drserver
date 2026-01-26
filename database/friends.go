@@ -319,7 +319,7 @@ func CreateAnchorRequest(c *gin.Context, roadmapID string, anchorUserID string) 
 
 	// Check if there's already a request for this roadmap and anchor
 	var existingRequest types.AnchorRequest
-	result := db.Where("roadmap_id = ? AND anchor_id = ?", roadmapID, anchorUserID).First(&existingRequest)
+	result := db.Where("roadmap_id = ? AND anchor_id = ? AND target_type = ?", roadmapID, anchorUserID, types.TargetTypeRoadmap).First(&existingRequest)
 	if result.Error == nil {
 		if existingRequest.Status == "pending" {
 			return types.AnchorRequest{}, errors.New("anchor request already exists for this roadmap")
@@ -339,7 +339,8 @@ func CreateAnchorRequest(c *gin.Context, roadmapID string, anchorUserID string) 
 
 	// Create the anchor request
 	anchorRequest := types.AnchorRequest{
-		RoadmapID:   roadmapID,
+		TargetType:  types.TargetTypeRoadmap,
+		RoadmapID:   &roadmapID,
 		RequesterID: userIDStr,
 		AnchorID:    anchorUserID,
 		Status:      "pending",
@@ -356,6 +357,69 @@ func CreateAnchorRequest(c *gin.Context, roadmapID string, anchorUserID string) 
 	return anchorRequest, nil
 }
 
+// CreateHabitAnchorRequest creates a new anchor request for a habit
+func CreateHabitAnchorRequest(c *gin.Context, habitID string, anchorUserID string) (types.AnchorRequest, error) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return types.AnchorRequest{}, errors.New("missing or invalid user_id")
+	}
+
+	userIDStr := userID.(string)
+
+	// Verify the habit exists and belongs to the requester
+	var habit types.Habit
+	if err := db.Where("habit_id = ? AND user_id = ?", habitID, userIDStr).First(&habit).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return types.AnchorRequest{}, errors.New("habit not found or you don't have permission")
+		}
+		return types.AnchorRequest{}, err
+	}
+
+	// Check if they are friends
+	if !CheckAreFriends(userIDStr, anchorUserID) {
+		return types.AnchorRequest{}, errors.New("you are not friends with this user")
+	}
+
+	// Check if there's already a pending request for this habit and anchor
+	var existingRequest types.AnchorRequest
+	result := db.Where("habit_id = ? AND anchor_id = ? AND target_type = ?", habitID, anchorUserID, types.TargetTypeHabit).First(&existingRequest)
+	if result.Error == nil {
+		if existingRequest.Status == "pending" {
+			return types.AnchorRequest{}, errors.New("anchor request already exists for this habit")
+		}
+		// If rejected, delete the old record to allow a fresh request
+		if existingRequest.Status == "rejected" {
+			if err := db.Delete(&existingRequest).Error; err != nil {
+				return types.AnchorRequest{}, err
+			}
+		}
+	}
+
+	// Check if the anchor is already assigned to this habit
+	if habit.AnchorID != nil && *habit.AnchorID == anchorUserID {
+		return types.AnchorRequest{}, errors.New("this user is already an anchor for this habit")
+	}
+
+	// Create the anchor request
+	anchorRequest := types.AnchorRequest{
+		TargetType:  types.TargetTypeHabit,
+		HabitID:     &habitID,
+		RequesterID: userIDStr,
+		AnchorID:    anchorUserID,
+		Status:      "pending",
+		CreatedAt:   time.Now(),
+	}
+
+	if err := db.Create(&anchorRequest).Error; err != nil {
+		return types.AnchorRequest{}, err
+	}
+
+	// Preload relationships
+	db.Preload("Habit").Preload("Requester").Preload("Anchor").First(&anchorRequest, "request_id = ?", anchorRequest.RequestID)
+
+	return anchorRequest, nil
+}
+
 // GetAnchorRequests gets all pending anchor requests for the current user (as anchor)
 func GetAnchorRequests(c *gin.Context) []types.AnchorRequest {
 	userID, exists := c.Get("user_id")
@@ -366,6 +430,7 @@ func GetAnchorRequests(c *gin.Context) []types.AnchorRequest {
 	var requests []types.AnchorRequest
 	db.Where("anchor_id = ? AND status = ?", userID.(string), "pending").
 		Preload("Roadmap").
+		Preload("Habit").
 		Preload("Requester").
 		Order("created_at DESC").
 		Find(&requests)
@@ -373,7 +438,7 @@ func GetAnchorRequests(c *gin.Context) []types.AnchorRequest {
 	return requests
 }
 
-// AcceptAnchorRequest accepts an anchor request and updates the roadmap
+// AcceptAnchorRequest accepts an anchor request and updates the roadmap or habit
 func AcceptAnchorRequest(c *gin.Context, requestID string) (types.AnchorRequest, error) {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
@@ -413,12 +478,23 @@ func AcceptAnchorRequest(c *gin.Context, requestID string) (types.AnchorRequest,
 		return types.AnchorRequest{}, err
 	}
 
-	// Update the roadmap's anchor_id
-	if err := tx.Model(&types.Roadmap{}).
-		Where("roadmap_id = ?", anchorRequest.RoadmapID).
-		Update("anchor_id", userIDStr).Error; err != nil {
-		tx.Rollback()
-		return types.AnchorRequest{}, err
+	// Update the target's anchor_id based on target type
+	if anchorRequest.TargetType == types.TargetTypeHabit && anchorRequest.HabitID != nil {
+		// Update the habit's anchor_id
+		if err := tx.Model(&types.Habit{}).
+			Where("habit_id = ?", *anchorRequest.HabitID).
+			Update("anchor_id", userIDStr).Error; err != nil {
+			tx.Rollback()
+			return types.AnchorRequest{}, err
+		}
+	} else if anchorRequest.RoadmapID != nil {
+		// Update the roadmap's anchor_id
+		if err := tx.Model(&types.Roadmap{}).
+			Where("roadmap_id = ?", *anchorRequest.RoadmapID).
+			Update("anchor_id", userIDStr).Error; err != nil {
+			tx.Rollback()
+			return types.AnchorRequest{}, err
+		}
 	}
 
 	// Commit the transaction
@@ -427,7 +503,7 @@ func AcceptAnchorRequest(c *gin.Context, requestID string) (types.AnchorRequest,
 	}
 
 	// Reload with relationships
-	db.Preload("Roadmap").Preload("Requester").Preload("Anchor").First(&anchorRequest, "request_id = ?", anchorRequest.RequestID)
+	db.Preload("Roadmap").Preload("Habit").Preload("Requester").Preload("Anchor").First(&anchorRequest, "request_id = ?", anchorRequest.RequestID)
 
 	return anchorRequest, nil
 }
@@ -469,7 +545,7 @@ func RejectAnchorRequest(c *gin.Context, requestID string) (types.AnchorRequest,
 	}
 
 	// Reload with relationships
-	db.Preload("Roadmap").Preload("Requester").Preload("Anchor").First(&anchorRequest, "request_id = ?", anchorRequest.RequestID)
+	db.Preload("Roadmap").Preload("Habit").Preload("Requester").Preload("Anchor").First(&anchorRequest, "request_id = ?", anchorRequest.RequestID)
 
 	return anchorRequest, nil
 }
@@ -500,6 +576,39 @@ func RemoveAnchor(c *gin.Context, roadmapID string) error {
 	// Remove the anchor
 	if err := db.Model(&types.Roadmap{}).
 		Where("roadmap_id = ?", roadmapID).
+		Update("anchor_id", nil).Error; err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// RemoveHabitAnchor removes an anchor from a habit
+func RemoveHabitAnchor(c *gin.Context, habitID string) error {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return errors.New("missing or invalid user_id")
+	}
+
+	userIDStr := userID.(string)
+
+	// Verify the habit exists and belongs to the user
+	var habit types.Habit
+	if err := db.Where("habit_id = ? AND user_id = ?", habitID, userIDStr).First(&habit).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return errors.New("habit not found or you don't have permission")
+		}
+		return err
+	}
+
+	// Check if there's an anchor
+	if habit.AnchorID == nil {
+		return errors.New("no anchor assigned to this habit")
+	}
+
+	// Remove the anchor
+	if err := db.Model(&types.Habit{}).
+		Where("habit_id = ?", habitID).
 		Update("anchor_id", nil).Error; err != nil {
 		return err
 	}

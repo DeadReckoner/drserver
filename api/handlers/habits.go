@@ -474,3 +474,99 @@ func GetHabitStats(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, stats)
 	log.Info(ctx, "GetHabitStats: statistics calculated successfully", habitID)
 }
+
+// =============================================================================
+// ANCHOR HANDLERS
+// =============================================================================
+
+// CreateHabitAnchorRequest creates an anchor request for a habit
+// POST /api/v1/habits/:habitid/anchor-request
+func CreateHabitAnchorRequest(c *gin.Context) {
+	ctx := c.Request.Context()
+	habitID := c.Param("habitid")
+
+	var requestBody struct {
+		AnchorID string `json:"anchor_id" binding:"required"`
+	}
+
+	if !utils.BindJSONOrAbort(c, &requestBody) {
+		return
+	}
+
+	log.Info(ctx, "CreateHabitAnchorRequest: creating anchor request for habit", habitID)
+
+	anchorRequest, err := database.CreateHabitAnchorRequest(c, habitID, requestBody.AnchorID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "habit not found or you don't have permission" {
+			utils.NotFoundResponse(c, "Habit")
+			return
+		}
+		if errMsg == "you are not friends with this user" {
+			utils.ErrorResponse(c, http.StatusForbidden, errMsg)
+			return
+		}
+		if errMsg == "anchor request already exists for this habit" || errMsg == "this user is already an anchor for this habit" {
+			utils.ConflictResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusCreated, anchorRequest)
+	log.Info(ctx, "CreateHabitAnchorRequest: anchor request created successfully")
+
+	// Send push notification to the anchor
+	go sendHabitAnchorRequestNotification(anchorRequest)
+}
+
+// RemoveHabitAnchor removes an anchor from a habit
+// DELETE /api/v1/habits/:habitid/anchor
+func RemoveHabitAnchor(c *gin.Context) {
+	ctx := c.Request.Context()
+	habitID := c.Param("habitid")
+
+	log.Info(ctx, "RemoveHabitAnchor: removing anchor from habit", habitID)
+
+	err := database.RemoveHabitAnchor(c, habitID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "habit not found or you don't have permission" {
+			utils.NotFoundResponse(c, "Habit")
+			return
+		}
+		if errMsg == "no anchor assigned to this habit" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.MessageResponse(c, http.StatusOK, "Anchor removed successfully")
+	log.Info(ctx, "RemoveHabitAnchor: anchor removed successfully")
+}
+
+// sendHabitAnchorRequestNotification sends a notification when a habit anchor request is created
+func sendHabitAnchorRequestNotification(anchorRequest types.AnchorRequest) {
+	// Get requester's name
+	requester, err := database.GetUserByID(anchorRequest.RequesterID)
+	if err != nil {
+		log.Info(nil, "Failed to get requester info for notification:", err)
+		return
+	}
+
+	requesterName := requester.FirstName + " " + requester.LastName
+
+	utils.SendPushNotification(
+		anchorRequest.AnchorID,
+		"habit_anchor_request",
+		"New Habit Anchor Request",
+		requesterName+" wants you to be their habit anchor",
+		map[string]any{
+			"request_id": anchorRequest.RequestID,
+			"habit_id":   anchorRequest.HabitID,
+		},
+	)
+}

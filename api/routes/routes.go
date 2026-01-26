@@ -132,6 +132,10 @@ func setupHabitRoutes(rg *gin.RouterGroup) {
 
 		// Statistics
 		habits.GET("/:habitid/stats", utils.ValidateUUID("habitid"), handlers.GetHabitStats)
+
+		// Anchor operations
+		habits.POST("/:habitid/anchor-request", utils.ValidateUUID("habitid"), handlers.CreateHabitAnchorRequest)
+		habits.DELETE("/:habitid/anchor", utils.ValidateUUID("habitid"), handlers.RemoveHabitAnchor)
 	}
 }
 

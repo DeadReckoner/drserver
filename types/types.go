@@ -56,9 +56,17 @@ type FriendProfileResponse struct {
 	ThreadID        string    `json:"thread_id"`
 }
 
+// Target type constants for polymorphic anchor requests
+const (
+	TargetTypeRoadmap = "roadmap"
+	TargetTypeHabit   = "habit"
+)
+
 type AnchorRequest struct {
 	RequestID   string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:request_id" json:"request_id"`
-	RoadmapID   string     `gorm:"type:uuid;column:roadmap_id;not null" json:"roadmap_id"`
+	TargetType  string     `gorm:"column:target_type;default:roadmap" json:"target_type"` // "roadmap" or "habit"
+	RoadmapID   *string    `gorm:"type:uuid;column:roadmap_id" json:"roadmap_id,omitempty"`
+	HabitID     *string    `gorm:"type:uuid;column:habit_id" json:"habit_id,omitempty"`
 	RequesterID string     `gorm:"type:uuid;column:requester_id;not null" json:"requester_id"`
 	AnchorID    string     `gorm:"type:uuid;column:anchor_id;not null" json:"anchor_id"`
 	Status      string     `gorm:"column:status;default:pending" json:"status"` // "pending", "accepted", "rejected"
@@ -67,6 +75,7 @@ type AnchorRequest struct {
 
 	// Relationships for preloading
 	Roadmap   *Roadmap `gorm:"foreignKey:RoadmapID;references:RoadmapID" json:"roadmap,omitempty"`
+	Habit     *Habit   `gorm:"foreignKey:HabitID;references:HabitID" json:"habit,omitempty"`
 	Requester *User    `gorm:"foreignKey:RequesterID;references:UserID" json:"requester,omitempty"`
 	Anchor    *User    `gorm:"foreignKey:AnchorID;references:UserID" json:"anchor,omitempty"`
 }
@@ -308,6 +317,10 @@ type Habit struct {
 
 	// Status
 	Archived bool `gorm:"default:false" json:"archived"`
+
+	// Anchor - accountability partner for this habit
+	AnchorID *string `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
+	Anchor   *User   `gorm:"foreignKey:AnchorID;references:UserID" json:"anchor,omitempty"`
 
 	// Metadata
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`

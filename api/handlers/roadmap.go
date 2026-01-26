@@ -442,15 +442,24 @@ func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status stri
 		return // Unknown status
 	}
 
+	// Build data map with request_id and appropriate target ID
+	data := map[string]any{
+		"request_id":  anchorRequest.RequestID,
+		"target_type": anchorRequest.TargetType,
+	}
+	if anchorRequest.RoadmapID != nil {
+		data["roadmap_id"] = *anchorRequest.RoadmapID
+	}
+	if anchorRequest.HabitID != nil {
+		data["habit_id"] = *anchorRequest.HabitID
+	}
+
 	utils.SendPushNotification(
 		anchorRequest.RequesterID,
 		notificationType,
 		title,
 		body,
-		map[string]any{
-			"request_id": anchorRequest.RequestID,
-			"roadmap_id": anchorRequest.RoadmapID,
-		},
+		data,
 	)
 }
 
