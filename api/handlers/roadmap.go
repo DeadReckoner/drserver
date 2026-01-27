@@ -466,10 +466,14 @@ func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status stri
 // cleanupAnchorRequestNotification removes the original anchor_request notification
 // when an anchor request is accepted or rejected to prevent duplicate notifications
 func cleanupAnchorRequestNotification(ctx context.Context, anchorRequest types.AnchorRequest) {
+	notifType := "anchor_request"
+	if anchorRequest.TargetType == types.TargetTypeHabit {
+		notifType = "habit_anchor_request"
+	}
 	err := database.DeleteNotificationsByTypeAndData(
 		ctx,
 		anchorRequest.AnchorID,
-		"anchor_request",
+		notifType,
 		"request_id",
 		anchorRequest.RequestID,
 	)
