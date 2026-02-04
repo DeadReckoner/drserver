@@ -31,6 +31,7 @@ func setupV1Routes(router *gin.Engine) {
 	setupAgentRoutes(v1)
 	setupNotificationRoutes(v1)
 	setupMessageThreadRoutes(v1)
+	setupFeedbackRoutes(v1)
 	setupWebSocketRoutes(v1)
 }
 
@@ -182,6 +183,13 @@ func setupMessageThreadRoutes(rg *gin.RouterGroup) {
 		threads.GET("/:threadid/messages", utils.ValidateUUID("threadid"), handlers.GetMessages)
 		threads.GET("/unread", handlers.GetTotalUnreadCount)
 		threads.GET("/message/:messageid", utils.ValidateUUID("messageid"), handlers.GetMessageById)
+	}
+}
+
+func setupFeedbackRoutes(rg *gin.RouterGroup) {
+	feedback := rg.Group("/feedback")
+	{
+		feedback.POST("", handlers.CreateFeedback)
 	}
 }
 
