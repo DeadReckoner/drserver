@@ -97,6 +97,7 @@ type GoalRequest struct {
 	WorkFrequency        string `json:"workFrequency"`
 	Constraints          string `json:"constraints"`
 	CurrentSkillLevel    string `json:"currentSkillLevel"`
+	AdditionalContext    string `json:"additionalContext"`
 }
 
 type OpenAIContent struct {
@@ -616,6 +617,7 @@ type Notification struct {
 	SentAt         *time.Time     `gorm:"column:sent_at" json:"sent_at,omitempty"`
 	ReadAt         *time.Time     `gorm:"column:read_at" json:"read_at,omitempty"`
 	Error          string         `gorm:"column:error" json:"error,omitempty"`
+	ClearedAt      *time.Time     `gorm:"column:cleared_at" json:"cleared_at,omitempty"`
 	CreatedAt      time.Time      `gorm:"column:created_at;default:now()" json:"created_at"`
 }
 

@@ -53,7 +53,7 @@ func CreateNotification(ctx context.Context, notif *types.Notification) error {
 	return db.Create(notif).Error
 }
 
-func GetNotifications(c *gin.Context, userID string, unreadOnly bool) []types.Notification {
+func GetNotifications(c *gin.Context, userID string, unreadOnly bool, includeCleared bool) []types.Notification {
 	var notifs []types.Notification
 	query := db.Where("user_id = ?", userID)
 
@@ -61,8 +61,19 @@ func GetNotifications(c *gin.Context, userID string, unreadOnly bool) []types.No
 		query = query.Where("read_at IS NULL")
 	}
 
+	if !includeCleared {
+		query = query.Where("cleared_at IS NULL")
+	}
+
 	query.Order("created_at DESC").Find(&notifs)
 	return notifs
+}
+
+func ClearNotifications(ctx context.Context, userID string, excludeTypes []string) error {
+	now := time.Now()
+	return db.Model(&types.Notification{}).
+		Where("user_id = ? AND cleared_at IS NULL AND type NOT IN ?", userID, excludeTypes).
+		Update("cleared_at", now).Error
 }
 
 func MarkNotificationRead(ctx context.Context, notifID string) error {

@@ -68,7 +68,7 @@ type GeneratedRoadmap struct {
 
 // buildGoalPrompt converts structured goal request into natural language prompt
 func buildGoalPrompt(goalReq types.GoalRequest) string {
-	return fmt.Sprintf(`
+	prompt := fmt.Sprintf(`
 Based on the following goal information, create a detailed roadmap:
 
 Goal: %s
@@ -79,11 +79,17 @@ Weekly Time Commitment: %s
 Work Frequency: %s
 Constraints: %s
 Current Skill Level: %s
-
-Please create a comprehensive roadmap with milestones, tasks, and actionable steps that takes into account the user's skill level, time commitment, and constraints.
 `, goalReq.GoalName, goalReq.GoalDescription, goalReq.GoalImportance,
 		goalReq.TargetCompletionDate, goalReq.WeeklyTimeCommitment,
 		goalReq.WorkFrequency, goalReq.Constraints, goalReq.CurrentSkillLevel)
+
+	if goalReq.AdditionalContext != "" {
+		prompt += fmt.Sprintf("Additional Context: %s\n", goalReq.AdditionalContext)
+	}
+
+	prompt += "\nPlease create a comprehensive roadmap with milestones, tasks, and actionable steps that takes into account the user's skill level, time commitment, and constraints.\n"
+
+	return prompt
 }
 
 // GenerateGoalFromStructure is the main entry point when the user provides structured goal data

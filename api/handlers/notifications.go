@@ -13,6 +13,7 @@ import (
 
 // GetNotifications returns all notifications for the current user
 // Supports ?unread=true query parameter to filter to only unread notifications
+// Supports ?include_cleared=true query parameter to include cleared notifications
 func GetNotifications(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
@@ -20,11 +21,32 @@ func GetNotifications(c *gin.Context) {
 		return
 	}
 
-	// Check for unread query parameter
 	unreadOnly := c.Query("unread") == "true"
+	includeCleared := c.Query("include_cleared") == "true"
 
-	notifications := database.GetNotifications(c, userID.(string), unreadOnly)
+	notifications := database.GetNotifications(c, userID.(string), unreadOnly, includeCleared)
 	utils.DataResponse(c, http.StatusOK, notifications)
+}
+
+// ClearNotifications marks all non-request notifications as cleared for the current user
+func ClearNotifications(c *gin.Context) {
+	ctx := c.Request.Context()
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		utils.BadRequestResponse(c, "missing or invalid user_id")
+		return
+	}
+
+	requestTypes := []string{"friend_request", "anchor_request", "habit_anchor_request"}
+
+	if err := database.ClearNotifications(ctx, userID.(string), requestTypes); err != nil {
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Notifications cleared",
+	})
 }
 
 // MarkNotificationRead marks a specific notification as read

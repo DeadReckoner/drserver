@@ -164,6 +164,7 @@ func setupNotificationRoutes(rg *gin.RouterGroup) {
 	notifications := rg.Group("/notifications")
 	{
 		notifications.GET("", handlers.GetNotifications)
+		notifications.POST("/clear", handlers.ClearNotifications)
 		notifications.PUT("/:alertid/read", utils.ValidateUUID("alertid"), handlers.MarkNotificationRead)
 	}
 
