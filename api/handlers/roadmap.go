@@ -55,17 +55,17 @@ func GetRoadmap(c *gin.Context) {
 	var roadmap types.Roadmap
 
 	switch view {
-	case "macro":
-		// Load only macro map (strategic view)
-		roadmap = database.GetRoadmapWithMacroMap(c, roadmapID)
+	case "strategic":
+		// Load only strategic view (phases with milestones, no tasks)
+		roadmap = database.GetRoadmapWithStrategicView(c, roadmapID)
 	case "milestones":
-		// Load only detailed milestones (tactical view)
+		// Load only detailed milestones (tactical view with tasks)
 		roadmap = database.GetRoadmap(c, roadmapID)
 	case "full":
-		// Load both macro map and milestones
-		roadmap = database.GetRoadmapWithMacroMapAndMilestones(c, roadmapID)
+		// Load everything (phases, milestones, tasks, steps)
+		roadmap = database.GetRoadmapFull(c, roadmapID)
 	default:
-		utils.BadRequestResponse(c, "Invalid view parameter. Use 'macro', 'milestones', or 'full'")
+		utils.BadRequestResponse(c, "Invalid view parameter. Use 'strategic', 'milestones', or 'full'")
 		return
 	}
 
@@ -224,41 +224,6 @@ func dateTasks(c *gin.Context, startDate time.Time, task types.Task) types.Task 
 	task.Date = startDate.AddDate(0, 0, task.Day)
 
 	return database.UpdateTask(c, task.TaskID, task)
-}
-
-// Macro Map handlers
-
-func CreateMacroMap(c *gin.Context) {
-	ctx := c.Request.Context()
-	roadmapID := c.Param("roadmapid")
-	var newMacroMap types.MacroMap
-
-	if !utils.BindJSONOrAbort(c, &newMacroMap) {
-		return
-	}
-
-	fmt.Printf("Macro map received: %+v\n", newMacroMap)
-
-	createdMacroMap, err := database.CreateMacroMap(c, roadmapID, newMacroMap)
-	if err != nil {
-		utils.InternalErrorResponse(c, err)
-		return
-	}
-
-	utils.DataResponse(c, http.StatusCreated, createdMacroMap)
-	log.Info(ctx, "Macro map created successfully")
-}
-
-func GetMacroMap(c *gin.Context) {
-	roadmapID := c.Param("roadmapid")
-	macroMap, err := database.GetMacroMap(c, roadmapID)
-
-	if err != nil {
-		utils.NotFoundResponse(c, "Macro Map")
-		return
-	}
-
-	utils.DataResponse(c, http.StatusOK, macroMap)
 }
 
 // Anchor handlers

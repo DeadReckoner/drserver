@@ -16,37 +16,67 @@ import (
 // generateUUIDs generates UUIDs for all entities in the roadmap.
 // The frontend sends empty strings for UUIDs, but GORM/PostgreSQL can't handle empty strings for UUID columns.
 // We generate UUIDs in Go and set all foreign keys before inserting.
+//
+// New structure: Roadmap → Phases → Milestones → Spikes/Risks/Tasks → Steps
 func generateUUIDs(rm *types.Roadmap) {
 	rm.RoadmapID = uuid.NewString()
 
-	if rm.MacroMap != nil {
-		rm.MacroMap.MacroMapID = uuid.NewString()
-		rm.MacroMap.RoadmapID = rm.RoadmapID
+	// Generate UUIDs for Phases and their nested Milestones
+	for i := range rm.Phases {
+		rm.Phases[i].PhaseID = uuid.NewString()
+		rm.Phases[i].RoadmapID = rm.RoadmapID
 
-		for i := range rm.MacroMap.Phases {
-			rm.MacroMap.Phases[i].PhaseID = uuid.NewString()
-			rm.MacroMap.Phases[i].MacroMapID = rm.MacroMap.MacroMapID
+		for j := range rm.Phases[i].Milestones {
+			milestoneID := uuid.NewString()
+			rm.Phases[i].Milestones[j].MilestoneID = milestoneID
+			rm.Phases[i].Milestones[j].RoadmapID = rm.RoadmapID
+			phaseID := rm.Phases[i].PhaseID
+			rm.Phases[i].Milestones[j].PhaseID = &phaseID
 
-			for j := range rm.MacroMap.Phases[i].MacroMilestones {
-				rm.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID = uuid.NewString()
-				rm.MacroMap.Phases[i].MacroMilestones[j].PhaseID = rm.MacroMap.Phases[i].PhaseID
+			// Generate UUIDs for Spikes
+			for k := range rm.Phases[i].Milestones[j].Spikes {
+				rm.Phases[i].Milestones[j].Spikes[k].SpikeID = uuid.NewString()
+				rm.Phases[i].Milestones[j].Spikes[k].MilestoneID = milestoneID
+			}
 
-				for k := range rm.MacroMap.Phases[i].MacroMilestones[j].Spikes {
-					rm.MacroMap.Phases[i].MacroMilestones[j].Spikes[k].SpikeID = uuid.NewString()
-					rm.MacroMap.Phases[i].MacroMilestones[j].Spikes[k].MacroMilestoneID = rm.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID
-				}
+			// Generate UUIDs for Risks
+			for k := range rm.Phases[i].Milestones[j].Risks {
+				rm.Phases[i].Milestones[j].Risks[k].RiskID = uuid.NewString()
+				rm.Phases[i].Milestones[j].Risks[k].MilestoneID = milestoneID
+			}
 
-				for k := range rm.MacroMap.Phases[i].MacroMilestones[j].Risks {
-					rm.MacroMap.Phases[i].MacroMilestones[j].Risks[k].RiskID = uuid.NewString()
-					rm.MacroMap.Phases[i].MacroMilestones[j].Risks[k].MacroMilestoneID = rm.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID
+			// Generate UUIDs for Tasks and Steps
+			for k := range rm.Phases[i].Milestones[j].Tasks {
+				rm.Phases[i].Milestones[j].Tasks[k].TaskID = uuid.NewString()
+				rm.Phases[i].Milestones[j].Tasks[k].MilestoneID = milestoneID
+				rm.Phases[i].Milestones[j].Tasks[k].RoadmapID = rm.RoadmapID
+
+				for l := range rm.Phases[i].Milestones[j].Tasks[k].Steps {
+					rm.Phases[i].Milestones[j].Tasks[k].Steps[l].StepID = uuid.NewString()
+					rm.Phases[i].Milestones[j].Tasks[k].Steps[l].TaskID = rm.Phases[i].Milestones[j].Tasks[k].TaskID
 				}
 			}
 		}
 	}
 
+	// Also handle top-level Milestones array (for backward compatibility)
 	for i := range rm.Milestones {
-		rm.Milestones[i].MilestoneID = uuid.NewString()
+		if rm.Milestones[i].MilestoneID == "" {
+			rm.Milestones[i].MilestoneID = uuid.NewString()
+		}
 		rm.Milestones[i].RoadmapID = rm.RoadmapID
+
+		// Generate UUIDs for Spikes attached directly to top-level milestones
+		for k := range rm.Milestones[i].Spikes {
+			rm.Milestones[i].Spikes[k].SpikeID = uuid.NewString()
+			rm.Milestones[i].Spikes[k].MilestoneID = rm.Milestones[i].MilestoneID
+		}
+
+		// Generate UUIDs for Risks attached directly to top-level milestones
+		for k := range rm.Milestones[i].Risks {
+			rm.Milestones[i].Risks[k].RiskID = uuid.NewString()
+			rm.Milestones[i].Risks[k].MilestoneID = rm.Milestones[i].MilestoneID
+		}
 
 		for j := range rm.Milestones[i].Tasks {
 			rm.Milestones[i].Tasks[j].TaskID = uuid.NewString()
@@ -103,14 +133,31 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 
 	var createdRoadmap types.Roadmap
 	query := db.Where("roadmap_id = ?", rm.RoadmapID).
-		Preload("Milestones.Tasks.Steps")
-
-	// Also preload macro map if it was created
-	if rm.MacroMap != nil {
-		query = query.
-			Preload("MacroMap.Phases.MacroMilestones.Spikes").
-			Preload("MacroMap.Phases.MacroMilestones.Risks")
-	}
+		Preload("Phases", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.Milestones.Spikes").
+		Preload("Phases.Milestones.Risks").
+		Preload("Phases.Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Phases.Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
+		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Spikes").
+		Preload("Milestones.Risks").
+		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		})
 
 	if err := query.First(&createdRoadmap).Error; err != nil {
 		return types.Roadmap{}, err
@@ -142,8 +189,8 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 	return roadmaps
 }
 
-// GetRoadmapWithMacroMap loads only the Macro Map (strategic overview) for a roadmap
-func GetRoadmapWithMacroMap(c *gin.Context, roadmapID string) types.Roadmap {
+// GetRoadmapWithStrategicView loads only the strategic overview (phases with milestones, no tasks)
+func GetRoadmapWithStrategicView(c *gin.Context, roadmapID string) types.Roadmap {
 	var roadmap types.Roadmap
 	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {
@@ -152,25 +199,25 @@ func GetRoadmapWithMacroMap(c *gin.Context, roadmapID string) types.Roadmap {
 	}
 
 	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).
-		Preload("MacroMap.Phases", func(db *gorm.DB) *gorm.DB {
+		Preload("Phases", func(db *gorm.DB) *gorm.DB {
 			return db.Order("order_index ASC")
 		}).
-		Preload("MacroMap.Phases.MacroMilestones", func(db *gorm.DB) *gorm.DB {
+		Preload("Phases.Milestones", func(db *gorm.DB) *gorm.DB {
 			return db.Order("order_index ASC")
 		}).
-		Preload("MacroMap.Phases.MacroMilestones.Spikes").
-		Preload("MacroMap.Phases.MacroMilestones.Risks").
+		Preload("Phases.Milestones.Spikes").
+		Preload("Phases.Milestones.Risks").
 		First(&roadmap)
 
 	if result.Error != nil {
-		log.Println("Error fetching roadmap macro map:", result.Error)
+		log.Println("Error fetching roadmap strategic view:", result.Error)
 	}
 
 	return roadmap
 }
 
-// GetRoadmapWithMacroMapAndMilestones loads both Macro Map and Milestone Map (complete view)
-func GetRoadmapWithMacroMapAndMilestones(c *gin.Context, roadmapID string) types.Roadmap {
+// GetRoadmapFull loads the complete roadmap with phases, milestones, tasks, and steps
+func GetRoadmapFull(c *gin.Context, roadmapID string) types.Roadmap {
 	var roadmap types.Roadmap
 	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {
@@ -179,17 +226,25 @@ func GetRoadmapWithMacroMapAndMilestones(c *gin.Context, roadmapID string) types
 	}
 
 	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).
-		Preload("MacroMap.Phases", func(db *gorm.DB) *gorm.DB {
+		Preload("Phases", func(db *gorm.DB) *gorm.DB {
 			return db.Order("order_index ASC")
 		}).
-		Preload("MacroMap.Phases.MacroMilestones", func(db *gorm.DB) *gorm.DB {
+		Preload("Phases.Milestones", func(db *gorm.DB) *gorm.DB {
 			return db.Order("order_index ASC")
 		}).
-		Preload("MacroMap.Phases.MacroMilestones.Spikes").
-		Preload("MacroMap.Phases.MacroMilestones.Risks").
+		Preload("Phases.Milestones.Spikes").
+		Preload("Phases.Milestones.Risks").
+		Preload("Phases.Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Phases.Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
 		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
 			return db.Order("day ASC")
 		}).
+		Preload("Milestones.Spikes").
+		Preload("Milestones.Risks").
 		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
 			return db.Order("day ASC")
 		}).
@@ -214,15 +269,20 @@ func GetRoadmap(c *gin.Context, roadmapID string) types.Roadmap {
 	}
 
 	// Query the roadmap table for all roadmaps with this user_id
-	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
-		return db.Order("number ASC")
-	}).Find(&roadmap)
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).
+		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Spikes").
+		Preload("Milestones.Risks").
+		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).Find(&roadmap)
 	if result.Error != nil {
-		log.Println("Error fetching roadmaps:", result.Error)
+		log.Println("Error fetching roadmap:", result.Error)
 	}
 
 	return roadmap
@@ -492,79 +552,6 @@ func DeleteMilestone(c *gin.Context, milestoneID string) error {
 	return nil
 }
 
-// CreateMacroMap creates a macro map with all its phases, milestones, spikes, and risks
-func CreateMacroMap(c *gin.Context, roadmapID string, macroMap types.MacroMap) (types.MacroMap, error) {
-	user_id, exists := c.Get("user_id")
-	if !exists || user_id == "" {
-		return types.MacroMap{}, errors.New("missing or invalid user_id")
-	}
-
-	// Verify roadmap exists and belongs to user
-	var roadmap types.Roadmap
-	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).First(&roadmap)
-	if result.Error != nil {
-		return types.MacroMap{}, errors.New("roadmap not found or access denied")
-	}
-
-	macroMap.RoadmapID = roadmapID
-
-	// Create the macro map with all nested data
-	tx := db.Create(&macroMap)
-	if tx.Error != nil {
-		return types.MacroMap{}, tx.Error
-	}
-
-	// Fetch the created macro map with all associations
-	var createdMacroMap types.MacroMap
-	if err := db.Where("macro_map_id = ?", macroMap.MacroMapID).
-		Preload("Phases", func(db *gorm.DB) *gorm.DB {
-			return db.Order("order_index ASC")
-		}).
-		Preload("Phases.MacroMilestones", func(db *gorm.DB) *gorm.DB {
-			return db.Order("order_index ASC")
-		}).
-		Preload("Phases.MacroMilestones.Spikes").
-		Preload("Phases.MacroMilestones.Risks").
-		First(&createdMacroMap).Error; err != nil {
-		return types.MacroMap{}, err
-	}
-
-	return createdMacroMap, nil
-}
-
-// GetMacroMap fetches a macro map by roadmap ID
-func GetMacroMap(c *gin.Context, roadmapID string) (types.MacroMap, error) {
-	user_id, exists := c.Get("user_id")
-	if !exists || user_id == "" {
-		return types.MacroMap{}, errors.New("missing or invalid user_id")
-	}
-
-	// Verify roadmap exists and belongs to user
-	var roadmap types.Roadmap
-	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).First(&roadmap)
-	if result.Error != nil {
-		return types.MacroMap{}, errors.New("roadmap not found or access denied")
-	}
-
-	var macroMap types.MacroMap
-	err := db.Where("roadmap_id = ?", roadmapID).
-		Preload("Phases", func(db *gorm.DB) *gorm.DB {
-			return db.Order("order_index ASC")
-		}).
-		Preload("Phases.MacroMilestones", func(db *gorm.DB) *gorm.DB {
-			return db.Order("order_index ASC")
-		}).
-		Preload("Phases.MacroMilestones.Spikes").
-		Preload("Phases.MacroMilestones.Risks").
-		First(&macroMap).Error
-
-	if err != nil {
-		return types.MacroMap{}, err
-	}
-
-	return macroMap, nil
-}
-
 func CreateDraftRoadmap(c *gin.Context, draft *types.Roadmap) error {
 	user_id, exists := c.Get("user_id")
 	if !exists || user_id == "" {
@@ -596,38 +583,68 @@ func CreateDraftRoadmap(c *gin.Context, draft *types.Roadmap) error {
 }
 
 func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) error {
-	// Generate UUIDs for all nested entities (MacroMap, Phases, etc.)
+	// Generate UUIDs for all nested entities (Phases, Milestones, etc.)
 	// Note: RoadmapID should already be set from the draft
-	if roadmap.MacroMap != nil {
-		roadmap.MacroMap.MacroMapID = uuid.NewString()
-		roadmap.MacroMap.RoadmapID = roadmap.RoadmapID
 
-		for i := range roadmap.MacroMap.Phases {
-			roadmap.MacroMap.Phases[i].PhaseID = uuid.NewString()
-			roadmap.MacroMap.Phases[i].MacroMapID = roadmap.MacroMap.MacroMapID
+	// Handle Phases and their nested Milestones
+	for i := range roadmap.Phases {
+		roadmap.Phases[i].PhaseID = uuid.NewString()
+		roadmap.Phases[i].RoadmapID = roadmap.RoadmapID
 
-			for j := range roadmap.MacroMap.Phases[i].MacroMilestones {
-				roadmap.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID = uuid.NewString()
-				roadmap.MacroMap.Phases[i].MacroMilestones[j].PhaseID = roadmap.MacroMap.Phases[i].PhaseID
+		for j := range roadmap.Phases[i].Milestones {
+			milestoneID := uuid.NewString()
+			roadmap.Phases[i].Milestones[j].MilestoneID = milestoneID
+			roadmap.Phases[i].Milestones[j].RoadmapID = roadmap.RoadmapID
+			roadmap.Phases[i].Milestones[j].UserID = roadmap.UserID
+			phaseID := roadmap.Phases[i].PhaseID
+			roadmap.Phases[i].Milestones[j].PhaseID = &phaseID
 
-				for k := range roadmap.MacroMap.Phases[i].MacroMilestones[j].Spikes {
-					roadmap.MacroMap.Phases[i].MacroMilestones[j].Spikes[k].SpikeID = uuid.NewString()
-					roadmap.MacroMap.Phases[i].MacroMilestones[j].Spikes[k].MacroMilestoneID = roadmap.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID
-				}
+			// Generate UUIDs for Spikes
+			for k := range roadmap.Phases[i].Milestones[j].Spikes {
+				roadmap.Phases[i].Milestones[j].Spikes[k].SpikeID = uuid.NewString()
+				roadmap.Phases[i].Milestones[j].Spikes[k].MilestoneID = milestoneID
+			}
 
-				for k := range roadmap.MacroMap.Phases[i].MacroMilestones[j].Risks {
-					roadmap.MacroMap.Phases[i].MacroMilestones[j].Risks[k].RiskID = uuid.NewString()
-					roadmap.MacroMap.Phases[i].MacroMilestones[j].Risks[k].MacroMilestoneID = roadmap.MacroMap.Phases[i].MacroMilestones[j].MacroMilestoneID
+			// Generate UUIDs for Risks
+			for k := range roadmap.Phases[i].Milestones[j].Risks {
+				roadmap.Phases[i].Milestones[j].Risks[k].RiskID = uuid.NewString()
+				roadmap.Phases[i].Milestones[j].Risks[k].MilestoneID = milestoneID
+			}
+
+			// Generate UUIDs for Tasks and Steps
+			for k := range roadmap.Phases[i].Milestones[j].Tasks {
+				roadmap.Phases[i].Milestones[j].Tasks[k].TaskID = uuid.NewString()
+				roadmap.Phases[i].Milestones[j].Tasks[k].MilestoneID = milestoneID
+				roadmap.Phases[i].Milestones[j].Tasks[k].RoadmapID = roadmap.RoadmapID
+				roadmap.Phases[i].Milestones[j].Tasks[k].UserID = roadmap.UserID
+
+				for l := range roadmap.Phases[i].Milestones[j].Tasks[k].Steps {
+					roadmap.Phases[i].Milestones[j].Tasks[k].Steps[l].StepID = uuid.NewString()
+					roadmap.Phases[i].Milestones[j].Tasks[k].Steps[l].TaskID = roadmap.Phases[i].Milestones[j].Tasks[k].TaskID
 				}
 			}
 		}
 	}
 
-	// Handle milestones if they exist (though async generation currently only creates MacroMap)
+	// Handle top-level Milestones (for backward compatibility)
 	for i := range roadmap.Milestones {
-		roadmap.Milestones[i].MilestoneID = uuid.NewString()
+		if roadmap.Milestones[i].MilestoneID == "" {
+			roadmap.Milestones[i].MilestoneID = uuid.NewString()
+		}
 		roadmap.Milestones[i].RoadmapID = roadmap.RoadmapID
 		roadmap.Milestones[i].UserID = roadmap.UserID
+
+		// Generate UUIDs for Spikes
+		for k := range roadmap.Milestones[i].Spikes {
+			roadmap.Milestones[i].Spikes[k].SpikeID = uuid.NewString()
+			roadmap.Milestones[i].Spikes[k].MilestoneID = roadmap.Milestones[i].MilestoneID
+		}
+
+		// Generate UUIDs for Risks
+		for k := range roadmap.Milestones[i].Risks {
+			roadmap.Milestones[i].Risks[k].RiskID = uuid.NewString()
+			roadmap.Milestones[i].Risks[k].MilestoneID = roadmap.Milestones[i].MilestoneID
+		}
 
 		for j := range roadmap.Milestones[i].Tasks {
 			roadmap.Milestones[i].Tasks[j].TaskID = uuid.NewString()
@@ -643,7 +660,7 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 	}
 
 	// Update the roadmap with full save of all associations
-	// FullSaveAssociations ensures nested entities (MacroMap, Phases, etc.) are saved
+	// FullSaveAssociations ensures nested entities (Phases, Milestones, etc.) are saved
 	return db.Session(&gorm.Session{FullSaveAssociations: true}).Updates(roadmap).Error
 }
 

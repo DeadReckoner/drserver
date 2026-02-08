@@ -30,26 +30,19 @@ func AgentGenerate(c *gin.Context) {
 	start := time.Now()
 	log.Info(ctx, "Start Time:", start)
 
-	// Generate both macro map and milestone map
+	// Generate strategic roadmap with phases and milestones, tasks for first milestone
 	generated, err := agent.GenerateGoalFromStructure(ctx, goalReq)
 	if err != nil {
-		//log.Printf("Failed to generate roadmap: %v", err)
 		utils.InternalErrorResponse(c, err)
 		return
 	}
 
-	//duration := time.Since(start)
-	//log.Printf("Request took: %v", duration)
-
-	fmt.Printf("Generated roadmap with macro map: %+v\n", generated)
+	fmt.Printf("Generated roadmap with phases: %+v\n", generated)
 
 	// Set roadmap type to "ai_generated" since this was created by the AI
 	generated.Roadmap.Type = "ai_generated"
 
-	// Attach macro map to roadmap (nest it inside)
-	generated.Roadmap.MacroMap = generated.MacroMap
-
-	// Return the complete roadmap with nested macro map
+	// Return the complete roadmap with phases and milestones
 	utils.DataResponse(c, http.StatusOK, generated.Roadmap)
 }
 
@@ -186,38 +179,51 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 
 	updateJobProgress(jobID, 5, string(types.JobStatusProcessing), "Initializing AI generation...")
 
-	updateJobProgress(jobID, 10, string(types.JobStatusProcessing), "Generating strategic roadmap (macro map)...")
-	log.Info(ctx, "Processing macro map generation", fmt.Sprintf("JobID: %s, RoadmapID: %s", jobID, roadmapID))
+	updateJobProgress(jobID, 10, string(types.JobStatusProcessing), "Generating strategic roadmap (phases and milestones)...")
+	log.Info(ctx, "Processing strategic roadmap generation", fmt.Sprintf("JobID: %s, RoadmapID: %s", jobID, roadmapID))
 
-	// Step 1: Generate macro map (strategic view)
-	macroMap, err := agent.GenerateMacroMapFromGoalRequest(ctx, req)
+	// Step 1: Generate strategic roadmap (phases with milestones)
+	roadmap, err := agent.GenerateStrategicRoadmapFromGoalRequest(ctx, req)
 	if err != nil {
-		log.Info(ctx, "Macro map generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
+		log.Info(ctx, "Strategic roadmap generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
 		handleGenerationError(jobID, roadmapID, userID, err)
 		return
 	}
-	log.Info(ctx, "Macro map generation completed", fmt.Sprintf("JobID: %s, Phases: %d", jobID, len(macroMap.Phases)))
+	log.Info(ctx, "Strategic roadmap generation completed", fmt.Sprintf("JobID: %s, Phases: %d", jobID, len(roadmap.Phases)))
 
-	updateJobProgress(jobID, 50, string(types.JobStatusProcessing), "Macro map complete! Generating detailed milestone plan...")
-	log.Info(ctx, "Processing detailed milestone map", fmt.Sprintf("JobID: %s, RoadmapID: %s", jobID, roadmapID))
+	updateJobProgress(jobID, 50, string(types.JobStatusProcessing), "Strategic roadmap complete! Generating tasks for first milestone...")
+	log.Info(ctx, "Processing first milestone tasks", fmt.Sprintf("JobID: %s, RoadmapID: %s", jobID, roadmapID))
 
-	// Step 2: Generate milestone map (tactical view) using the macro map as context
-	roadmap, err := agent.GenerateMilestoneMapFromGoalRequest(ctx, req, macroMap)
-	if err != nil {
-		log.Info(ctx, "Milestone map generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
-		handleGenerationError(jobID, roadmapID, userID, err)
-		return
+	// Step 2: Generate tasks for the first milestone only
+	var firstMilestone *types.Milestone
+	for i := range roadmap.Phases {
+		if len(roadmap.Phases[i].Milestones) > 0 {
+			firstMilestone = &roadmap.Phases[i].Milestones[0]
+			break
+		}
 	}
-	log.Info(ctx, "Milestone map generation completed", fmt.Sprintf("JobID: %s, Milestones: %d", jobID, len(roadmap.Milestones)))
+
+	if firstMilestone != nil {
+		tasks, err := agent.GenerateMilestoneTasksFromGoalRequest(ctx, req, firstMilestone)
+		if err != nil {
+			log.Info(ctx, "Milestone tasks generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
+			handleGenerationError(jobID, roadmapID, userID, err)
+			return
+		}
+		firstMilestone.Tasks = tasks
+		log.Info(ctx, "Milestone tasks generation completed", fmt.Sprintf("JobID: %s, Tasks: %d", jobID, len(tasks)))
+	}
+
+	// Flatten milestones from phases into top-level Milestones array
+	for _, phase := range roadmap.Phases {
+		roadmap.Milestones = append(roadmap.Milestones, phase.Milestones...)
+	}
 
 	updateJobProgress(jobID, 80, string(types.JobStatusProcessing), "Saving roadmap data...")
 
 	roadmap.RoadmapID = roadmapID
 	roadmap.UserID = userID
 	roadmap.Type = string(types.RoadmapTypeAIGenerated)
-
-	// Attach the MacroMap to the Roadmap before saving
-	roadmap.MacroMap = macroMap
 
 	if err := database.UpdateRoadmapWithGeneration(ctx, roadmap); err != nil {
 		handleGenerationError(jobID, roadmapID, userID, err)
@@ -233,8 +239,7 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 		Progress:    100,
 		CompletedAt: &now,
 		Result: map[string]any{
-			"roadmap_id":  roadmapID,
-			"macromap_id": macroMap.MacroMapID,
+			"roadmap_id": roadmapID,
 		},
 	}
 	database.UpdateBackgroundJob(ctx, &job)
@@ -343,8 +348,13 @@ func AgentGenerateMilestone(c *gin.Context) {
 	ctx := c.Request.Context()
 	milestoneID := c.Param("milestoneid")
 
-	nextMilestone := database.GetMilestone(c, milestoneID)
-	log.Info(ctx, "got next milestone:", nextMilestone)
+	// Get the existing milestone to generate tasks for
+	milestone := database.GetMilestone(c, milestoneID)
+	if milestone.MilestoneID == "" {
+		utils.NotFoundResponse(c, "Milestone")
+		return
+	}
+	log.Info(ctx, "Got milestone for task generation:", milestone.SubGoal)
 
 	var goalReq types.GoalRequest
 
@@ -357,27 +367,20 @@ func AgentGenerateMilestone(c *gin.Context) {
 	start := time.Now()
 	log.Info(ctx, "Start Time:", start)
 
-	// Generate both macro map and milestone map
-	generated, err := agent.GenerateGoalFromStructure(ctx, goalReq)
+	// Generate tasks for this specific milestone
+	tasks, err := agent.GenerateMilestoneTasksFromGoalRequest(ctx, goalReq, &milestone)
 	if err != nil {
-		//log.Printf("Failed to generate roadmap: %v", err)
 		utils.InternalErrorResponse(c, err)
 		return
 	}
 
-	//duration := time.Since(start)
-	//log.Printf("Request took: %v", duration)
+	fmt.Printf("Generated tasks for milestone: %d tasks\n", len(tasks))
 
-	fmt.Printf("Generated roadmap with macro map: %+v\n", generated)
+	// Attach tasks to milestone and update
+	milestone.Tasks = tasks
+	// TODO: Save tasks to database via UpdateMilestoneWithTasks
 
-	// Set roadmap type to "ai_generated" since this was created by the AI
-	generated.Roadmap.Type = "ai_generated"
-
-	// Attach macro map to roadmap (nest it inside)
-	generated.Roadmap.MacroMap = generated.MacroMap
-
-	// Return the complete roadmap with nested macro map
-	utils.DataResponse(c, http.StatusOK, generated.Roadmap)
+	utils.DataResponse(c, http.StatusOK, milestone)
 }
 
 func StartAISession(c *gin.Context) {
