@@ -30,14 +30,16 @@ Roadmap
 ### NEW Structure
 ```
 Roadmap
-├── Phases[]
+├── Phases[]                    (AI-generated roadmaps use this)
 │   └── Milestones[]
 │       ├── Spikes[]
 │       ├── Risks[]
 │       └── Tasks[]
 │           └── Steps[]
-└── Milestones[] (flattened copy for backward compatibility)
+└── Milestones[]                (custom/manual roadmaps only)
 ```
+
+**Note:** AI-generated roadmaps store milestones exclusively within the `Phases` structure. The top-level `Milestones[]` array is only used for manually-created roadmaps that don't use phases. This avoids duplicate milestone records in the database.
 
 ---
 
@@ -367,9 +369,7 @@ The completion response no longer includes `macromap_id`:
     }
   ],
 
-  "milestones": [
-    // Flattened list of all milestones (same objects as in phases)
-  ]
+  "milestones": []  // Empty for AI-generated roadmaps (milestones are in phases)
 }
 ```
 
@@ -459,12 +459,16 @@ const milestoneWithTasks = await response.json();
 
 ### 3. Milestone Location
 
-Milestones appear in TWO places in the response:
+Milestone location depends on roadmap type:
 
-1. **Nested in phases**: `roadmap.phases[].milestones[]` - Shows phase relationship
-2. **Flattened array**: `roadmap.milestones[]` - For backward compatibility and easy iteration
+**AI-Generated Roadmaps:**
+- Milestones are stored ONLY in phases: `roadmap.phases[].milestones[]`
+- The top-level `roadmap.milestones[]` array will be empty
+- This prevents duplicate records in the database
 
-Both contain the same milestone objects (same IDs).
+**Custom/Manual Roadmaps:**
+- Milestones are stored in the top-level array: `roadmap.milestones[]`
+- The `phases` array will be empty (phases are not used for manual roadmaps)
 
 ---
 
@@ -481,11 +485,23 @@ const risks = milestone.risks; // was on MacroMilestone
 ### New Way
 ```typescript
 // ✅ NEW - Use this
+
+// For AI-generated roadmaps: milestones are in phases
 const phases = roadmap.phases || [];
 const milestonesFromPhases = phases.flatMap(p => p.milestones || []);
 
-// Or use the flattened array
-const allMilestones = roadmap.milestones || [];
+// For custom/manual roadmaps: milestones are in top-level array
+const manualMilestones = roadmap.milestones || [];
+
+// Universal helper: get milestones regardless of roadmap type
+const getAllMilestones = (roadmap: Roadmap) => {
+  if (roadmap.phases && roadmap.phases.length > 0) {
+    // AI-generated: get from phases
+    return roadmap.phases.flatMap(p => p.milestones || []);
+  }
+  // Custom/manual: use top-level array
+  return roadmap.milestones || [];
+};
 
 // Strategic fields now on Milestone
 const acceptanceTest = milestone.acceptance_test;

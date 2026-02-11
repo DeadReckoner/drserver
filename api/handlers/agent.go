@@ -214,11 +214,6 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 		log.Info(ctx, "Milestone tasks generation completed", fmt.Sprintf("JobID: %s, Tasks: %d", jobID, len(tasks)))
 	}
 
-	// Flatten milestones from phases into top-level Milestones array
-	for _, phase := range roadmap.Phases {
-		roadmap.Milestones = append(roadmap.Milestones, phase.Milestones...)
-	}
-
 	updateJobProgress(jobID, 80, string(types.JobStatusProcessing), "Saving roadmap data...")
 
 	roadmap.RoadmapID = roadmapID
