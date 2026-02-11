@@ -364,7 +364,7 @@ func sendMessageNotifications(threadID, senderID, messageID, content string) {
 			map[string]any{
 				"thread_id":  threadID,
 				"message_id": messageID,
-				"sender_id": senderID,
+				"sender_id":  senderID,
 			},
 		)
 	}

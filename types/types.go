@@ -254,8 +254,8 @@ const (
 
 // Common day presets for convenience
 const (
-	Weekdays DayOfWeek = Monday | Tuesday | Wednesday | Thursday | Friday       // 62
-	Weekends DayOfWeek = Saturday | Sunday                                       // 65
+	Weekdays DayOfWeek = Monday | Tuesday | Wednesday | Thursday | Friday                     // 62
+	Weekends DayOfWeek = Saturday | Sunday                                                    // 65
 	EveryDay DayOfWeek = Sunday | Monday | Tuesday | Wednesday | Thursday | Friday | Saturday // 127
 )
 
@@ -292,9 +292,9 @@ type Habit struct {
 
 	// Scheduling - determines when this habit is due
 	RecurrenceType RecurrenceType `gorm:"type:varchar(20);not null;default:'none'" json:"recurrence_type"`
-	DaysOfWeek     int            `gorm:"default:0" json:"days_of_week,omitempty"`  // Bitmask for weekly recurrence
-	DayOfMonth     *int           `json:"day_of_month,omitempty"`                   // 1-31 for monthly recurrence
-	DueDate        *time.Time     `json:"due_date,omitempty"`                       // For one-time todos
+	DaysOfWeek     int            `gorm:"default:0" json:"days_of_week,omitempty"` // Bitmask for weekly recurrence
+	DayOfMonth     *int           `json:"day_of_month,omitempty"`                  // 1-31 for monthly recurrence
+	DueDate        *time.Time     `json:"due_date,omitempty"`                      // For one-time todos
 
 	// Active period - when this habit is active
 	StartDate time.Time  `gorm:"not null" json:"start_date"`
@@ -325,7 +325,7 @@ func (h *Habit) IsDueOn(date time.Time) bool {
 	// Normalize input date and habit dates to start of day in UTC for comparison
 	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	startDateOnly := time.Date(h.StartDate.Year(), h.StartDate.Month(), h.StartDate.Day(), 0, 0, 0, 0, time.UTC)
-	
+
 	// Check if date is within active period
 	if dateOnly.Before(startDateOnly) {
 		return false
@@ -451,7 +451,7 @@ type UpdateHabitRequest struct {
 
 // CompleteHabitRequest is the payload for marking a habit complete
 type CompleteHabitRequest struct {
-	Date  *time.Time `json:"date"`  // Defaults to today if not provided
+	Date  *time.Time `json:"date"` // Defaults to today if not provided
 	Notes string     `json:"notes"`
 }
 
@@ -464,10 +464,10 @@ type HabitWithStatus struct {
 
 // HabitStatsResponse contains statistics for a habit
 type HabitStatsResponse struct {
-	CurrentStreak      int     `json:"current_streak"`
-	CompletionRate7d   float64 `json:"completion_rate_7d"`
-	CompletionRate30d  float64 `json:"completion_rate_30d"`
-	TotalCompletions   int     `json:"total_completions"`
+	CurrentStreak     int     `json:"current_streak"`
+	CompletionRate7d  float64 `json:"completion_rate_7d"`
+	CompletionRate30d float64 `json:"completion_rate_30d"`
+	TotalCompletions  int     `json:"total_completions"`
 }
 
 // =============================================================================

@@ -465,10 +465,10 @@ func GetHabitStats(c *gin.Context) {
 	}
 
 	stats := types.HabitStatsResponse{
-		CurrentStreak:      streak,
-		CompletionRate7d:   rate7,
-		CompletionRate30d:  rate30,
-		TotalCompletions:   int(totalCompletions),
+		CurrentStreak:     streak,
+		CompletionRate7d:  rate7,
+		CompletionRate30d: rate30,
+		TotalCompletions:  int(totalCompletions),
 	}
 
 	utils.DataResponse(c, http.StatusOK, stats)
