@@ -2,6 +2,7 @@
 .PHONY: all tidy fmt build test clean
 
 all: tidy fmt lint build test clean
+ci: tidy fmt build test clean
 
 
 tidy:
@@ -20,4 +21,4 @@ test:
 	go test -cover ./...
 
 clean:
-	rm ./server
+	rm -f ./server
