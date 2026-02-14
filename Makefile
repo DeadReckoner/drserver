@@ -1,5 +1,5 @@
 
-.PHONY: all tidy fmt build test clean
+.PHONY: all tidy vet fmt build test clean
 
 all: tidy fmt lint build test clean
 ci: tidy fmt build test clean
@@ -10,6 +10,9 @@ tidy:
 
 fmt:
 	go fmt ./...
+
+vet:
+	go vet ./...
 
 lint:
 	- golangci-lint run
