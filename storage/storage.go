@@ -4,11 +4,10 @@ import (
 	storage "github.com/supabase-community/storage-go"
 )
 
-
 type Options struct {
 	supabaseURL string
-	supbaseKey string
-	bucketID string
+	supbaseKey  string
+	bucketID    string
 }
 
 type bucket interface {
@@ -19,8 +18,4 @@ type bucket interface {
 func NewClient() {
 	store := storage.NewClient("", "", nil)
 
-
 }
-
-
-
