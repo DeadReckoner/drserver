@@ -162,41 +162,50 @@ func GetThreadMessages(c *gin.Context, threadID, userID string) ([]types.Message
 		return nil, err
 	}
 
-	// Get messages with user information
+	// Get all messages in a single query
 	var messages []types.Messages
 	err := db.Where("thread_id = ? AND deleted_at IS NULL", threadID).
 		Order("created_at ASC").
 		Find(&messages).Error
-
 	if err != nil {
 		return nil, err
 	}
 
-	// Build response with user information
-	var response []types.MessageResponse
+	if len(messages) == 0 {
+		return []types.MessageResponse{}, nil
+	}
+
+	// Collect unique sender IDs
+	senderIDSet := make(map[string]struct{}, len(messages))
 	for _, msg := range messages {
-		var user types.User
-		if err := db.Where("user_id = ?", msg.UserID).First(&user).Error; err == nil {
-			response = append(response, types.MessageResponse{
-				MessageID: msg.MessageID,
-				ThreadID:  msg.ThreadID,
-				UserID:    msg.UserID,
-				Content:   msg.Content,
-				Read:      msg.Read,
-				CreatedAt: msg.CreatedAt,
-				User:      &user,
-			})
-		} else {
-			// If user not found, still include message but without user object
-			response = append(response, types.MessageResponse{
-				MessageID: msg.MessageID,
-				ThreadID:  msg.ThreadID,
-				UserID:    msg.UserID,
-				Content:   msg.Content,
-				Read:      msg.Read,
-				CreatedAt: msg.CreatedAt,
-				User:      nil,
-			})
+		senderIDSet[msg.UserID] = struct{}{}
+	}
+	senderIDs := make([]string, 0, len(senderIDSet))
+	for id := range senderIDSet {
+		senderIDs = append(senderIDs, id)
+	}
+
+	// Batch-fetch all senders in a single query instead of one query per message
+	var users []types.User
+	if err := db.Where("user_id IN ?", senderIDs).Find(&users).Error; err != nil {
+		log.Printf("Warning: Failed to batch-fetch users for thread %s: %v", threadID, err)
+	}
+	userMap := make(map[string]*types.User, len(users))
+	for i := range users {
+		userMap[users[i].UserID] = &users[i]
+	}
+
+	// Build response
+	response := make([]types.MessageResponse, len(messages))
+	for i, msg := range messages {
+		response[i] = types.MessageResponse{
+			MessageID: msg.MessageID,
+			ThreadID:  msg.ThreadID,
+			UserID:    msg.UserID,
+			Content:   msg.Content,
+			Read:      msg.Read,
+			CreatedAt: msg.CreatedAt,
+			User:      userMap[msg.UserID],
 		}
 	}
 
