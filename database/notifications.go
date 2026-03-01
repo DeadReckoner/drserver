@@ -28,11 +28,13 @@ func CreateOrUpdatePushToken(ctx context.Context, token *types.PushToken) error 
 		return result.Error
 	}
 
-	// Update existing token (refresh platform, device_id, last_used_at, reactivate if needed)
+	// Update existing token (refresh user_id in case device changed hands, plus platform, device_id, last_used_at, reactivate if needed)
+	existing.UserID = token.UserID
 	existing.Platform = token.Platform
 	existing.DeviceID = token.DeviceID
 	existing.IsActive = true
 	existing.LastUsedAt = time.Now()
+	token.TokenID = existing.TokenID
 	return db.Save(&existing).Error
 }
 
