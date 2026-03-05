@@ -1,16 +1,49 @@
 package types
 
 import (
+	"strings"
 	"time"
 )
 
 type User struct {
 	UserID      string `gorm:"type:uuid;primaryKey;column:user_id" json:"user_id"`
-	FirstName   string `gorm:"column:first_name" json:"first_name"`
-	LastName    string `gorm:"column:last_name" json:"last_name"`
+	FirstName   string `gorm:"column:first_name" json:"first_name,omitempty"`
+	LastName    string `gorm:"column:last_name" json:"last_name,omitempty"`
 	Email       string `gorm:"column:email" json:"email"`
 	PhoneNumber string `gorm:"column:phone_number" json:"phone_number"`
 	CreatedAt   time.Time
+
+	// FullName is used for Apple/Google sign-in which returns full_name instead of first_name/last_name.
+	// This field is not stored in the database - it's parsed into FirstName/LastName on user creation.
+	FullName string `gorm:"-" json:"full_name,omitempty"`
+}
+
+// ParseFullName splits FullName into FirstName and LastName if they are not already set.
+// Handles various name formats:
+// - "John" -> FirstName: "John", LastName: ""
+// - "John Doe" -> FirstName: "John", LastName: "Doe"
+// - "John Middle Doe" -> FirstName: "John", LastName: "Middle Doe"
+func (u *User) ParseFullName() {
+	// Only parse if we have a full name and first/last are empty
+	if u.FullName == "" || (u.FirstName != "" && u.LastName != "") {
+		return
+	}
+
+	// Trim whitespace
+	fullName := strings.TrimSpace(u.FullName)
+	if fullName == "" {
+		return
+	}
+
+	// Split on first space
+	parts := strings.SplitN(fullName, " ", 2)
+
+	if len(parts) >= 1 {
+		u.FirstName = strings.TrimSpace(parts[0])
+	}
+	if len(parts) >= 2 {
+		u.LastName = strings.TrimSpace(parts[1])
+	}
 }
 
 type Friendship struct {

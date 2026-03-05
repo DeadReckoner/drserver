@@ -20,6 +20,9 @@ func CreateUser(c *gin.Context) {
 		return
 	}
 
+	// Parse full_name into first_name/last_name if provided (for Apple/Google sign-in)
+	newUser.ParseFullName()
+
 	fmt.Printf("User received: %+v\n", newUser)
 
 	tx := database.CreateUser(c, newUser)
@@ -44,6 +47,9 @@ func UpdateUser(c *gin.Context) {
 	if !utils.BindJSONOrAbort(c, &updatedUser) {
 		return
 	}
+
+	// Parse full_name into first_name/last_name if provided
+	updatedUser.ParseFullName()
 
 	tx := database.UpdateUser(userID, updatedUser)
 	if tx.Error != nil {
