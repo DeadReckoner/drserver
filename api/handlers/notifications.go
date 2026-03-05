@@ -132,3 +132,48 @@ func DeactivatePushToken(c *gin.Context) {
 		"message": "Push token deactivated successfully",
 	})
 }
+
+// RefreshBadge calculates the current badge count and sends a silent push to update the app badge.
+// This should be called when the user reads messages, completes tasks/habits, etc.
+func RefreshBadge(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		utils.BadRequestResponse(c, "missing or invalid user_id")
+		return
+	}
+
+	// Calculate badge count
+	badgeCount := utils.GetBadgeCount(userID.(string))
+
+	// Send silent push to update badge on all devices
+	if err := utils.SendBadgeUpdate(userID.(string)); err != nil {
+		// Log the error but don't fail the request - badge count is still returned
+		c.JSON(http.StatusOK, gin.H{
+			"badge_count": badgeCount,
+			"push_sent":   false,
+			"message":     "Badge count calculated but push update failed",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"badge_count": badgeCount,
+		"push_sent":   true,
+	})
+}
+
+// GetBadgeCount returns the current badge count without sending a push notification.
+// Useful for the mobile app to display badge count in the UI.
+func GetBadgeCount(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		utils.BadRequestResponse(c, "missing or invalid user_id")
+		return
+	}
+
+	badgeCount := utils.GetBadgeCount(userID.(string))
+
+	c.JSON(http.StatusOK, gin.H{
+		"badge_count": badgeCount,
+	})
+}

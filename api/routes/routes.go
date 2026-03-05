@@ -170,6 +170,12 @@ func setupNotificationRoutes(rg *gin.RouterGroup) {
 		push.POST("/tokens", handlers.RegisterPushToken)
 		push.DELETE("/tokens/:token", handlers.DeactivatePushToken)
 	}
+
+	badge := rg.Group("/badge")
+	{
+		badge.GET("", handlers.GetBadgeCount)
+		badge.POST("/refresh", handlers.RefreshBadge)
+	}
 }
 
 func setupMessageThreadRoutes(rg *gin.RouterGroup) {
