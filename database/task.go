@@ -352,3 +352,54 @@ func DeleteStep(c *gin.Context, taskID string, stepID string) error {
 
 	return nil
 }
+
+// CompleteAllSteps marks all steps of a task as complete in a single operation.
+// Also triggers cascade completion for task, milestone, and roadmap if applicable.
+// Returns the number of steps that were marked complete.
+func CompleteAllSteps(c *gin.Context, taskID string) (int64, error) {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return 0, errors.New("missing or invalid user_id")
+	}
+
+	// Verify task exists and belongs to user
+	var task types.Task
+	taskResult := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).First(&task)
+	if taskResult.Error != nil {
+		if taskResult.Error == gorm.ErrRecordNotFound {
+			return 0, errors.New("task not found")
+		}
+		return 0, taskResult.Error
+	}
+
+	// Mark all incomplete steps as complete
+	result := db.Model(&types.Step{}).
+		Where("task_id = ? AND completed = ?", taskID, false).
+		Update("completed", true)
+
+	if result.Error != nil {
+		log.Println("Error completing all steps:", result.Error)
+		return 0, result.Error
+	}
+
+	stepsCompleted := result.RowsAffected
+
+	// Trigger cascade completion checks
+	// Mark task as complete
+	db.Model(&types.Task{}).Where("task_id = ?", taskID).Update("completed", true)
+
+	// Check if this completion should trigger milestone completion
+	if shouldCompleteMilestone(task.MilestoneID) {
+		db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
+
+		// Check if this completion should trigger roadmap completion
+		var milestone types.Milestone
+		db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
+		if shouldCompleteRoadmap(milestone.RoadmapID) {
+			db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
+		}
+	}
+
+	log.Printf("Completed all steps for task %s: %d steps marked complete", taskID, stepsCompleted)
+	return stepsCompleted, nil
+}

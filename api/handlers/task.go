@@ -153,3 +153,26 @@ func DeleteStep(c *gin.Context) {
 	utils.MessageResponse(c, http.StatusOK, "Step deleted successfully")
 	log.Println("Step deleted successfully")
 }
+
+// CompleteAllSteps marks all steps of a task as complete in a single operation.
+// This also triggers cascade completion for the task, milestone, and roadmap.
+func CompleteAllSteps(c *gin.Context) {
+	taskID := c.Param("taskid")
+
+	stepsCompleted, err := database.CompleteAllSteps(c, taskID)
+	if err != nil {
+		if err.Error() == "task not found" {
+			utils.NotFoundResponse(c, "Task")
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":         "All steps marked as complete",
+		"steps_completed": stepsCompleted,
+		"task_id":         taskID,
+	})
+	log.Printf("All steps completed for task %s: %d steps", taskID, stepsCompleted)
+}

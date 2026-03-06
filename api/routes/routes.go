@@ -109,6 +109,7 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		tasks.POST("/:taskid/steps", utils.ValidateUUID("taskid"), handlers.CreateStep)
 		tasks.PATCH("/:taskid/steps/:stepid", utils.ValidateUUID("taskid"), utils.ValidateUUID("stepid"), handlers.UpdateStep)
 		tasks.DELETE("/:taskid/steps/:stepid", utils.ValidateUUID("taskid"), utils.ValidateUUID("stepid"), handlers.DeleteStep)
+		tasks.POST("/:taskid/steps/complete-all", utils.ValidateUUID("taskid"), handlers.CompleteAllSteps)
 	}
 }
 
