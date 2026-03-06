@@ -368,3 +368,41 @@ func GetMessageByID(c *gin.Context, messageID, userID string) (*types.MessageRes
 
 	return &response, nil
 }
+
+// DeleteThreadBetweenUsers deletes the message thread between two users.
+// This includes all messages and participant records.
+// Used when a friendship is removed.
+func DeleteThreadBetweenUsers(c *gin.Context, userID1, userID2 string) error {
+	// Find the thread between these two users
+	threadID := GetThreadBetweenUsers(c, userID1, userID2)
+	if threadID == "" {
+		// No thread exists, nothing to delete
+		return nil
+	}
+
+	// Use a transaction to ensure all deletions succeed or none do
+	tx := db.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+
+	// Delete all messages in the thread (hard delete)
+	if err := tx.Where("thread_id = ?", threadID).Delete(&types.Messages{}).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Delete thread participants
+	if err := tx.Where("thread_id = ?", threadID).Delete(&types.ThreadParticipants{}).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Delete the thread itself
+	if err := tx.Where("thread_id = ?", threadID).Delete(&types.Thread{}).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	return tx.Commit().Error
+}
