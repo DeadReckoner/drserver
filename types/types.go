@@ -1,6 +1,7 @@
 package types
 
 import (
+	"errors"
 	"strings"
 	"time"
 )
@@ -722,4 +723,51 @@ const (
 	GenerationStatusProcessing GenerationStatus = "processing"
 	GenerationStatusCompleted  GenerationStatus = "completed"
 	GenerationStatusFailed     GenerationStatus = "failed"
+)
+
+// =============================================================================
+// NUDGE SYSTEM TYPES
+// =============================================================================
+
+// Nudge represents an accountability nudge sent by an anchor to a roadmap/habit owner.
+// Used for rate limiting (max 2 per day per target).
+type Nudge struct {
+	NudgeID    string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:nudge_id" json:"nudge_id"`
+	SenderID   string    `gorm:"type:uuid;column:sender_id;not null" json:"sender_id"`
+	ReceiverID string    `gorm:"type:uuid;column:receiver_id;not null" json:"receiver_id"`
+	TargetType string    `gorm:"column:target_type;not null" json:"target_type"` // "roadmap" or "habit"
+	TargetID   string    `gorm:"type:uuid;column:target_id;not null" json:"target_id"`
+	CreatedAt  time.Time `gorm:"column:created_at;default:now()" json:"created_at"`
+
+	// Relationships for preloading
+	Sender   *User `gorm:"foreignKey:SenderID;references:UserID" json:"sender,omitempty"`
+	Receiver *User `gorm:"foreignKey:ReceiverID;references:UserID" json:"receiver,omitempty"`
+}
+
+func (Nudge) TableName() string {
+	return "nudges"
+}
+
+// NudgeResponse includes target title for display purposes
+type NudgeResponse struct {
+	NudgeID     string    `json:"nudge_id"`
+	Sender      *User     `json:"sender,omitempty"`
+	Receiver    *User     `json:"receiver,omitempty"`
+	TargetType  string    `json:"target_type"`
+	TargetID    string    `json:"target_id"`
+	TargetTitle string    `json:"target_title"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// Nudge constants
+const (
+	NudgeTargetTypeRoadmap = "roadmap"
+	NudgeTargetTypeHabit   = "habit"
+	NudgeRateLimitPerDay   = 2
+)
+
+// Nudge errors
+var (
+	ErrNudgeRateLimitExceeded = errors.New("rate limit exceeded: max 2 nudges per day per target")
+	ErrNotAnchor              = errors.New("you are not the anchor for this target")
 )

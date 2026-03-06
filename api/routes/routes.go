@@ -32,6 +32,7 @@ func setupV1Routes(router *gin.Engine) {
 	setupNotificationRoutes(v1)
 	setupMessageThreadRoutes(v1)
 	setupFeedbackRoutes(v1)
+	setupNudgeRoutes(v1)
 	setupWebSocketRoutes(v1)
 }
 
@@ -76,6 +77,9 @@ func setupRoadmapRoutes(rg *gin.RouterGroup) {
 		// Anchor routes
 		roadmaps.POST("/:roadmapid/anchor-request", utils.ValidateUUID("roadmapid"), handlers.CreateAnchorRequest)
 		roadmaps.DELETE("/:roadmapid/anchor", utils.ValidateUUID("roadmapid"), handlers.RemoveAnchor)
+
+		// Nudge route (anchor nudges roadmap owner)
+		roadmaps.POST("/:roadmapid/nudge", utils.ValidateUUID("roadmapid"), handlers.NudgeRoadmap)
 	}
 
 	// Anchor request routes
@@ -133,6 +137,9 @@ func setupHabitRoutes(rg *gin.RouterGroup) {
 		// Anchor operations
 		habits.POST("/:habitid/anchor-request", utils.ValidateUUID("habitid"), handlers.CreateHabitAnchorRequest)
 		habits.DELETE("/:habitid/anchor", utils.ValidateUUID("habitid"), handlers.RemoveHabitAnchor)
+
+		// Nudge route (anchor nudges habit owner)
+		habits.POST("/:habitid/nudge", utils.ValidateUUID("habitid"), handlers.NudgeHabit)
 	}
 }
 
@@ -192,6 +199,14 @@ func setupFeedbackRoutes(rg *gin.RouterGroup) {
 	feedback := rg.Group("/feedback")
 	{
 		feedback.POST("", handlers.CreateFeedback)
+	}
+}
+
+func setupNudgeRoutes(rg *gin.RouterGroup) {
+	nudges := rg.Group("/nudges")
+	{
+		nudges.GET("", handlers.GetNudgesReceived)
+		nudges.GET("/sent", handlers.GetNudgesSent)
 	}
 }
 
