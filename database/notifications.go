@@ -109,3 +109,100 @@ func DeleteNotificationsByTypeAndMultipleDataKeys(ctx context.Context, userID st
 	}
 	return query.Delete(&types.Notification{}).Error
 }
+
+// DismissNotification marks a specific notification as cleared for a user.
+// This allows users to dismiss any notification, including request types that
+// are normally excluded from bulk clear operations.
+func DismissNotification(ctx context.Context, userID string, notificationID string) error {
+	now := time.Now()
+	result := db.Model(&types.Notification{}).
+		Where("notification_id = ? AND user_id = ?", notificationID, userID).
+		Update("cleared_at", now)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+
+	return nil
+}
+
+// CleanupOrphanedRequestNotifications finds and clears request notifications
+// where the underlying request no longer exists or is no longer pending.
+// Returns the number of orphaned notifications that were cleared.
+func CleanupOrphanedRequestNotifications(ctx context.Context, userID string) (int, error) {
+	// Get all uncleared request-type notifications for this user
+	var notifications []types.Notification
+	requestTypes := []string{"friend_request", "anchor_request", "habit_anchor_request"}
+
+	err := db.Where("user_id = ? AND type IN ? AND cleared_at IS NULL", userID, requestTypes).
+		Find(&notifications).Error
+	if err != nil {
+		return 0, err
+	}
+
+	if len(notifications) == 0 {
+		return 0, nil
+	}
+
+	orphanedIDs := []string{}
+	now := time.Now()
+
+	for _, notif := range notifications {
+		isOrphaned := false
+
+		switch notif.Type {
+		case "friend_request":
+			// Check if friendship exists and is pending
+			friendshipID, ok := notif.Data["friendship_id"].(string)
+			if !ok {
+				isOrphaned = true
+			} else {
+				var friendship types.Friendship
+				result := db.Where("id = ?", friendshipID).First(&friendship)
+				if result.Error == gorm.ErrRecordNotFound {
+					isOrphaned = true
+				} else if result.Error == nil && friendship.Status != "pending" {
+					isOrphaned = true
+				}
+			}
+
+		case "anchor_request", "habit_anchor_request":
+			// Check if anchor request exists and is pending
+			requestID, ok := notif.Data["request_id"].(string)
+			if !ok {
+				isOrphaned = true
+			} else {
+				var anchorRequest types.AnchorRequest
+				result := db.Where("request_id = ?", requestID).First(&anchorRequest)
+				if result.Error == gorm.ErrRecordNotFound {
+					isOrphaned = true
+				} else if result.Error == nil && anchorRequest.Status != "pending" {
+					isOrphaned = true
+				}
+			}
+		}
+
+		if isOrphaned {
+			orphanedIDs = append(orphanedIDs, notif.NotificationID)
+		}
+	}
+
+	if len(orphanedIDs) == 0 {
+		return 0, nil
+	}
+
+	// Clear all orphaned notifications
+	result := db.Model(&types.Notification{}).
+		Where("notification_id IN ?", orphanedIDs).
+		Update("cleared_at", now)
+
+	if result.Error != nil {
+		return 0, result.Error
+	}
+
+	return int(result.RowsAffected), nil
+}

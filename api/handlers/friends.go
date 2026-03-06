@@ -183,6 +183,7 @@ func UpdateFriendRequestStatus(c *gin.Context) {
 	if !ok {
 		return
 	}
+	userID, _ := c.Get("user_id")
 
 	var req types.UpdateFriendshipStatusRequest
 	if !utils.BindJSONOrAbort(c, &req) {
@@ -193,6 +194,8 @@ func UpdateFriendRequestStatus(c *gin.Context) {
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "friendship not found" {
+			// Clean up any orphaned notification for this friend request
+			go cleanupOrphanedFriendRequestNotification(ctx, userID.(string), friendshipID)
 			utils.NotFoundResponse(c, "Friendship")
 			return
 		}
@@ -201,6 +204,8 @@ func UpdateFriendRequestStatus(c *gin.Context) {
 			return
 		}
 		if errMsg == "friend request is not pending" {
+			// Request exists but is not pending - clean up notification
+			go cleanupOrphanedFriendRequestNotification(ctx, userID.(string), friendshipID)
 			utils.BadRequestResponse(c, errMsg)
 			return
 		}
@@ -293,5 +298,21 @@ func cleanupFriendRequestNotification(ctx context.Context, friendship types.Frie
 	)
 	if err != nil {
 		log.Info(ctx, "Failed to cleanup friend request notification:", err)
+	}
+}
+
+// cleanupOrphanedFriendRequestNotification cleans up notifications for friend requests
+// that no longer exist or are no longer pending. This handles cases where the
+// underlying request was deleted or already processed but the notification remains.
+func cleanupOrphanedFriendRequestNotification(ctx context.Context, userID string, friendshipID string) {
+	err := database.DeleteNotificationsByTypeAndData(
+		ctx,
+		userID,
+		"friend_request",
+		"friendship_id",
+		friendshipID,
+	)
+	if err != nil {
+		log.Info(ctx, "Failed to cleanup orphaned friend request notification:", err)
 	}
 }

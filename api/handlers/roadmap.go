@@ -274,11 +274,14 @@ func GetAnchorRequests(c *gin.Context) {
 func AcceptAnchorRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	requestID := c.Param("requestid")
+	userID, _ := c.Get("user_id")
 
 	anchorRequest, err := database.AcceptAnchorRequest(c, requestID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "anchor request not found" {
+			// Clean up any orphaned notification for this request
+			go cleanupOrphanedAnchorNotification(ctx, userID.(string), requestID)
 			utils.NotFoundResponse(c, "Anchor Request")
 			return
 		}
@@ -287,6 +290,8 @@ func AcceptAnchorRequest(c *gin.Context) {
 			return
 		}
 		if errMsg == "anchor request is not pending" {
+			// Request exists but is not pending - clean up notification
+			go cleanupOrphanedAnchorNotification(ctx, userID.(string), requestID)
 			utils.BadRequestResponse(c, errMsg)
 			return
 		}
@@ -307,11 +312,14 @@ func AcceptAnchorRequest(c *gin.Context) {
 func RejectAnchorRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	requestID := c.Param("requestid")
+	userID, _ := c.Get("user_id")
 
 	anchorRequest, err := database.RejectAnchorRequest(c, requestID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "anchor request not found" {
+			// Clean up any orphaned notification for this request
+			go cleanupOrphanedAnchorNotification(ctx, userID.(string), requestID)
 			utils.NotFoundResponse(c, "Anchor Request")
 			return
 		}
@@ -320,6 +328,8 @@ func RejectAnchorRequest(c *gin.Context) {
 			return
 		}
 		if errMsg == "anchor request is not pending" {
+			// Request exists but is not pending - clean up notification
+			go cleanupOrphanedAnchorNotification(ctx, userID.(string), requestID)
 			utils.BadRequestResponse(c, errMsg)
 			return
 		}
@@ -444,5 +454,24 @@ func cleanupAnchorRequestNotification(ctx context.Context, anchorRequest types.A
 	)
 	if err != nil {
 		log.Info(ctx, "Failed to cleanup anchor request notification:", err)
+	}
+}
+
+// cleanupOrphanedAnchorNotification cleans up notifications for anchor requests
+// that no longer exist or are no longer pending. This handles cases where the
+// underlying request was deleted or already processed but the notification remains.
+func cleanupOrphanedAnchorNotification(ctx context.Context, userID string, requestID string) {
+	// Try both notification types since we don't know which type it was
+	for _, notifType := range []string{"anchor_request", "habit_anchor_request"} {
+		err := database.DeleteNotificationsByTypeAndData(
+			ctx,
+			userID,
+			notifType,
+			"request_id",
+			requestID,
+		)
+		if err != nil {
+			log.Info(ctx, "Failed to cleanup orphaned notification:", err)
+		}
 	}
 }
