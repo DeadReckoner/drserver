@@ -159,7 +159,7 @@ type Roadmap struct {
 	Description       string    `json:"description"`
 	Days              int       `json:"days"`
 	Completed         bool      `json:"completed"`
-	StartDate         time.Time `json:"start_date,omitempty"`
+	StartDate         *time.Time `json:"start_date"`
 	Type              string    `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
 	AnchorID          *string   `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
 	CurrentSkillLevel string    `gorm:"column:current_skill_level" json:"current_skill_level,omitempty"`
@@ -212,7 +212,8 @@ type Milestone struct {
 	Description string    `json:"description"`
 	Day         int       `json:"day"`
 	Reached     bool      `json:"reached"`
-	Date        time.Time `json:"date,omitempty"`
+	Date        *time.Time `json:"date"`
+	Status	string 	`json:"status"`
 
 	// Strategic fields (from MacroMilestone merge)
 	PhaseID           *string `gorm:"type:uuid" json:"phase_id,omitempty"`
@@ -237,6 +238,7 @@ type Task struct {
 	UserID      string `gorm:"type:uuid" json:"user_id"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
+	Status	string 	`json:"status"`
 
 	// New fields from Milestone Map spec
 	Rationale    string  `json:"rationale,omitempty"`
@@ -246,7 +248,7 @@ type Task struct {
 
 	Day       int       `json:"day"`
 	Completed bool      `json:"completed"`
-	Date      time.Time `json:"date"`
+	Date      *time.Time `json:"date"`
 	Steps     []Step    `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps,omitempty"`
 }
 
