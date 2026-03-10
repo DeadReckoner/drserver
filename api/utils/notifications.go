@@ -35,7 +35,7 @@ func SendPushNotification(userID, notificationType, title, body string, data map
 		Status:         string(types.NotificationStatusPending),
 	}
 
-	database.CreateNotification(ctx, &alert)
+	_ = database.CreateNotification(ctx, &alert)
 
 	// Calculate badge count for the user
 	badgeCount := database.CalculateBadgeCount(ctx, userID)
@@ -85,7 +85,7 @@ func sendExpoNotification(ctx context.Context, expoToken, notificationType, titl
 		updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), err.Error())
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read response
 	responseBody, err := io.ReadAll(resp.Body)
@@ -198,7 +198,7 @@ func sendBadgeOnlyNotification(ctx context.Context, expoToken string, badgeCount
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

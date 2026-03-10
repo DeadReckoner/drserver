@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"dr/server/api/utils"
 	"dr/server/database"
 	"dr/server/log"
@@ -550,10 +551,11 @@ func RemoveHabitAnchor(c *gin.Context) {
 
 // sendHabitAnchorRequestNotification sends a notification when a habit anchor request is created
 func sendHabitAnchorRequestNotification(anchorRequest types.AnchorRequest) {
+	ctx := context.Background()
 	// Get requester's name
 	requester, err := database.GetUserByID(anchorRequest.RequesterID)
 	if err != nil {
-		log.Info(nil, "Failed to get requester info for notification:", err)
+		log.Info(ctx, "Failed to get requester info for notification:", err)
 		return
 	}
 

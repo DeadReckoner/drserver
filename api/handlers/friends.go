@@ -229,10 +229,11 @@ func UpdateFriendRequestStatus(c *gin.Context) {
 
 // sendFriendRequestNotification sends a notification when a friend request is created
 func sendFriendRequestNotification(friendship types.Friendship) {
+	ctx := context.Background()
 	// Get requester's name
 	requester, err := database.GetUserByID(friendship.RequesterID)
 	if err != nil {
-		log.Info(nil, "Failed to get requester info for notification:", err)
+		log.Info(ctx, "Failed to get requester info for notification:", err)
 		return
 	}
 
@@ -252,25 +253,27 @@ func sendFriendRequestNotification(friendship types.Friendship) {
 
 // sendFriendStatusNotification sends a notification when a friend request is accepted or rejected
 func sendFriendStatusNotification(friendship types.Friendship, status string) {
+	ctx := context.Background()
 	// Get addressee's name (the person who accepted/rejected)
 	addressee, err := database.GetUserByID(friendship.AddresseeID)
 	if err != nil {
-		log.Info(nil, "Failed to get addressee info for notification:", err)
+		log.Info(ctx, "Failed to get addressee info for notification:", err)
 		return
 	}
 
 	addresseeName := addressee.FirstName + " " + addressee.LastName
 
 	var notificationType, title, body string
-	if status == "accepted" {
+	switch status {
+	case "accepted":
 		notificationType = "friend_accepted"
 		title = "Friend Request Accepted"
 		body = addresseeName + " accepted your friend request"
-	} else if status == "rejected" {
+	case "rejected":
 		notificationType = "friend_rejected"
 		title = "Friend Request Declined"
 		body = addresseeName + " declined your friend request"
-	} else {
+	default:
 		return // Unknown status
 	}
 

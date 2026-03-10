@@ -171,7 +171,7 @@ func (room *ThreadRoom) handleBroadcast() {
 			err := conn.WriteMessage(gorillaws.TextMessage, msgBytes)
 			if err != nil {
 				fmt.Printf("Error sending message to client: %v\n", err)
-				conn.Close()
+				_ = conn.Close()
 				delete(room.clients, conn)
 			}
 		}
@@ -212,7 +212,7 @@ func WSHandler(c *gin.Context) {
 		fmt.Printf("WebSocket upgrade error: %v\n", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Get or create room for this thread
 	room := getOrCreateRoom(threadID)
@@ -248,7 +248,7 @@ func WSHandler(c *gin.Context) {
 			// Send error back to client
 			errMsg := map[string]string{"error": "invalid message format"}
 			errBytes, _ := json.Marshal(errMsg)
-			conn.WriteMessage(gorillaws.TextMessage, errBytes)
+			_ = conn.WriteMessage(gorillaws.TextMessage, errBytes)
 			continue
 		}
 
@@ -257,7 +257,7 @@ func WSHandler(c *gin.Context) {
 			fmt.Printf("Empty message content from user %s\n", userIDStr)
 			errMsg := map[string]string{"error": "message content cannot be empty"}
 			errBytes, _ := json.Marshal(errMsg)
-			conn.WriteMessage(gorillaws.TextMessage, errBytes)
+			_ = conn.WriteMessage(gorillaws.TextMessage, errBytes)
 			continue
 		}
 
@@ -267,7 +267,7 @@ func WSHandler(c *gin.Context) {
 			fmt.Printf("Error saving message to database (user %s, thread %s): %v\n", userIDStr, threadID, err)
 			errMsg := map[string]string{"error": "failed to save message"}
 			errBytes, _ := json.Marshal(errMsg)
-			conn.WriteMessage(gorillaws.TextMessage, errBytes)
+			_ = conn.WriteMessage(gorillaws.TextMessage, errBytes)
 			continue
 		}
 

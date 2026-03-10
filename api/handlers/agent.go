@@ -120,12 +120,12 @@ func WSAgentProgress(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Websocket upgrade failed"})
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	websocket.Manager.AddConnection(ctx, jobID, conn)
 	defer websocket.Manager.RemoveConnection(ctx, jobID, conn)
 
-	conn.WriteJSON(types.ProgressUpdate{
+	_ = conn.WriteJSON(types.ProgressUpdate{
 		Type:     "status",
 		JobID:    job.JobID,
 		Progress: job.Progress,
@@ -141,7 +141,7 @@ func WSAgentProgress(c *gin.Context) {
 		}
 
 		if msg["type"] == "ping" {
-			conn.WriteJSON(map[string]string{"type": "pong"})
+			_ = conn.WriteJSON(map[string]string{"type": "pong"})
 		}
 	}
 
@@ -237,7 +237,7 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 			"roadmap_id": roadmapID,
 		},
 	}
-	database.UpdateBackgroundJob(ctx, &job)
+	_ = database.UpdateBackgroundJob(ctx, &job)
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:     "complete",
@@ -273,7 +273,7 @@ func updateJobProgress(jobID string, progress int, status, message string) {
 		job.StartedAt = &now
 	}
 
-	database.UpdateBackgroundJob(ctx, &job)
+	_ = database.UpdateBackgroundJob(ctx, &job)
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:     "progress",
@@ -296,9 +296,9 @@ func handleGenerationError(jobID, roadmapID, userID string, err error) {
 		CompletedAt: &now,
 	}
 
-	database.UpdateBackgroundJob(ctx, &job)
+	_ = database.UpdateBackgroundJob(ctx, &job)
 
-	database.UpdateRoadmapGenerationStatus(ctx, roadmapID, string(types.GenerationStatusFailed))
+	_ = database.UpdateRoadmapGenerationStatus(ctx, roadmapID, string(types.GenerationStatusFailed))
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:    "error",

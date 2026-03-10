@@ -376,10 +376,11 @@ func RemoveAnchor(c *gin.Context) {
 
 // sendAnchorRequestNotification sends a notification when an anchor request is created
 func sendAnchorRequestNotification(anchorRequest types.AnchorRequest) {
+	ctx := context.Background()
 	// Get requester's name
 	requester, err := database.GetUserByID(anchorRequest.RequesterID)
 	if err != nil {
-		log.Info(nil, "Failed to get requester info for notification:", err)
+		log.Info(ctx, "Failed to get requester info for notification:", err)
 		return
 	}
 
@@ -399,25 +400,27 @@ func sendAnchorRequestNotification(anchorRequest types.AnchorRequest) {
 
 // sendAnchorStatusNotification sends a notification when an anchor request is accepted or rejected
 func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status string) {
+	ctx := context.Background()
 	// Get anchor's name (the person who accepted/rejected)
 	anchor, err := database.GetUserByID(anchorRequest.AnchorID)
 	if err != nil {
-		log.Info(nil, "Failed to get anchor info for notification:", err)
+		log.Info(ctx, "Failed to get anchor info for notification:", err)
 		return
 	}
 
 	anchorName := anchor.FirstName + " " + anchor.LastName
 
 	var notificationType, title, body string
-	if status == "accepted" {
+	switch status {
+	case "accepted":
 		notificationType = "anchor_accepted"
 		title = "Anchor Request Accepted"
 		body = anchorName + " accepted your anchor request"
-	} else if status == "rejected" {
+	case "rejected":
 		notificationType = "anchor_rejected"
 		title = "Anchor Request Declined"
 		body = anchorName + " declined your anchor request"
-	} else {
+	default:
 		return // Unknown status
 	}
 

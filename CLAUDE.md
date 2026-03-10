@@ -6,11 +6,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 go run main.go                              # Start server on :8080
-go test ./...                               # Run all tests
-go test ./api -v                            # Run API tests with verbose output
 go test ./api -run TestFunctionName -v      # Run single test
 fly deploy                                  # Deploy to Fly.io
 ```
+
+### Makefile
+
+```bash
+make all                                    # tidy, fmt, lint, build, test, clean
+make ci                                     # tidy, fmt, build, test, clean (no lint)
+make test                                   # Run tests with coverage
+make lint                                   # Run golangci-lint
+make fmt                                    # Format code
+make build                                  # Build binary
+```
+
+**Always run `make all` after making changes to verify compilation and tests pass.**
 
 Environment requires: `DATABASE_URL`, `API_URL`, `anon_key`, `OPENAI_API_KEY`
 
@@ -31,9 +42,8 @@ Environment requires: `DATABASE_URL`, `API_URL`, `anon_key`, `OPENAI_API_KEY`
 
 ```
 Roadmap
-├── MacroMap (strategic overview)
-│   └── Phases
-│       └── MacroMilestones (with Spikes, Risks)
+├── Phases (strategic overview)
+│   └── Milestones (with Spikes, Risks)
 └── Milestones (tactical detail)
     └── Tasks
         └── Steps
@@ -43,13 +53,37 @@ Roadmap
 
 ### Handler Pattern
 All handlers follow this pattern:
-1. Get userID from context via `c.GetString("userID")`
-2. Parse/validate request body
+1. Get userID from context via `c.GetString("user_id")`
+2. Parse/validate request body using `utils.BindJSONOrAbort(c, &req)`
 3. Call database function
-4. Return JSON response with appropriate status
+4. Return JSON response using `utils.DataResponse(c, statusCode, data)`
+
+### Response Helpers (api/utils/response.go)
+- `utils.DataResponse(c, statusCode, data)` - Return JSON data
+- `utils.ErrorResponse(c, statusCode, message)` - Return error
+- `utils.NotFoundResponse(c, "resource")` - 404 response
+- `utils.BadRequestResponse(c, message)` - 400 response
+- `utils.InternalErrorResponse(c, err)` - 500 response
 
 ### UUID Validation
 Routes use `utils.ValidateUUID("paramName")` middleware for path params.
+
+### GORM Hooks
+Models can define lifecycle hooks that GORM calls automatically:
+- `BeforeSave(tx *gorm.DB)` - Called before insert/update
+- `BeforeCreate(tx *gorm.DB)` - Called before insert only
+- `BeforeUpdate(tx *gorm.DB)` - Called before update only
+
+Note: Hooks don't run on batch operations like `db.Model(&Task{}).Where(...).Update(...)`. Use individual record operations or update fields manually.
+
+### Status Computation
+Task and Milestone have a `Status` field computed from `Date` and `Completed`/`Reached`:
+- `completed` → "completed"
+- date in future → "not_started"
+- date is today → "in_progress"
+- date in past → "overdue"
+
+Use `task.ComputeStatus()` or `milestone.ComputeStatus()` to recalculate.
 
 ### Async Job Processing
 Background jobs (roadmap generation) use:
@@ -70,3 +104,4 @@ Conversational roadmap generation:
 - GORM ORM with PostgreSQL driver
 - Run migrations: `supabase db push`
 - Custom table names via `TableName()` methods
+- `database.UpdateAllStatuses()` - Batch update task/milestone statuses (for daily jobs)

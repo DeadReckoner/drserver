@@ -43,7 +43,7 @@ func ClearNotifications(c *gin.Context) {
 	orphanedCount, err := database.CleanupOrphanedRequestNotifications(ctx, userID.(string))
 	if err != nil {
 		// Log error but continue with normal clear
-		c.Error(err)
+		_ = c.Error(err)
 	}
 
 	// Then clear all non-request notifications

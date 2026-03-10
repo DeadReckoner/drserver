@@ -481,14 +481,26 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 				milestone.Day = value.(int)
 			case "reached":
 				milestone.Reached = value.(bool)
+			case "date":
+				milestone.Date = value.(*time.Time)
 			}
+		}
+
+		// Recompute status if reached or date changed (Updates doesn't trigger hooks)
+		if _, hasReached := updateMap["reached"]; hasReached {
+			milestone.Status = milestone.ComputeStatus()
+			db.Model(&milestone).Update("status", milestone.Status)
+		} else if _, hasDate := updateMap["date"]; hasDate {
+			milestone.Status = milestone.ComputeStatus()
+			db.Model(&milestone).Update("status", milestone.Status)
 		}
 	}
 
 	// Check if all tasks are completed to auto-complete milestone
 	if shouldCompleteMilestone(milestone.MilestoneID) {
-		db.Model(&milestone).Update("reached", true)
 		milestone.Reached = true
+		milestone.Status = milestone.ComputeStatus()
+		db.Model(&milestone).Updates(map[string]interface{}{"reached": true, "status": milestone.Status})
 
 		// Check if this completion should trigger roadmap completion
 		if shouldCompleteRoadmap(milestone.RoadmapID) {
