@@ -55,7 +55,7 @@ func ClearNotifications(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":                "Notifications cleared",
+		"message":                   "Notifications cleared",
 		"orphaned_requests_cleared": orphanedCount,
 	})
 }

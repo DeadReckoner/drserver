@@ -655,7 +655,6 @@ func makeOpenAIRequest(ctx context.Context, reqBody AIRequest) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-
 	// Create HTTP POST request to OpenAI
 	req, err := http.NewRequestWithContext(ctx, "POST", openAIURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
