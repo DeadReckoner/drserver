@@ -29,7 +29,8 @@ func CreateRoadmap(c *gin.Context) {
 	}
 
 	// Set start_date to null (zero time) - it will be set when the roadmap is started
-	newRoadmap.StartDate = time.Time{}
+	date := time.Time{}
+	newRoadmap.StartDate = &date
 
 	fmt.Printf("Roadmap received: %+v\n", newRoadmap)
 
@@ -194,14 +195,15 @@ func StartRoadmap(c *gin.Context) {
 		return
 	}
 
-	roadmap.StartDate = time.Now()
+	date := time.Now()
+	roadmap.StartDate = &date
 
 	for index, milestone := range roadmap.Milestones {
 
 		fmt.Println("starting milestone ", milestone.Day)
-		roadmap.Milestones[index] = dateMilestones(c, roadmap.StartDate, milestone)
+		roadmap.Milestones[index] = dateMilestones(c, *roadmap.StartDate, milestone)
 		for taskIndex, task := range milestone.Tasks {
-			roadmap.Milestones[index].Tasks[taskIndex] = dateTasks(c, roadmap.StartDate, task)
+			roadmap.Milestones[index].Tasks[taskIndex] = dateTasks(c, *roadmap.StartDate, task)
 			log.Info(ctx, "Setting Task Date: ", task.Day, task.Date)
 		}
 	}
@@ -214,14 +216,16 @@ func StartRoadmap(c *gin.Context) {
 
 func dateMilestones(c *gin.Context, startDate time.Time, milestone types.Milestone) types.Milestone {
 
-	milestone.Date = startDate.AddDate(0, 0, milestone.Day)
-
+	date := startDate.AddDate(0, 0, milestone.Day)
+	milestone.Date = &date 
+	
 	return database.UpdateMilestone(c, milestone.MilestoneID, milestone)
 }
 
 func dateTasks(c *gin.Context, startDate time.Time, task types.Task) types.Task {
 
-	task.Date = startDate.AddDate(0, 0, task.Day)
+	date := startDate.AddDate(0, 0, task.Day)
+	task.Date = &date
 
 	return database.UpdateTask(c, task.TaskID, task)
 }
