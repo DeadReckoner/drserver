@@ -217,8 +217,8 @@ func StartRoadmap(c *gin.Context) {
 func dateMilestones(c *gin.Context, startDate time.Time, milestone types.Milestone) types.Milestone {
 
 	date := startDate.AddDate(0, 0, milestone.Day)
-	milestone.Date = &date 
-	
+	milestone.Date = &date
+
 	return database.UpdateMilestone(c, milestone.MilestoneID, milestone)
 }
 
