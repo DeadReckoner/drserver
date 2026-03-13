@@ -175,13 +175,22 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 	}
 
 	// Query the roadmap table for all roadmaps with this user_id
-	result := db.Where("user_id = ?", user_id).Preload("Milestones", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
-		return db.Order("number ASC")
-	}).Find(&roadmaps)
+	result := db.Where("user_id = ?", user_id).
+		Preload("Phases", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).Find(&roadmaps)
 	if result.Error != nil {
 		log.Println("Error fetching roadmaps:", result.Error)
 	}
