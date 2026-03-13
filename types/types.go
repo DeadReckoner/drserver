@@ -196,6 +196,14 @@ type Phase struct {
 	Milestones []Milestone `gorm:"foreignKey:PhaseID;constraint:OnDelete:SET NULL;" json:"milestones,omitempty"`
 }
 
+// BeforeSave is a GORM hook that sets a default status for Phase
+func (p *Phase) BeforeSave(tx *gorm.DB) error {
+	if p.Status == "" {
+		p.Status = string(StatusNotStarted)
+	}
+	return nil
+}
+
 type Milestone struct {
 	MilestoneID string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"milestone_id"`
 	RoadmapID   string     `gorm:"type:uuid" json:"roadmap_id"`
