@@ -323,7 +323,7 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 		}
 	}
 
-	// If step was completed, check cascade completion
+	// Handle cascade completion/un-completion based on step state
 	if updatedStep.Completed {
 		// Check if all steps are completed to auto-complete task
 		if shouldCompleteTask(taskID) {
@@ -343,6 +343,25 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 				if shouldCompleteRoadmap(milestone.RoadmapID) {
 					db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
 				}
+			}
+		}
+	} else {
+		// Step was unchecked - reverse cascade: un-complete task if it was completed
+		if task.Completed {
+			task.Completed = false
+			task.Status = task.ComputeStatus()
+			db.Model(&task).Updates(map[string]interface{}{"completed": false, "status": task.Status})
+
+			// Un-complete the milestone if it was reached
+			var milestone types.Milestone
+			db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
+			if milestone.Reached {
+				milestone.Reached = false
+				milestone.Status = milestone.ComputeStatus()
+				db.Model(&milestone).Updates(map[string]interface{}{"reached": false, "status": milestone.Status})
+
+				// Un-complete the roadmap if it was completed
+				db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", false)
 			}
 		}
 	}

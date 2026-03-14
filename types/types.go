@@ -191,12 +191,48 @@ type Phase struct {
 	Description   string `json:"description"`
 	OrderIndex    int    `json:"order_index"`
 	DurationWeeks string `json:"duration_weeks"`
-	Status        string `json:"status"`
+	Status        string `json:"status,omitempty"`
 
 	Milestones []Milestone `gorm:"foreignKey:PhaseID;constraint:OnDelete:SET NULL;" json:"milestones,omitempty"`
 }
 
+// ComputeStatus calculates the phase status based on its milestones
+func (p *Phase) ComputeStatus() string {
+	if len(p.Milestones) == 0 {
+		return string(StatusNotStarted)
+	}
+
+	allCompleted := true
+	anyInProgress := false
+	anyOverdue := false
+
+	for _, m := range p.Milestones {
+		status := m.ComputeStatus()
+		if status != string(StatusCompleted) {
+			allCompleted = false
+		}
+		if status == string(StatusInProgress) {
+			anyInProgress = true
+		}
+		if status == string(StatusOverdue) {
+			anyOverdue = true
+		}
+	}
+
+	if allCompleted {
+		return string(StatusCompleted)
+	}
+	if anyOverdue {
+		return string(StatusOverdue)
+	}
+	if anyInProgress {
+		return string(StatusInProgress)
+	}
+	return string(StatusNotStarted)
+}
+
 // BeforeSave is a GORM hook that sets a default status for Phase
+// Note: Status is computed dynamically via ComputeStatus() when milestones are loaded
 func (p *Phase) BeforeSave(tx *gorm.DB) error {
 	if p.Status == "" {
 		p.Status = string(StatusNotStarted)
@@ -213,7 +249,7 @@ type Milestone struct {
 	Day         int        `json:"day"`
 	Reached     bool       `json:"reached"`
 	Date        *time.Time `json:"date"`
-	Status      string     `json:"status"`
+	Status      string     `json:"status,omitempty"`
 
 	// Strategic fields
 	PhaseID           *string `gorm:"type:uuid" json:"phase_id,omitempty"`

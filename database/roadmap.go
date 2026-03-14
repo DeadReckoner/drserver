@@ -198,6 +198,45 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 	return roadmaps
 }
 
+// computePhaseStatuses recomputes status for all phases based on their milestones
+func computePhaseStatuses(roadmap *types.Roadmap) {
+	for i := range roadmap.Phases {
+		roadmap.Phases[i].Status = roadmap.Phases[i].ComputeStatus()
+	}
+}
+
+// recomputeTaskStatuses recomputes status for all tasks based on Completed/Date
+func recomputeTaskStatuses(roadmap *types.Roadmap) {
+	// Recompute for tasks in milestones in phases
+	for i := range roadmap.Phases {
+		for j := range roadmap.Phases[i].Milestones {
+			for k := range roadmap.Phases[i].Milestones[j].Tasks {
+				roadmap.Phases[i].Milestones[j].Tasks[k].Status = roadmap.Phases[i].Milestones[j].Tasks[k].ComputeStatus()
+			}
+		}
+	}
+	// Recompute for tasks in top-level milestones
+	for i := range roadmap.Milestones {
+		for j := range roadmap.Milestones[i].Tasks {
+			roadmap.Milestones[i].Tasks[j].Status = roadmap.Milestones[i].Tasks[j].ComputeStatus()
+		}
+	}
+}
+
+// recomputeMilestoneStatuses recomputes status for all milestones based on Reached/Date
+func recomputeMilestoneStatuses(roadmap *types.Roadmap) {
+	// Recompute for milestones in phases
+	for i := range roadmap.Phases {
+		for j := range roadmap.Phases[i].Milestones {
+			roadmap.Phases[i].Milestones[j].Status = roadmap.Phases[i].Milestones[j].ComputeStatus()
+		}
+	}
+	// Recompute for top-level milestones
+	for i := range roadmap.Milestones {
+		roadmap.Milestones[i].Status = roadmap.Milestones[i].ComputeStatus()
+	}
+}
+
 // GetRoadmapWithStrategicView loads only the strategic overview (phases with milestones, no tasks)
 func GetRoadmapWithStrategicView(c *gin.Context, roadmapID string) types.Roadmap {
 	var roadmap types.Roadmap
@@ -221,6 +260,10 @@ func GetRoadmapWithStrategicView(c *gin.Context, roadmapID string) types.Roadmap
 	if result.Error != nil {
 		log.Println("Error fetching roadmap strategic view:", result.Error)
 	}
+
+	// Recompute statuses dynamically based on current date/state
+	recomputeMilestoneStatuses(&roadmap)
+	computePhaseStatuses(&roadmap)
 
 	return roadmap
 }
@@ -266,6 +309,11 @@ func GetRoadmapFull(c *gin.Context, roadmapID string) types.Roadmap {
 		log.Println("Error fetching full roadmap:", result.Error)
 	}
 
+	// Recompute statuses dynamically based on current date/state
+	recomputeTaskStatuses(&roadmap)
+	recomputeMilestoneStatuses(&roadmap)
+	computePhaseStatuses(&roadmap)
+
 	return roadmap
 }
 
@@ -293,6 +341,10 @@ func GetRoadmap(c *gin.Context, roadmapID string) types.Roadmap {
 	if result.Error != nil {
 		log.Println("Error fetching roadmap:", result.Error)
 	}
+
+	// Recompute statuses dynamically based on current date/state
+	recomputeTaskStatuses(&roadmap)
+	recomputeMilestoneStatuses(&roadmap)
 
 	return roadmap
 }
