@@ -119,6 +119,18 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 
 	// Set user IDs for all nested entities
 	rm.UserID = userIDStr
+
+	// Set user IDs for milestones and tasks within phases
+	for i := range rm.Phases {
+		for j := range rm.Phases[i].Milestones {
+			rm.Phases[i].Milestones[j].UserID = userIDStr
+			for k := range rm.Phases[i].Milestones[j].Tasks {
+				rm.Phases[i].Milestones[j].Tasks[k].UserID = userIDStr
+			}
+		}
+	}
+
+	// Set user IDs for top-level milestones (backward compatibility)
 	for i := range rm.Milestones {
 		rm.Milestones[i].UserID = userIDStr
 		for j := range rm.Milestones[i].Tasks {
@@ -235,6 +247,18 @@ func recomputeMilestoneStatuses(roadmap *types.Roadmap) {
 	for i := range roadmap.Milestones {
 		roadmap.Milestones[i].Status = roadmap.Milestones[i].ComputeStatus()
 	}
+}
+
+// UpdatePhaseStatus updates the status of a phase by ID
+func UpdatePhaseStatus(phaseID string, status string) error {
+	result := db.Model(&types.Phase{}).Where("phase_id = ?", phaseID).Update("status", status)
+	return result.Error
+}
+
+// UpdateMilestoneStatus updates the status of a milestone by ID
+func UpdateMilestoneStatus(milestoneID string, status string) error {
+	result := db.Model(&types.Milestone{}).Where("milestone_id = ?", milestoneID).Update("status", status)
+	return result.Error
 }
 
 // GetRoadmapWithStrategicView loads only the strategic overview (phases with milestones, no tasks)
@@ -379,7 +403,9 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 	if rm.Completed != roadmap.Completed {
 		updateMap["completed"] = rm.Completed
 	}
-	if rm.StartDate != roadmap.StartDate {
+	// Compare pointer values, not addresses (nil check + time comparison)
+	if (rm.StartDate != nil && roadmap.StartDate == nil) ||
+		(rm.StartDate != nil && roadmap.StartDate != nil && !rm.StartDate.Equal(*roadmap.StartDate)) {
 		updateMap["start_date"] = rm.StartDate
 	}
 	if rm.CurrentSkillLevel != "" {
@@ -521,7 +547,9 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 	if updatedMilestone.Reached != milestone.Reached {
 		updateMap["reached"] = updatedMilestone.Reached
 	}
-	if updatedMilestone.Date != milestone.Date {
+	// Compare pointer values, not addresses (nil check + time comparison)
+	if (updatedMilestone.Date != nil && milestone.Date == nil) ||
+		(updatedMilestone.Date != nil && milestone.Date != nil && !updatedMilestone.Date.Equal(*milestone.Date)) {
 		updateMap["date"] = updatedMilestone.Date
 	}
 

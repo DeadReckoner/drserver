@@ -238,6 +238,7 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 		},
 	}
 	_ = database.UpdateBackgroundJob(ctx, &job)
+	_ = database.UpdateRoadmapGenerationStatus(ctx, roadmapID, string(types.GenerationStatusCompleted))
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:     "complete",

@@ -170,7 +170,7 @@ type Roadmap struct {
 	Description       string     `json:"description"`
 	Days              int        `json:"days"`
 	Completed         bool       `json:"completed"`
-	StartDate         *time.Time `json:"start_date"`
+	StartDate         *time.Time `json:"start_date,omitempty"`
 	Type              string     `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
 	AnchorID          *string    `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
 	CurrentSkillLevel string     `gorm:"column:current_skill_level" json:"current_skill_level,omitempty"`

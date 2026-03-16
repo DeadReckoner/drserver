@@ -28,10 +28,6 @@ func CreateRoadmap(c *gin.Context) {
 		newRoadmap.Type = "custom_made"
 	}
 
-	// Set start_date to null (zero time) - it will be set when the roadmap is started
-	date := time.Time{}
-	newRoadmap.StartDate = &date
-
 	fmt.Printf("Roadmap received: %+v\n", newRoadmap)
 
 	createdRoadmap, err := database.CreateRoadmap(c, newRoadmap)
@@ -188,7 +184,7 @@ func DeleteMilestone(c *gin.Context) {
 func StartRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
-	roadmap := database.GetRoadmap(c, roadmapID)
+	roadmap := database.GetRoadmapFull(c, roadmapID)
 
 	if roadmap.RoadmapID == "" {
 		utils.NotFoundResponse(c, "Roadmap")
@@ -198,14 +194,51 @@ func StartRoadmap(c *gin.Context) {
 	date := time.Now()
 	roadmap.StartDate = &date
 
-	for index, milestone := range roadmap.Milestones {
+	// Date all milestones and tasks in phases
+	for phaseIdx := range roadmap.Phases {
+		for milestoneIdx := range roadmap.Phases[phaseIdx].Milestones {
+			milestone := &roadmap.Phases[phaseIdx].Milestones[milestoneIdx]
+			log.Info(ctx, "Starting phase milestone", fmt.Sprintf("Day: %d", milestone.Day))
+			updatedMilestone := dateMilestones(c, *roadmap.StartDate, *milestone)
+			roadmap.Phases[phaseIdx].Milestones[milestoneIdx] = updatedMilestone
 
-		fmt.Println("starting milestone ", milestone.Day)
-		roadmap.Milestones[index] = dateMilestones(c, *roadmap.StartDate, milestone)
-		for taskIndex, task := range milestone.Tasks {
-			roadmap.Milestones[index].Tasks[taskIndex] = dateTasks(c, *roadmap.StartDate, task)
-			log.Info(ctx, "Setting Task Date: ", task.Day, task.Date)
+			for taskIdx := range updatedMilestone.Tasks {
+				task := updatedMilestone.Tasks[taskIdx]
+				updatedTask := dateTasks(c, *roadmap.StartDate, task)
+				roadmap.Phases[phaseIdx].Milestones[milestoneIdx].Tasks[taskIdx] = updatedTask
+				log.Info(ctx, "Set task date", fmt.Sprintf("Day: %d, Date: %v", updatedTask.Day, updatedTask.Date))
+			}
 		}
+	}
+
+	// Date all top-level milestones and tasks (backward compatibility)
+	for milestoneIdx := range roadmap.Milestones {
+		milestone := &roadmap.Milestones[milestoneIdx]
+		log.Info(ctx, "Starting top-level milestone", fmt.Sprintf("Day: %d", milestone.Day))
+		updatedMilestone := dateMilestones(c, *roadmap.StartDate, *milestone)
+		roadmap.Milestones[milestoneIdx] = updatedMilestone
+
+		for taskIdx := range updatedMilestone.Tasks {
+			task := updatedMilestone.Tasks[taskIdx]
+			updatedTask := dateTasks(c, *roadmap.StartDate, task)
+			roadmap.Milestones[milestoneIdx].Tasks[taskIdx] = updatedTask
+			log.Info(ctx, "Set task date", fmt.Sprintf("Day: %d, Date: %v", updatedTask.Day, updatedTask.Date))
+		}
+	}
+
+	// Set first phase to "in_progress"
+	if len(roadmap.Phases) > 0 {
+		database.UpdatePhaseStatus(roadmap.Phases[0].PhaseID, string(types.StatusInProgress))
+
+		// Set first milestone within first phase to "in_progress"
+		if len(roadmap.Phases[0].Milestones) > 0 {
+			database.UpdateMilestoneStatus(roadmap.Phases[0].Milestones[0].MilestoneID, string(types.StatusInProgress))
+		}
+	}
+
+	// Set first top-level milestone to "in_progress" (if no phases)
+	if len(roadmap.Phases) == 0 && len(roadmap.Milestones) > 0 {
+		database.UpdateMilestoneStatus(roadmap.Milestones[0].MilestoneID, string(types.StatusInProgress))
 	}
 
 	updatedRoadmap := database.UpdateRoadmap(c, roadmapID, roadmap)
