@@ -382,7 +382,10 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 	}
 
 	// Fetch the existing roadmap
-	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").First(&roadmap)
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).
+		Preload("Phases.Milestones.Tasks.Steps").
+		Preload("Milestones.Tasks.Steps").
+		First(&roadmap)
 	if result.Error != nil {
 		log.Println("Error fetching roadmap:", result.Error)
 		return roadmap
@@ -447,13 +450,31 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 	}
 
 	// Fetch updated roadmap with associations
-	db.Where("roadmap_id = ?", roadmapID).Preload("Milestones", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
-		return db.Order("number ASC")
-	}).First(&roadmap)
+	db.Where("roadmap_id = ?", roadmapID).
+		Preload("Phases", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.Milestones.Spikes").
+		Preload("Phases.Milestones.Risks").
+		Preload("Phases.Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Phases.Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
+		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
+		First(&roadmap)
 
 	return roadmap
 }
