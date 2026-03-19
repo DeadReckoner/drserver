@@ -261,7 +261,8 @@ func UpdateMilestoneStatus(milestoneID string, status string) error {
 	return result.Error
 }
 
-// GetRoadmapWithStrategicView loads only the strategic overview (phases with milestones, no tasks)
+// GetRoadmapWithStrategicView loads the strategic overview (phases with milestones).
+// Tasks are loaded (but not steps) since milestone status is computed from tasks.
 func GetRoadmapWithStrategicView(c *gin.Context, roadmapID string) types.Roadmap {
 	var roadmap types.Roadmap
 	user_id, exists := c.Get("user_id")
@@ -279,6 +280,9 @@ func GetRoadmapWithStrategicView(c *gin.Context, roadmapID string) types.Roadmap
 		}).
 		Preload("Phases.Milestones.Spikes").
 		Preload("Phases.Milestones.Risks").
+		Preload("Phases.Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
 		First(&roadmap)
 
 	if result.Error != nil {
@@ -286,6 +290,7 @@ func GetRoadmapWithStrategicView(c *gin.Context, roadmapID string) types.Roadmap
 	}
 
 	// Recompute statuses dynamically based on current date/state
+	recomputeTaskStatuses(&roadmap)
 	recomputeMilestoneStatuses(&roadmap)
 	computePhaseStatuses(&roadmap)
 
@@ -596,11 +601,9 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 			}
 		}
 
-		// Recompute status if reached or date changed (Updates doesn't trigger hooks)
+		// Recompute status if reached changed (Updates doesn't trigger hooks)
+		// Note: milestone status is derived from tasks, so date changes don't affect it
 		if _, hasReached := updateMap["reached"]; hasReached {
-			milestone.Status = milestone.ComputeStatus()
-			db.Model(&milestone).Update("status", milestone.Status)
-		} else if _, hasDate := updateMap["date"]; hasDate {
 			milestone.Status = milestone.ComputeStatus()
 			db.Model(&milestone).Update("status", milestone.Status)
 		}

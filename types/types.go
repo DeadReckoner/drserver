@@ -265,26 +265,44 @@ type Milestone struct {
 	Tasks  []Task  `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"tasks,omitempty"`
 }
 
-// ComputeStatus calculates the status based on Reached and Date fields
+// ComputeStatus calculates the milestone status based on its tasks.
+// If Reached is true, returns completed (manual override).
+// Otherwise cascades status from child tasks.
 func (m *Milestone) ComputeStatus() string {
 	if m.Reached {
 		return string(StatusCompleted)
 	}
-	if m.Date == nil {
+	if len(m.Tasks) == 0 {
 		return string(StatusNotStarted)
 	}
 
-	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	milestoneDate := time.Date(m.Date.Year(), m.Date.Month(), m.Date.Day(), 0, 0, 0, 0, m.Date.Location())
+	allCompleted := true
+	anyInProgress := false
+	anyOverdue := false
 
-	if milestoneDate.After(today) {
-		return string(StatusNotStarted)
+	for _, t := range m.Tasks {
+		status := t.ComputeStatus()
+		if status != string(StatusCompleted) {
+			allCompleted = false
+		}
+		if status == string(StatusInProgress) {
+			anyInProgress = true
+		}
+		if status == string(StatusOverdue) {
+			anyOverdue = true
+		}
 	}
-	if milestoneDate.Equal(today) {
+
+	if allCompleted {
+		return string(StatusCompleted)
+	}
+	if anyOverdue {
+		return string(StatusOverdue)
+	}
+	if anyInProgress {
 		return string(StatusInProgress)
 	}
-	return string(StatusOverdue)
+	return string(StatusNotStarted)
 }
 
 // BeforeSave is a GORM hook that updates Status before saving

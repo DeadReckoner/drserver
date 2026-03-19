@@ -209,7 +209,7 @@ func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Tas
 		// Check if this completion should trigger milestone completion
 		if shouldCompleteMilestone(task.MilestoneID) {
 			var milestone types.Milestone
-			db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
+			db.Where("milestone_id = ?", task.MilestoneID).Preload("Tasks").First(&milestone)
 			milestone.Reached = true
 			milestone.Status = milestone.ComputeStatus()
 			db.Model(&milestone).Updates(map[string]interface{}{"reached": true, "status": milestone.Status})
@@ -334,7 +334,7 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 			// Check if this completion should trigger milestone completion
 			if shouldCompleteMilestone(task.MilestoneID) {
 				var milestone types.Milestone
-				db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
+				db.Where("milestone_id = ?", task.MilestoneID).Preload("Tasks").First(&milestone)
 				milestone.Reached = true
 				milestone.Status = milestone.ComputeStatus()
 				db.Model(&milestone).Updates(map[string]interface{}{"reached": true, "status": milestone.Status})
@@ -354,7 +354,7 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 
 			// Un-complete the milestone if it was reached
 			var milestone types.Milestone
-			db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
+			db.Where("milestone_id = ?", task.MilestoneID).Preload("Tasks").First(&milestone)
 			if milestone.Reached {
 				milestone.Reached = false
 				milestone.Status = milestone.ComputeStatus()
@@ -430,7 +430,7 @@ func CompleteAllSteps(c *gin.Context, taskID string) (int64, error) {
 	// Check if this completion should trigger milestone completion
 	if shouldCompleteMilestone(task.MilestoneID) {
 		var milestone types.Milestone
-		db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
+		db.Where("milestone_id = ?", task.MilestoneID).Preload("Tasks").First(&milestone)
 		milestone.Reached = true
 		milestone.Status = milestone.ComputeStatus()
 		db.Model(&milestone).Updates(map[string]interface{}{"reached": true, "status": milestone.Status})
@@ -445,13 +445,15 @@ func CompleteAllSteps(c *gin.Context, taskID string) (int64, error) {
 	return stepsCompleted, nil
 }
 
-// UpdateAllStatuses updates the status field for all tasks and milestones based on
-// their date and completed/reached fields. This is intended to be called by a daily job
-// to catch status changes as dates pass (e.g., tasks becoming overdue).
+// UpdateAllStatuses updates the status field for all tasks and milestones.
+// Task status is based on completed and date fields.
+// Milestone status is computed from child task statuses.
+// This is intended to be called by a daily job to catch status changes as dates pass.
 // Returns the number of tasks and milestones updated.
 func UpdateAllStatuses() (tasksUpdated int64, milestonesUpdated int64, err error) {
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrow := today.Add(24 * time.Hour)
 
 	// Update tasks: set status based on completed and date
 	// Using raw SQL for efficiency since GORM hooks don't run on batch updates
@@ -475,7 +477,6 @@ func UpdateAllStatuses() (tasksUpdated int64, milestonesUpdated int64, err error
 	tasksUpdated += result.RowsAffected
 
 	// Tasks with date = today (not completed) -> "in_progress"
-	tomorrow := today.Add(24 * time.Hour)
 	result = db.Model(&types.Task{}).
 		Where("completed = ? AND date >= ? AND date < ? AND status != ?", false, today, tomorrow, string(types.StatusInProgress)).
 		Update("status", string(types.StatusInProgress))
@@ -502,52 +503,24 @@ func UpdateAllStatuses() (tasksUpdated int64, milestonesUpdated int64, err error
 	}
 	tasksUpdated += result.RowsAffected
 
-	// Update milestones: same logic but using "reached" instead of "completed"
-
-	// Milestones that are reached -> "completed"
-	result = db.Model(&types.Milestone{}).
-		Where("reached = ? AND status != ?", true, string(types.StatusCompleted)).
-		Update("status", string(types.StatusCompleted))
-	if result.Error != nil {
-		return tasksUpdated, 0, result.Error
+	// Update milestones: status is derived from child tasks
+	// Load all milestones with their tasks and recompute status
+	var milestones []types.Milestone
+	if err := db.Preload("Tasks").Find(&milestones).Error; err != nil {
+		return tasksUpdated, 0, err
 	}
-	milestonesUpdated += result.RowsAffected
 
-	// Milestones with date in the past (not reached) -> "overdue"
-	result = db.Model(&types.Milestone{}).
-		Where("reached = ? AND date < ? AND status != ?", false, today, string(types.StatusOverdue)).
-		Update("status", string(types.StatusOverdue))
-	if result.Error != nil {
-		return tasksUpdated, milestonesUpdated, result.Error
+	for _, m := range milestones {
+		newStatus := m.ComputeStatus()
+		if m.Status != newStatus {
+			if err := db.Model(&types.Milestone{}).
+				Where("milestone_id = ?", m.MilestoneID).
+				Update("status", newStatus).Error; err != nil {
+				return tasksUpdated, milestonesUpdated, err
+			}
+			milestonesUpdated++
+		}
 	}
-	milestonesUpdated += result.RowsAffected
-
-	// Milestones with date = today (not reached) -> "in_progress"
-	result = db.Model(&types.Milestone{}).
-		Where("reached = ? AND date >= ? AND date < ? AND status != ?", false, today, tomorrow, string(types.StatusInProgress)).
-		Update("status", string(types.StatusInProgress))
-	if result.Error != nil {
-		return tasksUpdated, milestonesUpdated, result.Error
-	}
-	milestonesUpdated += result.RowsAffected
-
-	// Milestones with date in the future (not reached) -> "not_started"
-	result = db.Model(&types.Milestone{}).
-		Where("reached = ? AND date >= ? AND status != ?", false, tomorrow, string(types.StatusNotStarted)).
-		Update("status", string(types.StatusNotStarted))
-	if result.Error != nil {
-		return tasksUpdated, milestonesUpdated, result.Error
-	}
-	milestonesUpdated += result.RowsAffected
-
-	// Milestones with no date (not reached) -> "not_started"
-	result = db.Model(&types.Milestone{}).
-		Where("reached = ? AND date IS NULL AND status != ?", false, string(types.StatusNotStarted)).
-		Update("status", string(types.StatusNotStarted))
-	if result.Error != nil {
-		return tasksUpdated, milestonesUpdated, result.Error
-	}
-	milestonesUpdated += result.RowsAffected
 
 	log.Printf("UpdateAllStatuses: updated %d tasks and %d milestones", tasksUpdated, milestonesUpdated)
 	return tasksUpdated, milestonesUpdated, nil
