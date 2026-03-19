@@ -217,21 +217,21 @@ func computePhaseStatuses(roadmap *types.Roadmap) {
 	}
 }
 
-// recomputeTaskStatuses recomputes status for all tasks based on Completed/Date
+// recomputeTaskStatuses recomputes status for all tasks using the "current task" logic.
+// The first incomplete task in each milestone is marked in_progress (or overdue if past due).
+// Other incomplete tasks are not_started. If roadmap hasn't started, all are not_started.
 func recomputeTaskStatuses(roadmap *types.Roadmap) {
+	roadmapStarted := roadmap.StartDate != nil
+
 	// Recompute for tasks in milestones in phases
 	for i := range roadmap.Phases {
 		for j := range roadmap.Phases[i].Milestones {
-			for k := range roadmap.Phases[i].Milestones[j].Tasks {
-				roadmap.Phases[i].Milestones[j].Tasks[k].Status = roadmap.Phases[i].Milestones[j].Tasks[k].ComputeStatus()
-			}
+			roadmap.Phases[i].Milestones[j].ComputeTaskStatuses(roadmapStarted)
 		}
 	}
 	// Recompute for tasks in top-level milestones
 	for i := range roadmap.Milestones {
-		for j := range roadmap.Milestones[i].Tasks {
-			roadmap.Milestones[i].Tasks[j].Status = roadmap.Milestones[i].Tasks[j].ComputeStatus()
-		}
+		roadmap.Milestones[i].ComputeTaskStatuses(roadmapStarted)
 	}
 }
 

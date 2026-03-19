@@ -311,6 +311,47 @@ func (m *Milestone) BeforeSave(tx *gorm.DB) error {
 	return nil
 }
 
+// ComputeTaskStatuses computes the status for all tasks in this milestone.
+// The "current task" (first incomplete by Day order) is marked in_progress.
+// If roadmapStarted is false, all incomplete tasks are not_started.
+// Tasks are only overdue if they are the current task AND their date is before today.
+func (m *Milestone) ComputeTaskStatuses(roadmapStarted bool) {
+	if len(m.Tasks) == 0 {
+		return
+	}
+
+	// Find the index of the first incomplete task (by Day order)
+	// Tasks should already be sorted by Day, but we find min Day among incomplete
+	currentTaskIdx := -1
+	for i := range m.Tasks {
+		if !m.Tasks[i].Completed {
+			if currentTaskIdx == -1 || m.Tasks[i].Day < m.Tasks[currentTaskIdx].Day {
+				currentTaskIdx = i
+			}
+		}
+	}
+
+	// Set statuses for all tasks
+	for i := range m.Tasks {
+		if m.Tasks[i].Completed {
+			m.Tasks[i].Status = string(StatusCompleted)
+		} else if !roadmapStarted {
+			// Roadmap not started - all incomplete tasks are not_started
+			m.Tasks[i].Status = string(StatusNotStarted)
+		} else if i == currentTaskIdx {
+			// This is the current task
+			if isDateBeforeToday(m.Tasks[i].Date) {
+				m.Tasks[i].Status = string(StatusOverdue)
+			} else {
+				m.Tasks[i].Status = string(StatusInProgress)
+			}
+		} else {
+			// Future task - not started yet
+			m.Tasks[i].Status = string(StatusNotStarted)
+		}
+	}
+}
+
 type Spike struct {
 	SpikeID     string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"spike_id"`
 	MilestoneID string `gorm:"type:uuid" json:"milestone_id"`
@@ -347,26 +388,28 @@ type Task struct {
 	Steps []Step `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps,omitempty"`
 }
 
-// ComputeStatus calculates the status based on Completed and Date fields
+// isDateBeforeToday checks if the given date is before today (ignoring time component).
+// Returns false if date is nil.
+func isDateBeforeToday(date *time.Time) bool {
+	if date == nil {
+		return false
+	}
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	return dateOnly.Before(today)
+}
+
+// ComputeStatus calculates the status based on Completed and Date fields.
+// Note: This is a fallback for individual task saves. When possible, use
+// Milestone.ComputeTaskStatuses() which considers the "current task" logic.
 func (t *Task) ComputeStatus() string {
 	if t.Completed {
 		return string(StatusCompleted)
 	}
-	if t.Date == nil {
-		return string(StatusNotStarted)
-	}
-
-	now := time.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	taskDate := time.Date(t.Date.Year(), t.Date.Month(), t.Date.Day(), 0, 0, 0, 0, t.Date.Location())
-
-	if taskDate.After(today) {
-		return string(StatusNotStarted)
-	}
-	if taskDate.Equal(today) {
-		return string(StatusInProgress)
-	}
-	return string(StatusOverdue)
+	// Without milestone context, default to not_started
+	// The recompute functions will set the correct status with context
+	return string(StatusNotStarted)
 }
 
 // BeforeSave is a GORM hook that updates Status before saving
