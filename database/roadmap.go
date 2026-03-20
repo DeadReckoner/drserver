@@ -210,45 +210,6 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 	return roadmaps
 }
 
-// computePhaseStatuses recomputes status for all phases based on their milestones
-func computePhaseStatuses(roadmap *types.Roadmap) {
-	for i := range roadmap.Phases {
-		roadmap.Phases[i].Status = roadmap.Phases[i].ComputeStatus()
-	}
-}
-
-// recomputeTaskStatuses recomputes status for all tasks using the "current task" logic.
-// The first incomplete task in each milestone is marked in_progress (or overdue if past due).
-// Other incomplete tasks are not_started. If roadmap hasn't started, all are not_started.
-func recomputeTaskStatuses(roadmap *types.Roadmap) {
-	roadmapStarted := roadmap.StartDate != nil
-
-	// Recompute for tasks in milestones in phases
-	for i := range roadmap.Phases {
-		for j := range roadmap.Phases[i].Milestones {
-			roadmap.Phases[i].Milestones[j].ComputeTaskStatuses(roadmapStarted)
-		}
-	}
-	// Recompute for tasks in top-level milestones
-	for i := range roadmap.Milestones {
-		roadmap.Milestones[i].ComputeTaskStatuses(roadmapStarted)
-	}
-}
-
-// recomputeMilestoneStatuses recomputes status for all milestones based on Reached/Date
-func recomputeMilestoneStatuses(roadmap *types.Roadmap) {
-	// Recompute for milestones in phases
-	for i := range roadmap.Phases {
-		for j := range roadmap.Phases[i].Milestones {
-			roadmap.Phases[i].Milestones[j].Status = roadmap.Phases[i].Milestones[j].ComputeStatus()
-		}
-	}
-	// Recompute for top-level milestones
-	for i := range roadmap.Milestones {
-		roadmap.Milestones[i].Status = roadmap.Milestones[i].ComputeStatus()
-	}
-}
-
 // UpdatePhaseStatus updates the status of a phase by ID
 func UpdatePhaseStatus(phaseID string, status string) error {
 	result := db.Model(&types.Phase{}).Where("phase_id = ?", phaseID).Update("status", status)
@@ -289,10 +250,8 @@ func GetRoadmapWithStrategicView(c *gin.Context, roadmapID string) types.Roadmap
 		log.Println("Error fetching roadmap strategic view:", result.Error)
 	}
 
-	// Recompute statuses dynamically based on current date/state
-	recomputeTaskStatuses(&roadmap)
-	recomputeMilestoneStatuses(&roadmap)
-	computePhaseStatuses(&roadmap)
+	// Compute all statuses dynamically based on current date/state
+	roadmap.ComputeAllStatuses()
 
 	return roadmap
 }
@@ -338,10 +297,8 @@ func GetRoadmapFull(c *gin.Context, roadmapID string) types.Roadmap {
 		log.Println("Error fetching full roadmap:", result.Error)
 	}
 
-	// Recompute statuses dynamically based on current date/state
-	recomputeTaskStatuses(&roadmap)
-	recomputeMilestoneStatuses(&roadmap)
-	computePhaseStatuses(&roadmap)
+	// Compute all statuses dynamically based on current date/state
+	roadmap.ComputeAllStatuses()
 
 	return roadmap
 }
@@ -371,9 +328,8 @@ func GetRoadmap(c *gin.Context, roadmapID string) types.Roadmap {
 		log.Println("Error fetching roadmap:", result.Error)
 	}
 
-	// Recompute statuses dynamically based on current date/state
-	recomputeTaskStatuses(&roadmap)
-	recomputeMilestoneStatuses(&roadmap)
+	// Compute all statuses dynamically based on current date/state
+	roadmap.ComputeAllStatuses()
 
 	return roadmap
 }
@@ -601,24 +557,23 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 			}
 		}
 
-		// Recompute status if reached changed (Updates doesn't trigger hooks)
-		// Note: milestone status is derived from tasks, so date changes don't affect it
+		// Recompute status if reached changed
 		if _, hasReached := updateMap["reached"]; hasReached {
-			milestone.Status = milestone.ComputeStatus()
-			db.Model(&milestone).Update("status", milestone.Status)
+			_ = RecomputeAndSaveStatuses(milestone.RoadmapID)
 		}
 	}
 
 	// Check if all tasks are completed to auto-complete milestone
 	if shouldCompleteMilestone(milestone.MilestoneID) {
-		milestone.Reached = true
-		milestone.Status = milestone.ComputeStatus()
-		db.Model(&milestone).Updates(map[string]interface{}{"reached": true, "status": milestone.Status})
+		db.Model(&types.Milestone{}).Where("milestone_id = ?", milestone.MilestoneID).Update("reached", true)
 
 		// Check if this completion should trigger roadmap completion
 		if shouldCompleteRoadmap(milestone.RoadmapID) {
 			db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
 		}
+
+		// Recompute and save all statuses
+		_ = RecomputeAndSaveStatuses(milestone.RoadmapID)
 	}
 
 	// Fetch updated milestone with associations
@@ -715,6 +670,9 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 	for i := range roadmap.Phases {
 		roadmap.Phases[i].PhaseID = uuid.NewString()
 		roadmap.Phases[i].RoadmapID = roadmap.RoadmapID
+		if roadmap.Phases[i].Status == "" {
+			roadmap.Phases[i].Status = string(types.StatusNotStarted)
+		}
 
 		for j := range roadmap.Phases[i].Milestones {
 			milestoneID := uuid.NewString()
@@ -723,6 +681,9 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 			roadmap.Phases[i].Milestones[j].UserID = roadmap.UserID
 			phaseID := roadmap.Phases[i].PhaseID
 			roadmap.Phases[i].Milestones[j].PhaseID = &phaseID
+			if roadmap.Phases[i].Milestones[j].Status == "" {
+				roadmap.Phases[i].Milestones[j].Status = string(types.StatusNotStarted)
+			}
 
 			// Generate UUIDs for Spikes
 			for k := range roadmap.Phases[i].Milestones[j].Spikes {
@@ -742,6 +703,9 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 				roadmap.Phases[i].Milestones[j].Tasks[k].MilestoneID = milestoneID
 				roadmap.Phases[i].Milestones[j].Tasks[k].RoadmapID = roadmap.RoadmapID
 				roadmap.Phases[i].Milestones[j].Tasks[k].UserID = roadmap.UserID
+				if roadmap.Phases[i].Milestones[j].Tasks[k].Status == "" {
+					roadmap.Phases[i].Milestones[j].Tasks[k].Status = string(types.StatusNotStarted)
+				}
 
 				for l := range roadmap.Phases[i].Milestones[j].Tasks[k].Steps {
 					roadmap.Phases[i].Milestones[j].Tasks[k].Steps[l].StepID = uuid.NewString()
@@ -758,6 +722,9 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 		}
 		roadmap.Milestones[i].RoadmapID = roadmap.RoadmapID
 		roadmap.Milestones[i].UserID = roadmap.UserID
+		if roadmap.Milestones[i].Status == "" {
+			roadmap.Milestones[i].Status = string(types.StatusNotStarted)
+		}
 
 		// Generate UUIDs for Spikes
 		for k := range roadmap.Milestones[i].Spikes {
@@ -776,6 +743,9 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 			roadmap.Milestones[i].Tasks[j].MilestoneID = roadmap.Milestones[i].MilestoneID
 			roadmap.Milestones[i].Tasks[j].RoadmapID = roadmap.RoadmapID
 			roadmap.Milestones[i].Tasks[j].UserID = roadmap.UserID
+			if roadmap.Milestones[i].Tasks[j].Status == "" {
+				roadmap.Milestones[i].Tasks[j].Status = string(types.StatusNotStarted)
+			}
 
 			for k := range roadmap.Milestones[i].Tasks[j].Steps {
 				roadmap.Milestones[i].Tasks[j].Steps[k].StepID = uuid.NewString()

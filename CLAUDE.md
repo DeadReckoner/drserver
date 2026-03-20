@@ -77,13 +77,19 @@ Models can define lifecycle hooks that GORM calls automatically:
 Note: Hooks don't run on batch operations like `db.Model(&Task{}).Where(...).Update(...)`. Use individual record operations or update fields manually.
 
 ### Status Computation
-Task and Milestone have a `Status` field computed from `Date` and `Completed`/`Reached`:
-- `completed` → "completed"
-- date in future → "not_started"
-- date is today → "in_progress"
-- date in past → "overdue"
+Status is computed via `Roadmap.ComputeAllStatuses()` which handles tasks, milestones, and phases:
 
-Use `task.ComputeStatus()` or `milestone.ComputeStatus()` to recalculate.
+**Tasks:**
+- Only ONE task across the entire roadmap is "in_progress" - the first incomplete task
+- Completed tasks are "completed"
+- The current task is "overdue" if its date is before today (ignoring time)
+- All other incomplete tasks are "not_started"
+
+**Milestones:** Derived from child tasks - "completed" if all done, "in_progress" if any in_progress, etc.
+**Phases:** Derived from child milestones using the same logic.
+
+Use `database.RecomputeAndSaveStatuses(roadmapID)` to recompute and persist all statuses.
+Use `database.UpdateAllStatuses()` for the daily job to update all roadmaps.
 
 ### Async Job Processing
 Background jobs (roadmap generation) use:

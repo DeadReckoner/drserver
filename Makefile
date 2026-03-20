@@ -2,6 +2,7 @@
 .PHONY: all tidy vet fmt build test clean
 
 all: tidy fmt lint build test clean
+local: tidy fmt lint test run
 ci: tidy fmt build test clean
 
 
@@ -19,6 +20,10 @@ lint:
 
 build:
 	go build .
+
+run:
+	go run .
+
 
 test:
 	go test -cover ./...

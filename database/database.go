@@ -69,14 +69,28 @@ func Database() {
 // Helper functions for checking completion status
 
 // shouldCompleteTask checks if all steps in a task are completed
+// Returns false if task has no steps (empty task should not be auto-completed)
 func shouldCompleteTask(taskID string) bool {
+	var totalSteps int64
+	db.Model(&types.Step{}).Where("task_id = ?", taskID).Count(&totalSteps)
+	if totalSteps == 0 {
+		return false // Don't auto-complete tasks with no steps
+	}
+
 	var incompleteSteps int64
 	db.Model(&types.Step{}).Where("task_id = ? AND completed = ?", taskID, false).Count(&incompleteSteps)
 	return incompleteSteps == 0
 }
 
 // shouldCompleteMilestone checks if all tasks in a milestone are completed
+// Returns false if milestone has no tasks (empty milestone should not be auto-completed)
 func shouldCompleteMilestone(milestoneID string) bool {
+	var totalTasks int64
+	db.Model(&types.Task{}).Where("milestone_id = ?", milestoneID).Count(&totalTasks)
+	if totalTasks == 0 {
+		return false // Don't auto-complete milestones with no tasks
+	}
+
 	var incompleteTasks int64
 	db.Model(&types.Task{}).Where("milestone_id = ? AND completed = ?", milestoneID, false).Count(&incompleteTasks)
 	return incompleteTasks == 0

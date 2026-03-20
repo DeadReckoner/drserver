@@ -4,8 +4,6 @@ import (
 	"errors"
 	"strings"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 /******************************************************************************
@@ -184,6 +182,173 @@ type Roadmap struct {
 	Milestones []Milestone `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"milestones,omitempty"`
 }
 
+// ComputeAllStatuses computes statuses for all tasks, milestones, and phases in this roadmap.
+// This is the single source of truth for status computation.
+//
+// Logic:
+//   - Tasks: Only ONE task across the entire roadmap is "in_progress" - the first incomplete
+//     task in the first incomplete milestone. Completed tasks are "completed". The current
+//     task is "overdue" if its date is before today. All other incomplete tasks are "not_started".
+//   - Milestones: Derived from child tasks. "completed" if all tasks done, "in_progress" if
+//     any task is in_progress, "overdue" if any task is overdue, otherwise "not_started".
+//   - Phases: Derived from child milestones using the same logic.
+func (r *Roadmap) ComputeAllStatuses() {
+	roadmapStarted := r.StartDate != nil
+	foundCurrentTask := false
+
+	// Helper to compute task statuses for a milestone
+	computeMilestoneTaskStatuses := func(m *Milestone) {
+		for i := range m.Tasks {
+			task := &m.Tasks[i]
+			if task.Completed {
+				task.Status = string(StatusCompleted)
+			} else if !roadmapStarted {
+				task.Status = string(StatusNotStarted)
+			} else if !foundCurrentTask {
+				// This is the current task
+				foundCurrentTask = true
+				if isDateBeforeToday(task.Date) {
+					task.Status = string(StatusOverdue)
+				} else {
+					task.Status = string(StatusInProgress)
+				}
+			} else {
+				task.Status = string(StatusNotStarted)
+			}
+		}
+	}
+
+	// Helper to compute milestone status from its tasks
+	computeMilestoneStatus := func(m *Milestone) string {
+		if m.Reached {
+			return string(StatusCompleted)
+		}
+		if len(m.Tasks) == 0 {
+			return string(StatusNotStarted)
+		}
+
+		allCompleted := true
+		anyInProgress := false
+		anyOverdue := false
+
+		for _, t := range m.Tasks {
+			if t.Status != string(StatusCompleted) {
+				allCompleted = false
+			}
+			if t.Status == string(StatusInProgress) {
+				anyInProgress = true
+			}
+			if t.Status == string(StatusOverdue) {
+				anyOverdue = true
+			}
+		}
+
+		if allCompleted {
+			return string(StatusCompleted)
+		}
+		if anyOverdue {
+			return string(StatusOverdue)
+		}
+		if anyInProgress {
+			return string(StatusInProgress)
+		}
+		return string(StatusNotStarted)
+	}
+
+	// Helper to compute phase status from its milestones
+	computePhaseStatus := func(p *Phase) string {
+		if len(p.Milestones) == 0 {
+			return string(StatusNotStarted)
+		}
+
+		allCompleted := true
+		anyInProgress := false
+		anyOverdue := false
+
+		for _, m := range p.Milestones {
+			if m.Status != string(StatusCompleted) {
+				allCompleted = false
+			}
+			if m.Status == string(StatusInProgress) {
+				anyInProgress = true
+			}
+			if m.Status == string(StatusOverdue) {
+				anyOverdue = true
+			}
+		}
+
+		if allCompleted {
+			return string(StatusCompleted)
+		}
+		if anyOverdue {
+			return string(StatusOverdue)
+		}
+		if anyInProgress {
+			return string(StatusInProgress)
+		}
+		return string(StatusNotStarted)
+	}
+
+	// Step 1: Compute task statuses for milestones in phases (in order)
+	for i := range r.Phases {
+		for j := range r.Phases[i].Milestones {
+			computeMilestoneTaskStatuses(&r.Phases[i].Milestones[j])
+		}
+	}
+
+	// Step 2: Compute task statuses for top-level milestones (in order)
+	// Skip milestones that belong to a phase (already processed in Step 1)
+	for i := range r.Milestones {
+		if r.Milestones[i].PhaseID != nil && *r.Milestones[i].PhaseID != "" {
+			continue // Already processed with phases
+		}
+		computeMilestoneTaskStatuses(&r.Milestones[i])
+	}
+
+	// Step 3: Compute milestone statuses (after all tasks are computed)
+	for i := range r.Phases {
+		for j := range r.Phases[i].Milestones {
+			r.Phases[i].Milestones[j].Status = computeMilestoneStatus(&r.Phases[i].Milestones[j])
+		}
+	}
+	for i := range r.Milestones {
+		if r.Milestones[i].PhaseID != nil && *r.Milestones[i].PhaseID != "" {
+			continue // Already processed with phases
+		}
+		r.Milestones[i].Status = computeMilestoneStatus(&r.Milestones[i])
+	}
+
+	// Step 4: Compute phase statuses (after all milestones are computed)
+	for i := range r.Phases {
+		r.Phases[i].Status = computePhaseStatus(&r.Phases[i])
+	}
+
+	// Step 5: Sync top-level milestones with their phase counterparts
+	// Build a map of milestone statuses and task statuses from phases
+	milestoneStatusMap := make(map[string]string)
+	taskStatusMap := make(map[string]string)
+	for i := range r.Phases {
+		for j := range r.Phases[i].Milestones {
+			m := &r.Phases[i].Milestones[j]
+			milestoneStatusMap[m.MilestoneID] = m.Status
+			for k := range m.Tasks {
+				taskStatusMap[m.Tasks[k].TaskID] = m.Tasks[k].Status
+			}
+		}
+	}
+	// Apply to top-level milestones
+	for i := range r.Milestones {
+		if status, ok := milestoneStatusMap[r.Milestones[i].MilestoneID]; ok {
+			r.Milestones[i].Status = status
+		}
+		for j := range r.Milestones[i].Tasks {
+			if status, ok := taskStatusMap[r.Milestones[i].Tasks[j].TaskID]; ok {
+				r.Milestones[i].Tasks[j].Status = status
+			}
+		}
+	}
+}
+
 type Phase struct {
 	PhaseID       string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"phase_id"`
 	RoadmapID     string `gorm:"type:uuid" json:"roadmap_id"`
@@ -191,53 +356,9 @@ type Phase struct {
 	Description   string `json:"description"`
 	OrderIndex    int    `json:"order_index"`
 	DurationWeeks string `json:"duration_weeks"`
-	Status        string `json:"status,omitempty"`
+	Status        string `gorm:"default:not_started" json:"status,omitempty"`
 
 	Milestones []Milestone `gorm:"foreignKey:PhaseID;constraint:OnDelete:SET NULL;" json:"milestones,omitempty"`
-}
-
-// ComputeStatus calculates the phase status based on its milestones
-func (p *Phase) ComputeStatus() string {
-	if len(p.Milestones) == 0 {
-		return string(StatusNotStarted)
-	}
-
-	allCompleted := true
-	anyInProgress := false
-	anyOverdue := false
-
-	for _, m := range p.Milestones {
-		status := m.ComputeStatus()
-		if status != string(StatusCompleted) {
-			allCompleted = false
-		}
-		if status == string(StatusInProgress) {
-			anyInProgress = true
-		}
-		if status == string(StatusOverdue) {
-			anyOverdue = true
-		}
-	}
-
-	if allCompleted {
-		return string(StatusCompleted)
-	}
-	if anyOverdue {
-		return string(StatusOverdue)
-	}
-	if anyInProgress {
-		return string(StatusInProgress)
-	}
-	return string(StatusNotStarted)
-}
-
-// BeforeSave is a GORM hook that sets a default status for Phase
-// Note: Status is computed dynamically via ComputeStatus() when milestones are loaded
-func (p *Phase) BeforeSave(tx *gorm.DB) error {
-	if p.Status == "" {
-		p.Status = string(StatusNotStarted)
-	}
-	return nil
 }
 
 type Milestone struct {
@@ -265,91 +386,17 @@ type Milestone struct {
 	Tasks  []Task  `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"tasks,omitempty"`
 }
 
-// ComputeStatus calculates the milestone status based on its tasks.
-// If Reached is true, returns completed (manual override).
-// Otherwise cascades status from child tasks.
-func (m *Milestone) ComputeStatus() string {
+// IsComplete returns true if all tasks in the milestone are completed
+func (m *Milestone) IsComplete() bool {
 	if m.Reached {
-		return string(StatusCompleted)
+		return true
 	}
-	if len(m.Tasks) == 0 {
-		return string(StatusNotStarted)
-	}
-
-	allCompleted := true
-	anyInProgress := false
-	anyOverdue := false
-
 	for _, t := range m.Tasks {
-		status := t.ComputeStatus()
-		if status != string(StatusCompleted) {
-			allCompleted = false
-		}
-		if status == string(StatusInProgress) {
-			anyInProgress = true
-		}
-		if status == string(StatusOverdue) {
-			anyOverdue = true
+		if !t.Completed {
+			return false
 		}
 	}
-
-	if allCompleted {
-		return string(StatusCompleted)
-	}
-	if anyOverdue {
-		return string(StatusOverdue)
-	}
-	if anyInProgress {
-		return string(StatusInProgress)
-	}
-	return string(StatusNotStarted)
-}
-
-// BeforeSave is a GORM hook that updates Status before saving
-func (m *Milestone) BeforeSave(tx *gorm.DB) error {
-	m.Status = m.ComputeStatus()
-	return nil
-}
-
-// ComputeTaskStatuses computes the status for all tasks in this milestone.
-// The "current task" (first incomplete by Day order) is marked in_progress.
-// If roadmapStarted is false, all incomplete tasks are not_started.
-// Tasks are only overdue if they are the current task AND their date is before today.
-func (m *Milestone) ComputeTaskStatuses(roadmapStarted bool) {
-	if len(m.Tasks) == 0 {
-		return
-	}
-
-	// Find the index of the first incomplete task (by Day order)
-	// Tasks should already be sorted by Day, but we find min Day among incomplete
-	currentTaskIdx := -1
-	for i := range m.Tasks {
-		if !m.Tasks[i].Completed {
-			if currentTaskIdx == -1 || m.Tasks[i].Day < m.Tasks[currentTaskIdx].Day {
-				currentTaskIdx = i
-			}
-		}
-	}
-
-	// Set statuses for all tasks
-	for i := range m.Tasks {
-		if m.Tasks[i].Completed {
-			m.Tasks[i].Status = string(StatusCompleted)
-		} else if !roadmapStarted {
-			// Roadmap not started - all incomplete tasks are not_started
-			m.Tasks[i].Status = string(StatusNotStarted)
-		} else if i == currentTaskIdx {
-			// This is the current task
-			if isDateBeforeToday(m.Tasks[i].Date) {
-				m.Tasks[i].Status = string(StatusOverdue)
-			} else {
-				m.Tasks[i].Status = string(StatusInProgress)
-			}
-		} else {
-			// Future task - not started yet
-			m.Tasks[i].Status = string(StatusNotStarted)
-		}
-	}
+	return len(m.Tasks) > 0 // Empty milestone is not complete
 }
 
 type Spike struct {
@@ -398,24 +445,6 @@ func isDateBeforeToday(date *time.Time) bool {
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	return dateOnly.Before(today)
-}
-
-// ComputeStatus calculates the status based on Completed and Date fields.
-// Note: This is a fallback for individual task saves. When possible, use
-// Milestone.ComputeTaskStatuses() which considers the "current task" logic.
-func (t *Task) ComputeStatus() string {
-	if t.Completed {
-		return string(StatusCompleted)
-	}
-	// Without milestone context, default to not_started
-	// The recompute functions will set the correct status with context
-	return string(StatusNotStarted)
-}
-
-// BeforeSave is a GORM hook that updates Status before saving
-func (t *Task) BeforeSave(tx *gorm.DB) error {
-	t.Status = t.ComputeStatus()
-	return nil
 }
 
 type Step struct {

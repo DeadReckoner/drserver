@@ -11,40 +11,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// recomputeMilestoneTaskStatuses loads a milestone with its tasks and roadmap,
-// recomputes all task statuses using the "current task" logic, and saves them.
-// This should be called after any task completion/un-completion to update the next task's status.
-func recomputeMilestoneTaskStatuses(milestoneID string) error {
-	var milestone types.Milestone
-	if err := db.Where("milestone_id = ?", milestoneID).
-		Preload("Tasks", func(db *gorm.DB) *gorm.DB {
-			return db.Order("day ASC")
-		}).First(&milestone).Error; err != nil {
-		return err
-	}
-
-	// Check if roadmap is started
-	var roadmap types.Roadmap
-	if err := db.Where("roadmap_id = ?", milestone.RoadmapID).First(&roadmap).Error; err != nil {
-		return err
-	}
-	roadmapStarted := roadmap.StartDate != nil
-
-	// Compute new statuses
-	milestone.ComputeTaskStatuses(roadmapStarted)
-
-	// Update each task's status
-	for _, task := range milestone.Tasks {
-		if err := db.Model(&types.Task{}).
-			Where("task_id = ?", task.TaskID).
-			Update("status", task.Status).Error; err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // GetTasks by id with optional date and roadmap filtering
 func GetTasks(c *gin.Context, startDate, endDate, roadmapID string) []types.Task {
 	var tasks []types.Task
@@ -227,7 +193,7 @@ func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Tas
 		// Recompute task statuses for the milestone if completed changed
 		// This handles marking the next task as in_progress
 		if _, hasCompleted := updateMap["completed"]; hasCompleted {
-			if err := recomputeMilestoneTaskStatuses(task.MilestoneID); err != nil {
+			if err := RecomputeAndSaveStatusesByMilestone(task.MilestoneID); err != nil {
 				log.Println("Error recomputing milestone task statuses:", err)
 			}
 		}
@@ -238,23 +204,19 @@ func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Tas
 		task.Completed = true
 		db.Model(&task).Update("completed", true)
 
-		// Recompute task statuses for the milestone (marks next task as in_progress)
-		if err := recomputeMilestoneTaskStatuses(task.MilestoneID); err != nil {
-			log.Println("Error recomputing milestone task statuses:", err)
-		}
-
 		// Check if this completion should trigger milestone completion
 		if shouldCompleteMilestone(task.MilestoneID) {
-			var milestone types.Milestone
-			db.Where("milestone_id = ?", task.MilestoneID).Preload("Tasks").First(&milestone)
-			milestone.Reached = true
-			milestone.Status = milestone.ComputeStatus()
-			db.Model(&milestone).Updates(map[string]interface{}{"reached": true, "status": milestone.Status})
+			db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
 
 			// Check if this completion should trigger roadmap completion
-			if shouldCompleteRoadmap(milestone.RoadmapID) {
-				db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
+			if shouldCompleteRoadmap(task.RoadmapID) {
+				db.Model(&types.Roadmap{}).Where("roadmap_id = ?", task.RoadmapID).Update("completed", true)
 			}
+		}
+
+		// Recompute and save all statuses for the roadmap
+		if err := RecomputeAndSaveStatuses(task.RoadmapID); err != nil {
+			log.Println("Error recomputing statuses:", err)
 		}
 	}
 
@@ -367,23 +329,19 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 			task.Completed = true
 			db.Model(&task).Update("completed", true)
 
-			// Recompute task statuses for the milestone (marks next task as in_progress)
-			if err := recomputeMilestoneTaskStatuses(task.MilestoneID); err != nil {
-				log.Println("Error recomputing milestone task statuses:", err)
-			}
-
 			// Check if this completion should trigger milestone completion
 			if shouldCompleteMilestone(task.MilestoneID) {
-				var milestone types.Milestone
-				db.Where("milestone_id = ?", task.MilestoneID).Preload("Tasks").First(&milestone)
-				milestone.Reached = true
-				milestone.Status = milestone.ComputeStatus()
-				db.Model(&milestone).Updates(map[string]interface{}{"reached": true, "status": milestone.Status})
+				db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
 
 				// Check if this completion should trigger roadmap completion
-				if shouldCompleteRoadmap(milestone.RoadmapID) {
-					db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
+				if shouldCompleteRoadmap(task.RoadmapID) {
+					db.Model(&types.Roadmap{}).Where("roadmap_id = ?", task.RoadmapID).Update("completed", true)
 				}
+			}
+
+			// Recompute and save all statuses for the roadmap
+			if err := RecomputeAndSaveStatuses(task.RoadmapID); err != nil {
+				log.Println("Error recomputing statuses:", err)
 			}
 		}
 	} else {
@@ -392,21 +350,15 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 			task.Completed = false
 			db.Model(&task).Update("completed", false)
 
-			// Recompute task statuses for the milestone
-			if err := recomputeMilestoneTaskStatuses(task.MilestoneID); err != nil {
-				log.Println("Error recomputing milestone task statuses:", err)
-			}
-
 			// Un-complete the milestone if it was reached
-			var milestone types.Milestone
-			db.Where("milestone_id = ?", task.MilestoneID).Preload("Tasks").First(&milestone)
-			if milestone.Reached {
-				milestone.Reached = false
-				milestone.Status = milestone.ComputeStatus()
-				db.Model(&milestone).Updates(map[string]interface{}{"reached": false, "status": milestone.Status})
+			db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", false)
 
-				// Un-complete the roadmap if it was completed
-				db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", false)
+			// Un-complete the roadmap if it was completed
+			db.Model(&types.Roadmap{}).Where("roadmap_id = ?", task.RoadmapID).Update("completed", false)
+
+			// Recompute and save all statuses for the roadmap
+			if err := RecomputeAndSaveStatuses(task.RoadmapID); err != nil {
+				log.Println("Error recomputing statuses:", err)
 			}
 		}
 	}
@@ -471,109 +423,21 @@ func CompleteAllSteps(c *gin.Context, taskID string) (int64, error) {
 	task.Completed = true
 	db.Model(&task).Update("completed", true)
 
-	// Recompute task statuses for the milestone (marks next task as in_progress)
-	if err := recomputeMilestoneTaskStatuses(task.MilestoneID); err != nil {
-		log.Println("Error recomputing milestone task statuses:", err)
-	}
-
 	// Check if this completion should trigger milestone completion
 	if shouldCompleteMilestone(task.MilestoneID) {
-		var milestone types.Milestone
-		db.Where("milestone_id = ?", task.MilestoneID).Preload("Tasks").First(&milestone)
-		milestone.Reached = true
-		milestone.Status = milestone.ComputeStatus()
-		db.Model(&milestone).Updates(map[string]interface{}{"reached": true, "status": milestone.Status})
+		db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
 
 		// Check if this completion should trigger roadmap completion
-		if shouldCompleteRoadmap(milestone.RoadmapID) {
-			db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
+		if shouldCompleteRoadmap(task.RoadmapID) {
+			db.Model(&types.Roadmap{}).Where("roadmap_id = ?", task.RoadmapID).Update("completed", true)
 		}
+	}
+
+	// Recompute and save all statuses for the roadmap
+	if err := RecomputeAndSaveStatuses(task.RoadmapID); err != nil {
+		log.Println("Error recomputing statuses:", err)
 	}
 
 	log.Printf("Completed all steps for task %s: %d steps marked complete", taskID, stepsCompleted)
 	return stepsCompleted, nil
-}
-
-// UpdateAllStatuses updates the status field for all tasks and milestones.
-// Task status uses the "current task" logic - only the first incomplete task
-// in each milestone is in_progress (or overdue if past due).
-// Milestone status is computed from child task statuses.
-// This is intended to be called by a daily job to catch status changes as dates pass.
-// Returns the number of tasks and milestones updated.
-func UpdateAllStatuses() (tasksUpdated int64, milestonesUpdated int64, err error) {
-	// Load all roadmaps with their milestones and tasks
-	var roadmaps []types.Roadmap
-	if err := db.Preload("Phases.Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Find(&roadmaps).Error; err != nil {
-		return 0, 0, err
-	}
-
-	// Process each roadmap
-	for _, roadmap := range roadmaps {
-		roadmapStarted := roadmap.StartDate != nil
-
-		// Process milestones in phases
-		for i := range roadmap.Phases {
-			for j := range roadmap.Phases[i].Milestones {
-				milestone := &roadmap.Phases[i].Milestones[j]
-				milestone.ComputeTaskStatuses(roadmapStarted)
-
-				// Update each task if status changed
-				for _, task := range milestone.Tasks {
-					result := db.Model(&types.Task{}).
-						Where("task_id = ? AND status != ?", task.TaskID, task.Status).
-						Update("status", task.Status)
-					if result.Error != nil {
-						return tasksUpdated, milestonesUpdated, result.Error
-					}
-					tasksUpdated += result.RowsAffected
-				}
-
-				// Update milestone status
-				newStatus := milestone.ComputeStatus()
-				if milestone.Status != newStatus {
-					if err := db.Model(&types.Milestone{}).
-						Where("milestone_id = ?", milestone.MilestoneID).
-						Update("status", newStatus).Error; err != nil {
-						return tasksUpdated, milestonesUpdated, err
-					}
-					milestonesUpdated++
-				}
-			}
-		}
-
-		// Process top-level milestones
-		for i := range roadmap.Milestones {
-			milestone := &roadmap.Milestones[i]
-			milestone.ComputeTaskStatuses(roadmapStarted)
-
-			// Update each task if status changed
-			for _, task := range milestone.Tasks {
-				result := db.Model(&types.Task{}).
-					Where("task_id = ? AND status != ?", task.TaskID, task.Status).
-					Update("status", task.Status)
-				if result.Error != nil {
-					return tasksUpdated, milestonesUpdated, result.Error
-				}
-				tasksUpdated += result.RowsAffected
-			}
-
-			// Update milestone status
-			newStatus := milestone.ComputeStatus()
-			if milestone.Status != newStatus {
-				if err := db.Model(&types.Milestone{}).
-					Where("milestone_id = ?", milestone.MilestoneID).
-					Update("status", newStatus).Error; err != nil {
-					return tasksUpdated, milestonesUpdated, err
-				}
-				milestonesUpdated++
-			}
-		}
-	}
-
-	log.Printf("UpdateAllStatuses: updated %d tasks and %d milestones", tasksUpdated, milestonesUpdated)
-	return tasksUpdated, milestonesUpdated, nil
 }

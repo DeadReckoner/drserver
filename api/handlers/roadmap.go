@@ -226,22 +226,17 @@ func StartRoadmap(c *gin.Context) {
 		}
 	}
 
-	// Set first phase to "in_progress"
-	if len(roadmap.Phases) > 0 {
-		database.UpdatePhaseStatus(roadmap.Phases[0].PhaseID, string(types.StatusInProgress))
-
-		// Set first milestone within first phase to "in_progress"
-		if len(roadmap.Phases[0].Milestones) > 0 {
-			database.UpdateMilestoneStatus(roadmap.Phases[0].Milestones[0].MilestoneID, string(types.StatusInProgress))
-		}
-	}
-
-	// Set first top-level milestone to "in_progress" (if no phases)
-	if len(roadmap.Phases) == 0 && len(roadmap.Milestones) > 0 {
-		database.UpdateMilestoneStatus(roadmap.Milestones[0].MilestoneID, string(types.StatusInProgress))
-	}
-
+	// Save the roadmap with start date first (so RecomputeAndSaveStatuses sees it)
 	updatedRoadmap := database.UpdateRoadmap(c, roadmapID, roadmap)
+
+	// Recompute and save all statuses for the roadmap now that it's started
+	// This computes task, milestone, and phase statuses in one unified operation
+	if err := database.RecomputeAndSaveStatuses(roadmapID); err != nil {
+		log.Error(ctx, "Error recomputing statuses", err.Error())
+	}
+
+	// Refresh the roadmap to get the computed statuses
+	updatedRoadmap = database.GetRoadmapFull(c, roadmapID)
 
 	utils.DataResponse(c, http.StatusOK, updatedRoadmap)
 	log.Info(ctx, "Roadmap started successfully")
