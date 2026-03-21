@@ -364,6 +364,7 @@ paths:
 
     delete:
       summary: Delete user by ID
+      description: Deletes the user and their profile image from storage
       tags: [Users]
       parameters:
         - name: id
@@ -380,6 +381,124 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/with-image:
+    post:
+      summary: Create user with profile image
+      description: Creates a new user with an optional profile image. Uses multipart/form-data.
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - user
+              properties:
+                user:
+                  type: string
+                  description: JSON string of user data
+                  example: '{"first_name": "John", "last_name": "Doe", "email": "john@example.com"}'
+                image:
+                  type: string
+                  format: binary
+                  description: Profile image file
+      responses:
+        '200':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/{id}/with-image:
+    patch:
+      summary: Update user with profile image
+      description: Updates a user with an optional profile image. Uses multipart/form-data.
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: User ID
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - user
+              properties:
+                user:
+                  type: string
+                  description: JSON string of user data
+                  example: '{"first_name": "John", "last_name": "Doe"}'
+                image:
+                  type: string
+                  format: binary
+                  description: Profile image file
+      responses:
+        '200':
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/users/{id}/image:
+    delete:
+      summary: Delete user's profile image
+      description: Removes the user's profile image from storage and clears the URL from their profile
+      tags: [Users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: User ID
+      responses:
+        '200':
+          description: Profile image deleted successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -529,6 +648,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/roadmaps/{roadmapid}/start:
+    put:
+      summary: Start a roadmap
+      description: Marks a roadmap as started and initializes task statuses
+      tags: [Roadmaps]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      responses:
+        '200':
+          description: Roadmap started successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Roadmap'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/roadmaps/{roadmapid}/nudge:
+    post:
+      summary: Nudge roadmap owner
+      description: Sends a nudge notification from the anchor to the roadmap owner
+      tags: [Roadmaps, Nudges]
+      parameters:
+        - name: roadmapid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Roadmap ID
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Optional message to include with the nudge
+      responses:
+        '200':
+          description: Nudge sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '403':
+          description: Only the anchor can nudge the roadmap owner
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -967,6 +1152,36 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/tasks/{taskid}/steps/complete-all:
+    post:
+      summary: Complete all steps in a task
+      description: Marks all steps in the specified task as completed
+      tags: [Tasks, Steps]
+      parameters:
+        - name: taskid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Task ID
+      responses:
+        '200':
+          description: All steps completed successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Task'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   # Habits Management
   /api/v1/habits:
     post:
@@ -1344,6 +1559,101 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/habits/{habitid}/anchor-request:
+    post:
+      summary: Send anchor request for habit
+      description: Request a friend to be an accountability partner for this habit
+      tags: [Habits, Anchors]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - anchor_id
+              properties:
+                anchor_id:
+                  type: string
+                  format: uuid
+                  description: User ID of the friend to request as anchor
+      responses:
+        '201':
+          description: Anchor request created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/habits/{habitid}/anchor:
+    delete:
+      summary: Remove anchor from habit
+      description: Removes the accountability partner from this habit
+      tags: [Habits, Anchors]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+      responses:
+        '200':
+          description: Anchor removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/habits/{habitid}/nudge:
+    post:
+      summary: Nudge habit owner
+      description: Sends a nudge notification from the anchor to the habit owner
+      tags: [Habits, Nudges]
+      parameters:
+        - name: habitid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Habit ID
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Optional message to include with the nudge
+      responses:
+        '200':
+          description: Nudge sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '403':
+          description: Only the anchor can nudge the habit owner
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # Anchor Management (Accountability Partners)
   /api/v1/roadmaps/{roadmapid}/anchor-request:
     post:
@@ -1500,68 +1810,6 @@ paths:
         '404':
           description: Anchor request not found
 
-  # Macro Map Management
-  /api/v1/roadmaps/{roadmapid}/macro-map:
-    post:
-      summary: Create macro map for roadmap
-      tags: [Macro Map]
-      parameters:
-        - name: roadmapid
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Roadmap ID
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MacroMapInput'
-      responses:
-        '201':
-          description: Macro map created successfully
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/MacroMap'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-    get:
-      summary: Get macro map for roadmap
-      tags: [Macro Map]
-      parameters:
-        - name: roadmapid
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Roadmap ID
-      responses:
-        '200':
-          description: Macro map retrieved successfully
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/ApiResponse'
-                  - type: object
-                    properties:
-                      data:
-                        $ref: '#/components/schemas/MacroMap'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
   # AI Agent
   /api/v1/agent/generate:
     post:
@@ -1596,6 +1844,36 @@ paths:
                             $ref: '#/components/schemas/Roadmap'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/agent/generateMilestone/{milestoneid}:
+    post:
+      summary: Generate tasks for a milestone using AI
+      tags: [AI Agent]
+      description: Uses AI to generate tasks and steps for an existing milestone
+      parameters:
+        - name: milestoneid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Milestone ID
+      responses:
+        '200':
+          description: Tasks generated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Milestone'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -1907,6 +2185,21 @@ paths:
                         items:
                           $ref: '#/components/schemas/Notification'
 
+  /api/v1/notifications/clear:
+    post:
+      summary: Clear all notifications
+      description: Marks all notifications as cleared for the current user
+      tags: [Notifications]
+      responses:
+        '200':
+          description: Notifications cleared successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/notifications/{alertid}/read:
     put:
       summary: Mark notification as read
@@ -1931,6 +2224,78 @@ paths:
                   message:
                     type: string
                     example: "Notification marked as read"
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/notifications/{alertid}:
+    delete:
+      summary: Dismiss notification
+      description: Dismisses a specific notification
+      tags: [Notifications]
+      parameters:
+        - name: alertid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Notification ID
+      responses:
+        '200':
+          description: Notification dismissed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # Badge Management
+  /api/v1/badge:
+    get:
+      summary: Get badge count
+      description: Returns the current badge count for the user (unread notifications, messages, etc.)
+      tags: [Badge]
+      responses:
+        '200':
+          description: Badge count retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          count:
+                            type: integer
+                            example: 5
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/badge/refresh:
+    post:
+      summary: Refresh badge count
+      description: Recalculates and returns the current badge count
+      tags: [Badge]
+      responses:
+        '200':
+          description: Badge count refreshed successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          count:
+                            type: integer
+                            example: 5
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -1982,6 +2347,137 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/threads/unread:
+    get:
+      summary: Get total unread message count
+      description: Returns the total count of unread messages across all threads
+      tags: [Messaging]
+      responses:
+        '200':
+          description: Unread count retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          count:
+                            type: integer
+                            example: 3
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/threads/message/{messageid}:
+    get:
+      summary: Get message by ID
+      description: Retrieves a specific message by its ID
+      tags: [Messaging]
+      parameters:
+        - name: messageid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Message ID
+      responses:
+        '200':
+          description: Message retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Message'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # Nudges
+  /api/v1/nudges:
+    get:
+      summary: Get nudges received
+      description: Returns all nudges received by the current user
+      tags: [Nudges]
+      responses:
+        '200':
+          description: Nudges retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Nudge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/nudges/sent:
+    get:
+      summary: Get nudges sent
+      description: Returns all nudges sent by the current user
+      tags: [Nudges]
+      responses:
+        '200':
+          description: Nudges retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Nudge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # Feedback
+  /api/v1/feedback:
+    post:
+      summary: Submit feedback
+      description: Submit user feedback about the application
+      tags: [Feedback]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+                  description: Feedback message
+                type:
+                  type: string
+                  enum: [bug, feature, general]
+                  description: Type of feedback
+      responses:
+        '201':
+          description: Feedback submitted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   # WebSocket
   /api/v1/ws/messages/{threadid}:
@@ -2180,6 +2676,10 @@ components:
         phone_number:
           type: string
           example: "+1-555-123-4567"
+        profile_image_url:
+          type: string
+          format: uri
+          example: "https://example.supabase.co/storage/v1/object/public/avatars/user-id/profile"
         CreatedAt:
           type: string
           format: date-time
@@ -3086,6 +3586,39 @@ components:
         created_at:
           type: string
           format: date-time
+
+    Nudge:
+      type: object
+      properties:
+        nudge_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        sender_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        receiver_id:
+          type: string
+          format: uuid
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        target_type:
+          type: string
+          enum: [roadmap, habit]
+          description: Type of target being nudged about
+          example: "roadmap"
+        target_id:
+          type: string
+          format: uuid
+          description: ID of the roadmap or habit
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        created_at:
+          type: string
+          format: date-time
+        sender:
+          $ref: '#/components/schemas/User'
+        receiver:
+          $ref: '#/components/schemas/User'
 
     # Messaging
     Thread:
