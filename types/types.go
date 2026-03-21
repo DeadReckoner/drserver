@@ -559,15 +559,9 @@ type Habit struct {
 
 	// Scheduling
 	RecurrenceType RecurrenceType `gorm:"type:varchar(20);not null;default:'none'" json:"recurrence_type"`
-<<<<<<< HEAD
-	DaysOfWeek     int            `gorm:"default:0" json:"days_of_week,omitempty"` // Bitmask for weekly recurrence
-	DayOfMonth     *int           `json:"day_of_month,omitempty"`                  // 1-31 for monthly recurrence
-	DueDate        *time.Time     `json:"due_date,omitempty"`                      // For one-time todos
-=======
 	DaysOfWeek     int            `gorm:"default:0" json:"days_of_week,omitempty"`
 	DayOfMonth     *int           `json:"day_of_month,omitempty"`
 	DueDate        *time.Time     `json:"due_date,omitempty"`
->>>>>>> main
 
 	// Active period
 	StartDate time.Time  `gorm:"not null" json:"start_date"`
@@ -592,7 +586,6 @@ func (Habit) TableName() string {
 func (h *Habit) IsDueOn(date time.Time) bool {
 	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	startDateOnly := time.Date(h.StartDate.Year(), h.StartDate.Month(), h.StartDate.Day(), 0, 0, 0, 0, time.UTC)
-
 
 	if dateOnly.Before(startDateOnly) {
 		return false
@@ -699,11 +692,7 @@ type UpdateHabitRequest struct {
 }
 
 type CompleteHabitRequest struct {
-<<<<<<< HEAD
-	Date  *time.Time `json:"date"` // Defaults to today if not provided
-=======
 	Date  *time.Time `json:"date"`
->>>>>>> main
 	Notes string     `json:"notes"`
 }
 
