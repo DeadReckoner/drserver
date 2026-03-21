@@ -119,6 +119,18 @@ func CreateRoadmap(c *gin.Context, rm types.Roadmap) (types.Roadmap, error) {
 
 	// Set user IDs for all nested entities
 	rm.UserID = userIDStr
+
+	// Set user IDs for milestones and tasks within phases
+	for i := range rm.Phases {
+		for j := range rm.Phases[i].Milestones {
+			rm.Phases[i].Milestones[j].UserID = userIDStr
+			for k := range rm.Phases[i].Milestones[j].Tasks {
+				rm.Phases[i].Milestones[j].Tasks[k].UserID = userIDStr
+			}
+		}
+	}
+
+	// Set user IDs for top-level milestones (backward compatibility)
 	for i := range rm.Milestones {
 		rm.Milestones[i].UserID = userIDStr
 		for j := range rm.Milestones[i].Tasks {
@@ -175,13 +187,22 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 	}
 
 	// Query the roadmap table for all roadmaps with this user_id
-	result := db.Where("user_id = ?", user_id).Preload("Milestones", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
-		return db.Order("number ASC")
-	}).Find(&roadmaps)
+	result := db.Where("user_id = ?", user_id).
+		Preload("Phases", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).Find(&roadmaps)
 	if result.Error != nil {
 		log.Println("Error fetching roadmaps:", result.Error)
 	}
@@ -189,7 +210,20 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 	return roadmaps
 }
 
-// GetRoadmapWithStrategicView loads only the strategic overview (phases with milestones, no tasks)
+// UpdatePhaseStatus updates the status of a phase by ID
+func UpdatePhaseStatus(phaseID string, status string) error {
+	result := db.Model(&types.Phase{}).Where("phase_id = ?", phaseID).Update("status", status)
+	return result.Error
+}
+
+// UpdateMilestoneStatus updates the status of a milestone by ID
+func UpdateMilestoneStatus(milestoneID string, status string) error {
+	result := db.Model(&types.Milestone{}).Where("milestone_id = ?", milestoneID).Update("status", status)
+	return result.Error
+}
+
+// GetRoadmapWithStrategicView loads the strategic overview (phases with milestones).
+// Tasks are loaded (but not steps) since milestone status is computed from tasks.
 func GetRoadmapWithStrategicView(c *gin.Context, roadmapID string) types.Roadmap {
 	var roadmap types.Roadmap
 	user_id, exists := c.Get("user_id")
@@ -207,11 +241,17 @@ func GetRoadmapWithStrategicView(c *gin.Context, roadmapID string) types.Roadmap
 		}).
 		Preload("Phases.Milestones.Spikes").
 		Preload("Phases.Milestones.Risks").
+		Preload("Phases.Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
 		First(&roadmap)
 
 	if result.Error != nil {
 		log.Println("Error fetching roadmap strategic view:", result.Error)
 	}
+
+	// Compute all statuses dynamically based on current date/state
+	roadmap.ComputeAllStatuses()
 
 	return roadmap
 }
@@ -257,6 +297,9 @@ func GetRoadmapFull(c *gin.Context, roadmapID string) types.Roadmap {
 		log.Println("Error fetching full roadmap:", result.Error)
 	}
 
+	// Compute all statuses dynamically based on current date/state
+	roadmap.ComputeAllStatuses()
+
 	return roadmap
 }
 
@@ -285,6 +328,9 @@ func GetRoadmap(c *gin.Context, roadmapID string) types.Roadmap {
 		log.Println("Error fetching roadmap:", result.Error)
 	}
 
+	// Compute all statuses dynamically based on current date/state
+	roadmap.ComputeAllStatuses()
+
 	return roadmap
 }
 
@@ -297,7 +343,10 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 	}
 
 	// Fetch the existing roadmap
-	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).Preload("Milestones.Tasks.Steps").First(&roadmap)
+	result := db.Where("user_id = ?", user_id).Where("roadmap_id = ?", roadmapID).
+		Preload("Phases.Milestones.Tasks.Steps").
+		Preload("Milestones.Tasks.Steps").
+		First(&roadmap)
 	if result.Error != nil {
 		log.Println("Error fetching roadmap:", result.Error)
 		return roadmap
@@ -318,7 +367,9 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 	if rm.Completed != roadmap.Completed {
 		updateMap["completed"] = rm.Completed
 	}
-	if rm.StartDate != roadmap.StartDate {
+	// Compare pointer values, not addresses (nil check + time comparison)
+	if (rm.StartDate != nil && roadmap.StartDate == nil) ||
+		(rm.StartDate != nil && roadmap.StartDate != nil && !rm.StartDate.Equal(*roadmap.StartDate)) {
 		updateMap["start_date"] = rm.StartDate
 	}
 	if rm.CurrentSkillLevel != "" {
@@ -346,7 +397,7 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 			case "completed":
 				roadmap.Completed = value.(bool)
 			case "start_date":
-				roadmap.StartDate = value.(time.Time)
+				roadmap.StartDate = value.(*time.Time)
 			case "current_skill_level":
 				roadmap.CurrentSkillLevel = value.(string)
 			}
@@ -360,13 +411,31 @@ func UpdateRoadmap(c *gin.Context, roadmapID string, rm types.Roadmap) types.Roa
 	}
 
 	// Fetch updated roadmap with associations
-	db.Where("roadmap_id = ?", roadmapID).Preload("Milestones", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
-		return db.Order("day ASC")
-	}).Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
-		return db.Order("number ASC")
-	}).First(&roadmap)
+	db.Where("roadmap_id = ?", roadmapID).
+		Preload("Phases", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.Milestones.Spikes").
+		Preload("Phases.Milestones.Risks").
+		Preload("Phases.Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Phases.Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
+		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
+		First(&roadmap)
 
 	return roadmap
 }
@@ -460,7 +529,9 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 	if updatedMilestone.Reached != milestone.Reached {
 		updateMap["reached"] = updatedMilestone.Reached
 	}
-	if updatedMilestone.Date != milestone.Date {
+	// Compare pointer values, not addresses (nil check + time comparison)
+	if (updatedMilestone.Date != nil && milestone.Date == nil) ||
+		(updatedMilestone.Date != nil && milestone.Date != nil && !updatedMilestone.Date.Equal(*milestone.Date)) {
 		updateMap["date"] = updatedMilestone.Date
 	}
 
@@ -481,19 +552,28 @@ func UpdateMilestone(c *gin.Context, milestoneID string, updatedMilestone types.
 				milestone.Day = value.(int)
 			case "reached":
 				milestone.Reached = value.(bool)
+			case "date":
+				milestone.Date = value.(*time.Time)
 			}
+		}
+
+		// Recompute status if reached changed
+		if _, hasReached := updateMap["reached"]; hasReached {
+			_ = RecomputeAndSaveStatuses(milestone.RoadmapID)
 		}
 	}
 
 	// Check if all tasks are completed to auto-complete milestone
 	if shouldCompleteMilestone(milestone.MilestoneID) {
-		db.Model(&milestone).Update("reached", true)
-		milestone.Reached = true
+		db.Model(&types.Milestone{}).Where("milestone_id = ?", milestone.MilestoneID).Update("reached", true)
 
 		// Check if this completion should trigger roadmap completion
 		if shouldCompleteRoadmap(milestone.RoadmapID) {
 			db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
 		}
+
+		// Recompute and save all statuses
+		_ = RecomputeAndSaveStatuses(milestone.RoadmapID)
 	}
 
 	// Fetch updated milestone with associations
@@ -590,6 +670,9 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 	for i := range roadmap.Phases {
 		roadmap.Phases[i].PhaseID = uuid.NewString()
 		roadmap.Phases[i].RoadmapID = roadmap.RoadmapID
+		if roadmap.Phases[i].Status == "" {
+			roadmap.Phases[i].Status = string(types.StatusNotStarted)
+		}
 
 		for j := range roadmap.Phases[i].Milestones {
 			milestoneID := uuid.NewString()
@@ -598,6 +681,9 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 			roadmap.Phases[i].Milestones[j].UserID = roadmap.UserID
 			phaseID := roadmap.Phases[i].PhaseID
 			roadmap.Phases[i].Milestones[j].PhaseID = &phaseID
+			if roadmap.Phases[i].Milestones[j].Status == "" {
+				roadmap.Phases[i].Milestones[j].Status = string(types.StatusNotStarted)
+			}
 
 			// Generate UUIDs for Spikes
 			for k := range roadmap.Phases[i].Milestones[j].Spikes {
@@ -617,6 +703,9 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 				roadmap.Phases[i].Milestones[j].Tasks[k].MilestoneID = milestoneID
 				roadmap.Phases[i].Milestones[j].Tasks[k].RoadmapID = roadmap.RoadmapID
 				roadmap.Phases[i].Milestones[j].Tasks[k].UserID = roadmap.UserID
+				if roadmap.Phases[i].Milestones[j].Tasks[k].Status == "" {
+					roadmap.Phases[i].Milestones[j].Tasks[k].Status = string(types.StatusNotStarted)
+				}
 
 				for l := range roadmap.Phases[i].Milestones[j].Tasks[k].Steps {
 					roadmap.Phases[i].Milestones[j].Tasks[k].Steps[l].StepID = uuid.NewString()
@@ -633,6 +722,9 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 		}
 		roadmap.Milestones[i].RoadmapID = roadmap.RoadmapID
 		roadmap.Milestones[i].UserID = roadmap.UserID
+		if roadmap.Milestones[i].Status == "" {
+			roadmap.Milestones[i].Status = string(types.StatusNotStarted)
+		}
 
 		// Generate UUIDs for Spikes
 		for k := range roadmap.Milestones[i].Spikes {
@@ -651,6 +743,9 @@ func UpdateRoadmapWithGeneration(ctx context.Context, roadmap *types.Roadmap) er
 			roadmap.Milestones[i].Tasks[j].MilestoneID = roadmap.Milestones[i].MilestoneID
 			roadmap.Milestones[i].Tasks[j].RoadmapID = roadmap.RoadmapID
 			roadmap.Milestones[i].Tasks[j].UserID = roadmap.UserID
+			if roadmap.Milestones[i].Tasks[j].Status == "" {
+				roadmap.Milestones[i].Tasks[j].Status = string(types.StatusNotStarted)
+			}
 
 			for k := range roadmap.Milestones[i].Tasks[j].Steps {
 				roadmap.Milestones[i].Tasks[j].Steps[k].StepID = uuid.NewString()

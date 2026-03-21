@@ -1,17 +1,89 @@
 package types
 
 import (
+	"errors"
+	"strings"
 	"time"
 )
 
+/******************************************************************************
+ * SHARED ENUMS & CONSTANTS
+ ******************************************************************************/
+
+type Status string
+
+const (
+	StatusNotStarted Status = "not_started"
+	StatusInProgress Status = "in_progress"
+	StatusCompleted  Status = "completed"
+	StatusOverdue    Status = "overdue"
+)
+
+func (s Status) Validate() bool {
+	switch s {
+	case StatusNotStarted, StatusInProgress, StatusCompleted, StatusOverdue:
+		return true
+	}
+	return false
+}
+
+type RoadmapType string
+
+const (
+	RoadmapTypeAIGenerated RoadmapType = "ai_generated"
+	RoadmapTypeCustomMade  RoadmapType = "custom_made"
+)
+
+type GenerationStatus string
+
+const (
+	GenerationStatusPending    GenerationStatus = "pending"
+	GenerationStatusProcessing GenerationStatus = "processing"
+	GenerationStatusCompleted  GenerationStatus = "completed"
+	GenerationStatusFailed     GenerationStatus = "failed"
+)
+
+/******************************************************************************
+ * USER
+ ******************************************************************************/
+
 type User struct {
 	UserID      string `gorm:"type:uuid;primaryKey;column:user_id" json:"user_id"`
-	FirstName   string `gorm:"column:first_name" json:"first_name"`
-	LastName    string `gorm:"column:last_name" json:"last_name"`
+	FirstName   string `gorm:"column:first_name" json:"first_name,omitempty"`
+	LastName    string `gorm:"column:last_name" json:"last_name,omitempty"`
 	Email       string `gorm:"column:email" json:"email"`
 	PhoneNumber string `gorm:"column:phone_number" json:"phone_number"`
 	CreatedAt   time.Time
+
+	// FullName is used for Apple/Google sign-in which returns full_name instead of first_name/last_name.
+	// This field is not stored in the database - it's parsed into FirstName/LastName on user creation.
+	FullName string `gorm:"-" json:"full_name,omitempty"`
 }
+
+// ParseFullName splits FullName into FirstName and LastName if they are not already set.
+func (u *User) ParseFullName() {
+	if u.FullName == "" || (u.FirstName != "" && u.LastName != "") {
+		return
+	}
+
+	fullName := strings.TrimSpace(u.FullName)
+	if fullName == "" {
+		return
+	}
+
+	parts := strings.SplitN(fullName, " ", 2)
+
+	if len(parts) >= 1 {
+		u.FirstName = strings.TrimSpace(parts[0])
+	}
+	if len(parts) >= 2 {
+		u.LastName = strings.TrimSpace(parts[1])
+	}
+}
+
+/******************************************************************************
+ * FRIENDSHIPS & SOCIAL
+ ******************************************************************************/
 
 type Friendship struct {
 	ID           string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:id" json:"id"`
@@ -22,7 +94,6 @@ type Friendship struct {
 	CreatedAt    time.Time      `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt    *time.Time     `gorm:"column:updated_at" json:"updated_at,omitempty"`
 
-	// Relationships for preloading
 	Requester *User `gorm:"foreignKey:RequesterID;references:UserID" json:"requester,omitempty"`
 	Addressee *User `gorm:"foreignKey:AddresseeID;references:UserID" json:"addressee,omitempty"`
 }
@@ -56,7 +127,10 @@ type FriendProfileResponse struct {
 	ThreadID        string    `json:"thread_id"`
 }
 
-// Target type constants for polymorphic anchor requests
+/******************************************************************************
+ * ANCHOR REQUESTS
+ ******************************************************************************/
+
 const (
 	TargetTypeRoadmap = "roadmap"
 	TargetTypeHabit   = "habit"
@@ -73,7 +147,6 @@ type AnchorRequest struct {
 	CreatedAt   time.Time  `gorm:"column:created_at;default:now()" json:"created_at"`
 	UpdatedAt   *time.Time `gorm:"column:updated_at" json:"updated_at,omitempty"`
 
-	// Relationships for preloading
 	Roadmap   *Roadmap `gorm:"foreignKey:RoadmapID;references:RoadmapID" json:"roadmap,omitempty"`
 	Habit     *Habit   `gorm:"foreignKey:HabitID;references:HabitID" json:"habit,omitempty"`
 	Requester *User    `gorm:"foreignKey:RequesterID;references:UserID" json:"requester,omitempty"`
@@ -83,6 +156,308 @@ type AnchorRequest struct {
 func (AnchorRequest) TableName() string {
 	return "anchor_requests"
 }
+
+/******************************************************************************
+ * ROADMAP HIERARCHY: Roadmap -> Phase -> Milestone -> Task -> Step
+ ******************************************************************************/
+
+type Roadmap struct {
+	RoadmapID         string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"roadmap_id"`
+	UserID            string     `gorm:"type:uuid" json:"user_id"`
+	Goal              string     `json:"goal"`
+	Description       string     `json:"description"`
+	Days              int        `json:"days"`
+	Completed         bool       `json:"completed"`
+	StartDate         *time.Time `json:"start_date,omitempty"`
+	Type              string     `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
+	AnchorID          *string    `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
+	CurrentSkillLevel string     `gorm:"column:current_skill_level" json:"current_skill_level,omitempty"`
+
+	// Async generation tracking
+	JobID            *string `gorm:"type:uuid;column:job_id" json:"job_id,omitempty"`
+	GenerationStatus string  `gorm:"type:generation_status;column:generation_status;default:'pending'" json:"generation_status"`
+
+	// Relationships
+	Phases     []Phase     `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"phases,omitempty"`
+	Milestones []Milestone `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"milestones,omitempty"`
+}
+
+// ComputeAllStatuses computes statuses for all tasks, milestones, and phases in this roadmap.
+// This is the single source of truth for status computation.
+//
+// Logic:
+//   - Tasks: Only ONE task across the entire roadmap is "in_progress" - the first incomplete
+//     task in the first incomplete milestone. Completed tasks are "completed". The current
+//     task is "overdue" if its date is before today. All other incomplete tasks are "not_started".
+//   - Milestones: Derived from child tasks. "completed" if all tasks done, "in_progress" if
+//     any task is in_progress, "overdue" if any task is overdue, otherwise "not_started".
+//   - Phases: Derived from child milestones using the same logic.
+func (r *Roadmap) ComputeAllStatuses() {
+	roadmapStarted := r.StartDate != nil
+	foundCurrentTask := false
+
+	// Helper to compute task statuses for a milestone
+	computeMilestoneTaskStatuses := func(m *Milestone) {
+		for i := range m.Tasks {
+			task := &m.Tasks[i]
+			if task.Completed {
+				task.Status = string(StatusCompleted)
+			} else if !roadmapStarted {
+				task.Status = string(StatusNotStarted)
+			} else if !foundCurrentTask {
+				// This is the current task
+				foundCurrentTask = true
+				if isDateBeforeToday(task.Date) {
+					task.Status = string(StatusOverdue)
+				} else {
+					task.Status = string(StatusInProgress)
+				}
+			} else {
+				task.Status = string(StatusNotStarted)
+			}
+		}
+	}
+
+	// Helper to compute milestone status from its tasks
+	computeMilestoneStatus := func(m *Milestone) string {
+		if m.Reached {
+			return string(StatusCompleted)
+		}
+		if len(m.Tasks) == 0 {
+			return string(StatusNotStarted)
+		}
+
+		allCompleted := true
+		anyInProgress := false
+		anyOverdue := false
+
+		for _, t := range m.Tasks {
+			if t.Status != string(StatusCompleted) {
+				allCompleted = false
+			}
+			if t.Status == string(StatusInProgress) {
+				anyInProgress = true
+			}
+			if t.Status == string(StatusOverdue) {
+				anyOverdue = true
+			}
+		}
+
+		if allCompleted {
+			return string(StatusCompleted)
+		}
+		if anyOverdue {
+			return string(StatusOverdue)
+		}
+		if anyInProgress {
+			return string(StatusInProgress)
+		}
+		return string(StatusNotStarted)
+	}
+
+	// Helper to compute phase status from its milestones
+	computePhaseStatus := func(p *Phase) string {
+		if len(p.Milestones) == 0 {
+			return string(StatusNotStarted)
+		}
+
+		allCompleted := true
+		anyInProgress := false
+		anyOverdue := false
+
+		for _, m := range p.Milestones {
+			if m.Status != string(StatusCompleted) {
+				allCompleted = false
+			}
+			if m.Status == string(StatusInProgress) {
+				anyInProgress = true
+			}
+			if m.Status == string(StatusOverdue) {
+				anyOverdue = true
+			}
+		}
+
+		if allCompleted {
+			return string(StatusCompleted)
+		}
+		if anyOverdue {
+			return string(StatusOverdue)
+		}
+		if anyInProgress {
+			return string(StatusInProgress)
+		}
+		return string(StatusNotStarted)
+	}
+
+	// Step 1: Compute task statuses for milestones in phases (in order)
+	for i := range r.Phases {
+		for j := range r.Phases[i].Milestones {
+			computeMilestoneTaskStatuses(&r.Phases[i].Milestones[j])
+		}
+	}
+
+	// Step 2: Compute task statuses for top-level milestones (in order)
+	// Skip milestones that belong to a phase (already processed in Step 1)
+	for i := range r.Milestones {
+		if r.Milestones[i].PhaseID != nil && *r.Milestones[i].PhaseID != "" {
+			continue // Already processed with phases
+		}
+		computeMilestoneTaskStatuses(&r.Milestones[i])
+	}
+
+	// Step 3: Compute milestone statuses (after all tasks are computed)
+	for i := range r.Phases {
+		for j := range r.Phases[i].Milestones {
+			r.Phases[i].Milestones[j].Status = computeMilestoneStatus(&r.Phases[i].Milestones[j])
+		}
+	}
+	for i := range r.Milestones {
+		if r.Milestones[i].PhaseID != nil && *r.Milestones[i].PhaseID != "" {
+			continue // Already processed with phases
+		}
+		r.Milestones[i].Status = computeMilestoneStatus(&r.Milestones[i])
+	}
+
+	// Step 4: Compute phase statuses (after all milestones are computed)
+	for i := range r.Phases {
+		r.Phases[i].Status = computePhaseStatus(&r.Phases[i])
+	}
+
+	// Step 5: Sync top-level milestones with their phase counterparts
+	// Build a map of milestone statuses and task statuses from phases
+	milestoneStatusMap := make(map[string]string)
+	taskStatusMap := make(map[string]string)
+	for i := range r.Phases {
+		for j := range r.Phases[i].Milestones {
+			m := &r.Phases[i].Milestones[j]
+			milestoneStatusMap[m.MilestoneID] = m.Status
+			for k := range m.Tasks {
+				taskStatusMap[m.Tasks[k].TaskID] = m.Tasks[k].Status
+			}
+		}
+	}
+	// Apply to top-level milestones
+	for i := range r.Milestones {
+		if status, ok := milestoneStatusMap[r.Milestones[i].MilestoneID]; ok {
+			r.Milestones[i].Status = status
+		}
+		for j := range r.Milestones[i].Tasks {
+			if status, ok := taskStatusMap[r.Milestones[i].Tasks[j].TaskID]; ok {
+				r.Milestones[i].Tasks[j].Status = status
+			}
+		}
+	}
+}
+
+type Phase struct {
+	PhaseID       string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"phase_id"`
+	RoadmapID     string `gorm:"type:uuid" json:"roadmap_id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	OrderIndex    int    `json:"order_index"`
+	DurationWeeks string `json:"duration_weeks"`
+	Status        string `gorm:"default:not_started" json:"status,omitempty"`
+
+	Milestones []Milestone `gorm:"foreignKey:PhaseID;constraint:OnDelete:SET NULL;" json:"milestones,omitempty"`
+}
+
+type Milestone struct {
+	MilestoneID string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"milestone_id"`
+	RoadmapID   string     `gorm:"type:uuid" json:"roadmap_id"`
+	UserID      string     `gorm:"type:uuid" json:"user_id"`
+	SubGoal     string     `json:"sub_goal"`
+	Description string     `json:"description"`
+	Day         int        `json:"day"`
+	Reached     bool       `json:"reached"`
+	Date        *time.Time `json:"date"`
+	Status      string     `json:"status,omitempty"`
+
+	// Strategic fields
+	PhaseID           *string `gorm:"type:uuid" json:"phase_id,omitempty"`
+	AcceptanceTest    string  `json:"acceptance_test,omitempty"`
+	DurationDaysMin   int     `json:"duration_days_min,omitempty"`
+	DurationDaysMax   int     `json:"duration_days_max,omitempty"`
+	OrderIndex        int     `json:"order_index"`
+	ResourcesForecast *string `gorm:"type:text" json:"resources_forecast,omitempty"`
+
+	// Relationships
+	Spikes []Spike `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"spikes,omitempty"`
+	Risks  []Risk  `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"risks,omitempty"`
+	Tasks  []Task  `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"tasks,omitempty"`
+}
+
+// IsComplete returns true if all tasks in the milestone are completed
+func (m *Milestone) IsComplete() bool {
+	if m.Reached {
+		return true
+	}
+	for _, t := range m.Tasks {
+		if !t.Completed {
+			return false
+		}
+	}
+	return len(m.Tasks) > 0 // Empty milestone is not complete
+}
+
+type Spike struct {
+	SpikeID     string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"spike_id"`
+	MilestoneID string `gorm:"type:uuid" json:"milestone_id"`
+	Description string `json:"description"`
+	TimeboxDays int    `json:"timebox_days"`
+}
+
+type Risk struct {
+	RiskID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"risk_id"`
+	MilestoneID string `gorm:"type:uuid" json:"milestone_id"`
+	Description string `json:"description"`
+	Severity    string `json:"severity"`
+}
+
+type Task struct {
+	TaskID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"task_id"`
+	RoadmapID   string `gorm:"type:uuid" json:"roadmap_id"`
+	MilestoneID string `gorm:"type:uuid" json:"milestone_id"`
+	UserID      string `gorm:"type:uuid" json:"user_id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
+
+	// Planning fields
+	Rationale    string  `json:"rationale,omitempty"`
+	EstMinutes   int     `json:"est_minutes,omitempty"`
+	Dependencies *string `gorm:"type:text" json:"dependencies,omitempty"`
+	Confidence   string  `json:"confidence,omitempty"`
+
+	Day       int        `json:"day"`
+	Completed bool       `json:"completed"`
+	Date      *time.Time `json:"date"`
+
+	Steps []Step `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps,omitempty"`
+}
+
+// isDateBeforeToday checks if the given date is before today (ignoring time component).
+// Returns false if date is nil.
+func isDateBeforeToday(date *time.Time) bool {
+	if date == nil {
+		return false
+	}
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	return dateOnly.Before(today)
+}
+
+type Step struct {
+	StepID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"step_id"`
+	TaskID      string `gorm:"type:uuid" json:"task_id"`
+	Description string `json:"description"`
+	Completed   bool   `json:"completed"`
+	Number      int    `json:"number"`
+}
+
+/******************************************************************************
+ * AI AGENT
+ ******************************************************************************/
 
 type Prompt struct {
 	UserPrompt string `json:"user_prompt"`
@@ -103,7 +478,7 @@ type GoalRequest struct {
 type OpenAIContent struct {
 	Type        string `json:"type"`
 	Annotations []any  `json:"annotations"`
-	Text        string `json:"text"` // this is a JSON string
+	Text        string `json:"text"`
 }
 
 type OpenAIMessage struct {
@@ -118,109 +493,10 @@ type OpenAIResponse struct {
 	Output []OpenAIMessage `json:"output"`
 }
 
-type Roadmap struct {
-	RoadmapID         string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"roadmap_id"`
-	UserID            string    `gorm:"type:uuid" json:"user_id"`
-	Goal              string    `json:"goal"`
-	Description       string    `json:"description"`
-	Days              int       `json:"days"`
-	Completed         bool      `json:"completed"`
-	StartDate         time.Time `json:"start_date,omitempty"`
-	Type              string    `gorm:"type:roadmap_type;default:'custom_made'" json:"type"` // "ai_generated" or "custom_made"
-	AnchorID          *string   `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
-	CurrentSkillLevel string    `gorm:"column:current_skill_level" json:"current_skill_level,omitempty"`
+/******************************************************************************
+ * HABITS
+ ******************************************************************************/
 
-	// Async generation tracking
-	JobID            *string `gorm:"type:uuid;column:job_id" json:"job_id,omitempty"`
-	GenerationStatus string  `gorm:"type:generation_status;column:generation_status;default:'pending'" json:"generation_status"`
-
-	// Strategic structure: Phases contain Milestones with strategic metadata
-	Phases []Phase `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"phases,omitempty"`
-
-	// Milestones represent the detailed tactical plan
-	Milestones []Milestone `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"milestones,omitempty"`
-}
-
-// Phase represents a high-level stage in the roadmap
-type Phase struct {
-	PhaseID       string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"phase_id"`
-	RoadmapID     string `gorm:"type:uuid" json:"roadmap_id"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	OrderIndex    int    `json:"order_index"`
-	DurationWeeks string `json:"duration_weeks"`
-
-	// Milestones within this phase (strategic overview with optional tactical detail)
-	Milestones []Milestone `gorm:"foreignKey:PhaseID;constraint:OnDelete:SET NULL;" json:"milestones,omitempty"`
-}
-
-// Spike represents a time-boxed investigation or experiment
-type Spike struct {
-	SpikeID     string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"spike_id"`
-	MilestoneID string `gorm:"type:uuid" json:"milestone_id"`
-	Description string `json:"description"`
-	TimeboxDays int    `json:"timebox_days"`
-}
-
-// Risk represents a potential issue or blocker
-type Risk struct {
-	RiskID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"risk_id"`
-	MilestoneID string `gorm:"type:uuid" json:"milestone_id"`
-	Description string `json:"description"`
-	Severity    string `json:"severity"`
-}
-
-type Milestone struct {
-	MilestoneID string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"milestone_id"`
-	RoadmapID   string    `gorm:"type:uuid" json:"roadmap_id"`
-	UserID      string    `gorm:"type:uuid" json:"user_id"`
-	SubGoal     string    `json:"sub_goal"`
-	Description string    `json:"description"`
-	Day         int       `json:"day"`
-	Reached     bool      `json:"reached"`
-	Date        time.Time `json:"date,omitempty"`
-
-	// Strategic fields (from MacroMilestone merge)
-	PhaseID           *string `gorm:"type:uuid" json:"phase_id,omitempty"`
-	AcceptanceTest    string  `json:"acceptance_test,omitempty"`
-	DurationDaysMin   int     `json:"duration_days_min,omitempty"`
-	DurationDaysMax   int     `json:"duration_days_max,omitempty"`
-	OrderIndex        int     `json:"order_index"`
-	ResourcesForecast *string `gorm:"type:text" json:"resources_forecast,omitempty"`
-
-	// Related spikes and risks (strategic metadata)
-	Spikes []Spike `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"spikes,omitempty"`
-	Risks  []Risk  `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"risks,omitempty"`
-
-	// Tactical detail: Tasks and Steps
-	Tasks []Task `gorm:"foreignKey:MilestoneID;constraint:OnDelete:CASCADE;" json:"tasks,omitempty"`
-}
-
-type Task struct {
-	TaskID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"task_id"`
-	RoadmapID   string `gorm:"type:uuid" json:"roadmap_id"`
-	MilestoneID string `gorm:"type:uuid" json:"milestone_id"`
-	UserID      string `gorm:"type:uuid" json:"user_id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-
-	// New fields from Milestone Map spec
-	Rationale    string  `json:"rationale,omitempty"`
-	EstMinutes   int     `json:"est_minutes,omitempty"`
-	Dependencies *string `gorm:"type:text" json:"dependencies,omitempty"`
-	Confidence   string  `json:"confidence,omitempty"`
-
-	Day       int       `json:"day"`
-	Completed bool      `json:"completed"`
-	Date      time.Time `json:"date"`
-	Steps     []Step    `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps,omitempty"`
-}
-
-// =============================================================================
-// HABIT SYSTEM TYPES
-// =============================================================================
-
-// RecurrenceType defines how a habit recurs
 type RecurrenceType string
 
 const (
@@ -230,7 +506,6 @@ const (
 	RecurrenceMonthly RecurrenceType = "monthly" // Specific day of month
 )
 
-// Validate checks if the recurrence type is valid
 func (r RecurrenceType) Validate() bool {
 	switch r {
 	case RecurrenceNone, RecurrenceDaily, RecurrenceWeekly, RecurrenceMonthly:
@@ -239,7 +514,6 @@ func (r RecurrenceType) Validate() bool {
 	return false
 }
 
-// DayOfWeek represents a bitmask for days of the week
 type DayOfWeek int
 
 const (
@@ -252,24 +526,20 @@ const (
 	Saturday  DayOfWeek = 1 << 6 // 64
 )
 
-// Common day presets for convenience
 const (
 	Weekdays DayOfWeek = Monday | Tuesday | Wednesday | Thursday | Friday                     // 62
 	Weekends DayOfWeek = Saturday | Sunday                                                    // 65
 	EveryDay DayOfWeek = Sunday | Monday | Tuesday | Wednesday | Thursday | Friday | Saturday // 127
 )
 
-// DayOfWeekFromTime converts time.Weekday to our DayOfWeek bitmask value
 func DayOfWeekFromTime(w time.Weekday) DayOfWeek {
 	return 1 << DayOfWeek(w)
 }
 
-// Contains checks if a specific day is set in the bitmask
 func (d DayOfWeek) Contains(day time.Weekday) bool {
 	return d&DayOfWeekFromTime(day) != 0
 }
 
-// Days returns a slice of time.Weekday values that are set in the bitmask
 func (d DayOfWeek) Days() []time.Weekday {
 	var days []time.Weekday
 	for i := time.Sunday; i <= time.Saturday; i++ {
@@ -280,53 +550,53 @@ func (d DayOfWeek) Days() []time.Weekday {
 	return days
 }
 
-// Habit represents a recurring or one-time todo/habit
 type Habit struct {
-	// Identity
 	HabitID string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"habit_id"`
 	UserID  string `gorm:"type:uuid;index;not null" json:"user_id"`
 
-	// Content
 	Title       string `gorm:"not null" json:"title"`
 	Description string `json:"description,omitempty"`
 
-	// Scheduling - determines when this habit is due
+	// Scheduling
 	RecurrenceType RecurrenceType `gorm:"type:varchar(20);not null;default:'none'" json:"recurrence_type"`
+<<<<<<< HEAD
 	DaysOfWeek     int            `gorm:"default:0" json:"days_of_week,omitempty"` // Bitmask for weekly recurrence
 	DayOfMonth     *int           `json:"day_of_month,omitempty"`                  // 1-31 for monthly recurrence
 	DueDate        *time.Time     `json:"due_date,omitempty"`                      // For one-time todos
+=======
+	DaysOfWeek     int            `gorm:"default:0" json:"days_of_week,omitempty"`
+	DayOfMonth     *int           `json:"day_of_month,omitempty"`
+	DueDate        *time.Time     `json:"due_date,omitempty"`
+>>>>>>> main
 
-	// Active period - when this habit is active
+	// Active period
 	StartDate time.Time  `gorm:"not null" json:"start_date"`
 	EndDate   *time.Time `json:"end_date,omitempty"`
 
-	// Status
 	Archived bool `gorm:"default:false" json:"archived"`
 
-	// Anchor - accountability partner for this habit
+	// Anchor
 	AnchorID *string `gorm:"type:uuid;column:anchor_id" json:"anchor_id,omitempty"`
 	Anchor   *User   `gorm:"foreignKey:AnchorID;references:UserID" json:"anchor,omitempty"`
 
-	// Metadata
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 
-	// Relationships (optional - for eager loading)
 	Completions []HabitCompletion `gorm:"foreignKey:HabitID" json:"completions,omitempty"`
 }
 
-// TableName specifies the table name for GORM
 func (Habit) TableName() string {
 	return "habits"
 }
 
-// IsDueOn checks if the habit is scheduled for a given date
 func (h *Habit) IsDueOn(date time.Time) bool {
-	// Normalize input date and habit dates to start of day in UTC for comparison
 	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	startDateOnly := time.Date(h.StartDate.Year(), h.StartDate.Month(), h.StartDate.Day(), 0, 0, 0, 0, time.UTC)
 
+<<<<<<< HEAD
 	// Check if date is within active period
+=======
+>>>>>>> main
 	if dateOnly.Before(startDateOnly) {
 		return false
 	}
@@ -339,12 +609,9 @@ func (h *Habit) IsDueOn(date time.Time) bool {
 
 	switch h.RecurrenceType {
 	case RecurrenceNone:
-		// One-time todos should appear from start_date until due_date
-		// This allows users to see upcoming tasks before they're due
 		if h.DueDate == nil {
 			return false
 		}
-		// Normalize due date to start of day for comparison
 		dueDay := time.Date(h.DueDate.Year(), h.DueDate.Month(), h.DueDate.Day(), 0, 0, 0, 0, time.UTC)
 		return !dateOnly.After(dueDay)
 	case RecurrenceDaily:
@@ -357,7 +624,6 @@ func (h *Habit) IsDueOn(date time.Time) bool {
 	return false
 }
 
-// IsActive checks if the habit is currently active (not archived, within date range)
 func (h *Habit) IsActive(date time.Time) bool {
 	if h.Archived {
 		return false
@@ -371,36 +637,24 @@ func (h *Habit) IsActive(date time.Time) bool {
 	return true
 }
 
-// sameDay checks if two times represent the same calendar day
-func sameDay(a, b time.Time) bool {
-	y1, m1, d1 := a.Date()
-	y2, m2, d2 := b.Date()
-	return y1 == y2 && m1 == m2 && d1 == d2
-}
-
-// HabitCompletion tracks when a habit was completed
 type HabitCompletion struct {
 	CompletionID string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"completion_id"`
 	HabitID      string `gorm:"type:uuid;index;not null" json:"habit_id"`
-	UserID       string `gorm:"type:uuid;index;not null" json:"user_id"` // Denormalized for easier queries
+	UserID       string `gorm:"type:uuid;index;not null" json:"user_id"`
 
-	CompletedAt time.Time `gorm:"not null" json:"completed_at"`   // When they marked it complete
-	Date        time.Time `gorm:"type:date;not null" json:"date"` // The date this completion is "for"
-	Notes       string    `json:"notes,omitempty"`                // Optional notes
+	CompletedAt time.Time `gorm:"not null" json:"completed_at"`
+	Date        time.Time `gorm:"type:date;not null" json:"date"`
+	Notes       string    `json:"notes,omitempty"`
 
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 }
 
-// TableName specifies the table name for GORM
 func (HabitCompletion) TableName() string {
 	return "habit_completions"
 }
 
-// =============================================================================
-// HABIT REQUEST/RESPONSE TYPES
-// =============================================================================
+// Habit request/response types
 
-// CreateHabitRequest is the payload for creating a new habit
 type CreateHabitRequest struct {
 	Title          string         `json:"title" binding:"required"`
 	Description    string         `json:"description"`
@@ -408,11 +662,10 @@ type CreateHabitRequest struct {
 	DaysOfWeek     int            `json:"days_of_week"`
 	DayOfMonth     *int           `json:"day_of_month"`
 	DueDate        *time.Time     `json:"due_date"`
-	StartDate      *time.Time     `json:"start_date"` // Defaults to today if not provided
+	StartDate      *time.Time     `json:"start_date"`
 	EndDate        *time.Time     `json:"end_date"`
 }
 
-// Validate checks if the CreateHabitRequest is valid
 func (r *CreateHabitRequest) Validate() error {
 	if !r.RecurrenceType.Validate() {
 		return ErrInvalidRecurrenceType
@@ -436,7 +689,6 @@ func (r *CreateHabitRequest) Validate() error {
 	return nil
 }
 
-// UpdateHabitRequest is the payload for updating a habit (all fields optional)
 type UpdateHabitRequest struct {
 	Title          *string         `json:"title,omitempty"`
 	Description    *string         `json:"description,omitempty"`
@@ -449,20 +701,21 @@ type UpdateHabitRequest struct {
 	Archived       *bool           `json:"archived,omitempty"`
 }
 
-// CompleteHabitRequest is the payload for marking a habit complete
 type CompleteHabitRequest struct {
+<<<<<<< HEAD
 	Date  *time.Time `json:"date"` // Defaults to today if not provided
+=======
+	Date  *time.Time `json:"date"`
+>>>>>>> main
 	Notes string     `json:"notes"`
 }
 
-// HabitWithStatus represents a habit with its completion status for a specific date
 type HabitWithStatus struct {
 	Habit
 	IsCompleted bool       `json:"is_completed"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
-// HabitStatsResponse contains statistics for a habit
 type HabitStatsResponse struct {
 	CurrentStreak     int     `json:"current_streak"`
 	CompletionRate7d  float64 `json:"completion_rate_7d"`
@@ -470,11 +723,8 @@ type HabitStatsResponse struct {
 	TotalCompletions  int     `json:"total_completions"`
 }
 
-// =============================================================================
-// HABIT ERRORS
-// =============================================================================
+// Habit errors
 
-// HabitError represents a habit-specific error
 type HabitError struct {
 	Message string
 }
@@ -492,13 +742,9 @@ var (
 	ErrAlreadyCompleted      = HabitError{"habit already completed for this date"}
 )
 
-type Step struct {
-	StepID      string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"step_id"`
-	TaskID      string `gorm:"type:uuid" json:"task_id"`
-	Description string `json:"description"`
-	Completed   bool   `json:"completed"`
-	Number      int    `json:"number"`
-}
+/******************************************************************************
+ * MESSAGING
+ ******************************************************************************/
 
 type Thread struct {
 	ThreadID        string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid()" json:"thread_id"`
@@ -529,8 +775,6 @@ type ThreadParticipants struct {
 	Role      string     `json:"role"`
 }
 
-// Response types for messaging API
-
 type ThreadWithParticipants struct {
 	ThreadID        string    `json:"thread_id"`
 	Name            string    `json:"name"`
@@ -552,6 +796,10 @@ type MessageResponse struct {
 	User      *User     `json:"user,omitempty"`
 }
 
+/******************************************************************************
+ * BACKGROUND JOBS
+ ******************************************************************************/
+
 type BackgroundJob struct {
 	JobID       string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:job_id" json:"job_id"`
 	UserID      string     `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
@@ -563,68 +811,22 @@ type BackgroundJob struct {
 	Error       string     `gorm:"column:error" json:"error,omitempty"`
 	StartedAt   *time.Time `gorm:"column:started_at" json:"started_at,omitempty"`
 	CompletedAt *time.Time `gorm:"column:completed_at" json:"completed_at,omitempty"`
-	//why not pointer?
-	CreatedAt time.Time `gorm:"column:created_at;default:now()" json:"created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at;default:now()" json:"updated_at"`
+	CreatedAt   time.Time  `gorm:"column:created_at;default:now()" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"column:updated_at;default:now()" json:"updated_at"`
 }
 
-// What is the purpose of this ?
 func (BackgroundJob) TableName() string {
 	return "background_jobs"
 }
 
-// PushToken represents an Expo push notification token
-type PushToken struct {
-	TokenID    string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:token_id" json:"token_id"`
-	UserID     string    `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
-	ExpoToken  string    `gorm:"column:expo_token;not null;unique" json:"expo_token"`
-	Platform   string    `gorm:"column:platform" json:"platform"` // 'ios' or 'android'
-	DeviceID   string    `gorm:"column:device_id" json:"device_id,omitempty"`
-	IsActive   bool      `gorm:"column:is_active;default:true" json:"is_active"`
-	LastUsedAt time.Time `gorm:"column:last_used_at;default:now()" json:"last_used_at"`
-	CreatedAt  time.Time `gorm:"column:created_at;default:now()" json:"created_at"`
-}
-
-func (PushToken) TableName() string {
-	return "push_tokens"
-}
-
-// Notification represents a push notification record
-type Notification struct {
-	NotificationID string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:notification_id" json:"notification_id"`
-	UserID         string         `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
-	Type           string         `gorm:"column:type;not null" json:"type"`
-	Title          string         `gorm:"column:title;not null" json:"title"`
-	Body           string         `gorm:"column:body;not null" json:"body"`
-	Data           map[string]any `gorm:"type:jsonb;column:data;serializer:json" json:"data,omitempty"`
-	Status         string         `gorm:"column:status;default:pending" json:"status"` // 'pending', 'sent', 'failed', 'read'
-	SentAt         *time.Time     `gorm:"column:sent_at" json:"sent_at,omitempty"`
-	ReadAt         *time.Time     `gorm:"column:read_at" json:"read_at,omitempty"`
-	Error          string         `gorm:"column:error" json:"error,omitempty"`
-	ClearedAt      *time.Time     `gorm:"column:cleared_at" json:"cleared_at,omitempty"`
-	CreatedAt      time.Time      `gorm:"column:created_at;default:now()" json:"created_at"`
-}
-
-func (Notification) TableName() string {
-	return "notifications"
-}
-
-// ProgressUpdate represents a WebSocket message for generation progress
 type ProgressUpdate struct {
 	Type     string `json:"type"` // 'progress', 'status', 'complete', 'error'
 	JobID    string `json:"job_id"`
-	Progress int    `json:"progress"`       // 0-100
-	Status   string `json:"status"`         // 'pending', 'processing', 'completed', 'failed'
-	Message  string `json:"message"`        // Human-readable status
-	Data     any    `json:"data,omitempty"` // Additional context (roadmap_id, etc.)
+	Progress int    `json:"progress"`
+	Status   string `json:"status"`
+	Message  string `json:"message"`
+	Data     any    `json:"data,omitempty"`
 }
-
-type RoadmapType string
-
-const (
-	RoadmapTypeAIGenerated RoadmapType = "ai_generated"
-	RoadmapTypeCustomMade  RoadmapType = "custom_made"
-)
 
 type JobStatus string
 
@@ -642,6 +844,44 @@ const (
 	JobTypeMilestone JobType = "milestone_generation"
 )
 
+/******************************************************************************
+ * NOTIFICATIONS
+ ******************************************************************************/
+
+type PushToken struct {
+	TokenID    string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:token_id" json:"token_id"`
+	UserID     string    `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
+	ExpoToken  string    `gorm:"column:expo_token;not null;unique" json:"expo_token"`
+	Platform   string    `gorm:"column:platform" json:"platform"`
+	DeviceID   string    `gorm:"column:device_id" json:"device_id,omitempty"`
+	IsActive   bool      `gorm:"column:is_active;default:true" json:"is_active"`
+	LastUsedAt time.Time `gorm:"column:last_used_at;default:now()" json:"last_used_at"`
+	CreatedAt  time.Time `gorm:"column:created_at;default:now()" json:"created_at"`
+}
+
+func (PushToken) TableName() string {
+	return "push_tokens"
+}
+
+type Notification struct {
+	NotificationID string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:notification_id" json:"notification_id"`
+	UserID         string         `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
+	Type           string         `gorm:"column:type;not null" json:"type"`
+	Title          string         `gorm:"column:title;not null" json:"title"`
+	Body           string         `gorm:"column:body;not null" json:"body"`
+	Data           map[string]any `gorm:"type:jsonb;column:data;serializer:json" json:"data,omitempty"`
+	Status         string         `gorm:"column:status;default:pending" json:"status"`
+	SentAt         *time.Time     `gorm:"column:sent_at" json:"sent_at,omitempty"`
+	ReadAt         *time.Time     `gorm:"column:read_at" json:"read_at,omitempty"`
+	Error          string         `gorm:"column:error" json:"error,omitempty"`
+	ClearedAt      *time.Time     `gorm:"column:cleared_at" json:"cleared_at,omitempty"`
+	CreatedAt      time.Time      `gorm:"column:created_at;default:now()" json:"created_at"`
+}
+
+func (Notification) TableName() string {
+	return "notifications"
+}
+
 type PlatformType string
 
 const (
@@ -658,7 +898,10 @@ const (
 	NotificationStatusRead    NotificationStatus = "read"
 )
 
-// Feedback represents user-submitted feedback
+/******************************************************************************
+ * FEEDBACK
+ ******************************************************************************/
+
 type Feedback struct {
 	FeedbackID string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:feedback_id" json:"feedback_id"`
 	UserID     string    `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
@@ -682,11 +925,43 @@ type CreateFeedbackRequest struct {
 	Device     string `json:"device"`
 }
 
-type GenerationStatus string
+/******************************************************************************
+ * NUDGES
+ ******************************************************************************/
+
+type Nudge struct {
+	NudgeID    string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:nudge_id" json:"nudge_id"`
+	SenderID   string    `gorm:"type:uuid;column:sender_id;not null" json:"sender_id"`
+	ReceiverID string    `gorm:"type:uuid;column:receiver_id;not null" json:"receiver_id"`
+	TargetType string    `gorm:"column:target_type;not null" json:"target_type"`
+	TargetID   string    `gorm:"type:uuid;column:target_id;not null" json:"target_id"`
+	CreatedAt  time.Time `gorm:"column:created_at;default:now()" json:"created_at"`
+
+	Sender   *User `gorm:"foreignKey:SenderID;references:UserID" json:"sender,omitempty"`
+	Receiver *User `gorm:"foreignKey:ReceiverID;references:UserID" json:"receiver,omitempty"`
+}
+
+func (Nudge) TableName() string {
+	return "nudges"
+}
+
+type NudgeResponse struct {
+	NudgeID     string    `json:"nudge_id"`
+	Sender      *User     `json:"sender,omitempty"`
+	Receiver    *User     `json:"receiver,omitempty"`
+	TargetType  string    `json:"target_type"`
+	TargetID    string    `json:"target_id"`
+	TargetTitle string    `json:"target_title"`
+	CreatedAt   time.Time `json:"created_at"`
+}
 
 const (
-	GenerationStatusPending    GenerationStatus = "pending"
-	GenerationStatusProcessing GenerationStatus = "processing"
-	GenerationStatusCompleted  GenerationStatus = "completed"
-	GenerationStatusFailed     GenerationStatus = "failed"
+	NudgeTargetTypeRoadmap = "roadmap"
+	NudgeTargetTypeHabit   = "habit"
+	NudgeRateLimitPerDay   = 2
+)
+
+var (
+	ErrNudgeRateLimitExceeded = errors.New("rate limit exceeded: max 2 nudges per day per target")
+	ErrNotAnchor              = errors.New("you are not the anchor for this target")
 )

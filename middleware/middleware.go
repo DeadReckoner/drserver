@@ -90,7 +90,7 @@ func AuthMiddleware() gin.HandlerFunc {
 // -H "Authorization: Bearer USER_TOKEN"
 
 func parseToken(accessToken string) string {
-	godotenv.Load(".env")
+	_ = godotenv.Load(".env")
 
 	supabaseKey := os.Getenv("anon_key")
 	supabaseApi := os.Getenv("API_URL")
@@ -110,7 +110,7 @@ func parseToken(accessToken string) string {
 		fmt.Println("Error sending request:", err)
 		return ""
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -186,7 +186,8 @@ func GetFriendProfile(c *gin.Context, friendUserID string) (types.User, []types.
 	return friendUser, roadmaps, nil
 }
 
-// RemoveFriend deletes a friendship between the current user and the specified friend
+// RemoveFriend deletes a friendship between the current user and the specified friend.
+// This also deletes the message thread between the two users.
 func RemoveFriend(c *gin.Context, friendUserID string) error {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
@@ -212,6 +213,13 @@ func RemoveFriend(c *gin.Context, friendUserID string) error {
 	// Delete the friendship
 	if err := db.Delete(&friendship).Error; err != nil {
 		return err
+	}
+
+	// Delete the message thread between the two users
+	if err := DeleteThreadBetweenUsers(c, userIDStr, friendUserID); err != nil {
+		// Log the error but don't fail the friendship removal
+		// The friendship is already deleted, thread cleanup is secondary
+		log.Printf("Warning: failed to delete thread between %s and %s: %v", userIDStr, friendUserID, err)
 	}
 
 	return nil

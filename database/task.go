@@ -185,25 +185,38 @@ func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Tas
 				task.Day = value.(int)
 			case "completed":
 				task.Completed = value.(bool)
+			case "date":
+				task.Date = value.(*time.Time)
+			}
+		}
+
+		// Recompute task statuses for the milestone if completed changed
+		// This handles marking the next task as in_progress
+		if _, hasCompleted := updateMap["completed"]; hasCompleted {
+			if err := RecomputeAndSaveStatusesByMilestone(task.MilestoneID); err != nil {
+				log.Println("Error recomputing milestone task statuses:", err)
 			}
 		}
 	}
 
 	// Check if all steps are completed to auto-complete task
 	if shouldCompleteTask(task.TaskID) {
-		db.Model(&task).Update("completed", true)
 		task.Completed = true
+		db.Model(&task).Update("completed", true)
 
 		// Check if this completion should trigger milestone completion
 		if shouldCompleteMilestone(task.MilestoneID) {
 			db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
 
 			// Check if this completion should trigger roadmap completion
-			var milestone types.Milestone
-			db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
-			if shouldCompleteRoadmap(milestone.RoadmapID) {
-				db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
+			if shouldCompleteRoadmap(task.RoadmapID) {
+				db.Model(&types.Roadmap{}).Where("roadmap_id = ?", task.RoadmapID).Update("completed", true)
 			}
+		}
+
+		// Recompute and save all statuses for the roadmap
+		if err := RecomputeAndSaveStatuses(task.RoadmapID); err != nil {
+			log.Println("Error recomputing statuses:", err)
 		}
 	}
 
@@ -309,22 +322,43 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 		}
 	}
 
-	// If step was completed, check cascade completion
+	// Handle cascade completion/un-completion based on step state
 	if updatedStep.Completed {
 		// Check if all steps are completed to auto-complete task
 		if shouldCompleteTask(taskID) {
-			db.Model(&types.Task{}).Where("task_id = ?", taskID).Update("completed", true)
+			task.Completed = true
+			db.Model(&task).Update("completed", true)
 
 			// Check if this completion should trigger milestone completion
 			if shouldCompleteMilestone(task.MilestoneID) {
 				db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
 
 				// Check if this completion should trigger roadmap completion
-				var milestone types.Milestone
-				db.Where("milestone_id = ?", task.MilestoneID).First(&milestone)
-				if shouldCompleteRoadmap(milestone.RoadmapID) {
-					db.Model(&types.Roadmap{}).Where("roadmap_id = ?", milestone.RoadmapID).Update("completed", true)
+				if shouldCompleteRoadmap(task.RoadmapID) {
+					db.Model(&types.Roadmap{}).Where("roadmap_id = ?", task.RoadmapID).Update("completed", true)
 				}
+			}
+
+			// Recompute and save all statuses for the roadmap
+			if err := RecomputeAndSaveStatuses(task.RoadmapID); err != nil {
+				log.Println("Error recomputing statuses:", err)
+			}
+		}
+	} else {
+		// Step was unchecked - reverse cascade: un-complete task if it was completed
+		if task.Completed {
+			task.Completed = false
+			db.Model(&task).Update("completed", false)
+
+			// Un-complete the milestone if it was reached
+			db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", false)
+
+			// Un-complete the roadmap if it was completed
+			db.Model(&types.Roadmap{}).Where("roadmap_id = ?", task.RoadmapID).Update("completed", false)
+
+			// Recompute and save all statuses for the roadmap
+			if err := RecomputeAndSaveStatuses(task.RoadmapID); err != nil {
+				log.Println("Error recomputing statuses:", err)
 			}
 		}
 	}
@@ -351,4 +385,59 @@ func DeleteStep(c *gin.Context, taskID string, stepID string) error {
 	}
 
 	return nil
+}
+
+// CompleteAllSteps marks all steps of a task as complete in a single operation.
+// Also triggers cascade completion for task, milestone, and roadmap if applicable.
+// Returns the number of steps that were marked complete.
+func CompleteAllSteps(c *gin.Context, taskID string) (int64, error) {
+	user_id, exists := c.Get("user_id")
+	if !exists || user_id == "" {
+		return 0, errors.New("missing or invalid user_id")
+	}
+
+	// Verify task exists and belongs to user
+	var task types.Task
+	taskResult := db.Where("user_id = ?", user_id).Where("task_id = ?", taskID).First(&task)
+	if taskResult.Error != nil {
+		if taskResult.Error == gorm.ErrRecordNotFound {
+			return 0, errors.New("task not found")
+		}
+		return 0, taskResult.Error
+	}
+
+	// Mark all incomplete steps as complete
+	result := db.Model(&types.Step{}).
+		Where("task_id = ? AND completed = ?", taskID, false).
+		Update("completed", true)
+
+	if result.Error != nil {
+		log.Println("Error completing all steps:", result.Error)
+		return 0, result.Error
+	}
+
+	stepsCompleted := result.RowsAffected
+
+	// Trigger cascade completion checks
+	// Mark task as complete
+	task.Completed = true
+	db.Model(&task).Update("completed", true)
+
+	// Check if this completion should trigger milestone completion
+	if shouldCompleteMilestone(task.MilestoneID) {
+		db.Model(&types.Milestone{}).Where("milestone_id = ?", task.MilestoneID).Update("reached", true)
+
+		// Check if this completion should trigger roadmap completion
+		if shouldCompleteRoadmap(task.RoadmapID) {
+			db.Model(&types.Roadmap{}).Where("roadmap_id = ?", task.RoadmapID).Update("completed", true)
+		}
+	}
+
+	// Recompute and save all statuses for the roadmap
+	if err := RecomputeAndSaveStatuses(task.RoadmapID); err != nil {
+		log.Println("Error recomputing statuses:", err)
+	}
+
+	log.Printf("Completed all steps for task %s: %d steps marked complete", taskID, stepsCompleted)
+	return stepsCompleted, nil
 }

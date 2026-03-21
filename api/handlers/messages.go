@@ -13,7 +13,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
+	"gorm.io/gorm"
 )
+
+type MessageHandler struct {
+	db *gorm.DB
+}
+
+func NewMessageHandler(db *gorm.DB) *MessageHandler {
+	return &MessageHandler{db: db}
+}
 
 // Thread-specific websocket management
 type ThreadRoom struct {
@@ -49,7 +58,7 @@ var roomsMutex = &sync.Mutex{}
 // ============================================================================
 
 // GetThreads returns all threads for the current user
-func GetThreads(c *gin.Context) {
+func (h *MessageHandler) GetThreads(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
@@ -100,7 +109,7 @@ func GetThreads(c *gin.Context) {
 }
 
 // GetMessages returns all messages for a specific thread
-func GetMessages(c *gin.Context) {
+func (h *MessageHandler) GetMessages(c *gin.Context) {
 	ctx := c.Request.Context()
 	threadID := c.Param("threadid")
 	userID, exists := c.Get("user_id")
@@ -171,7 +180,7 @@ func (room *ThreadRoom) handleBroadcast() {
 			err := conn.WriteMessage(gorillaws.TextMessage, msgBytes)
 			if err != nil {
 				fmt.Printf("Error sending message to client: %v\n", err)
-				conn.Close()
+				_ = conn.Close()
 				delete(room.clients, conn)
 			}
 		}
@@ -180,7 +189,7 @@ func (room *ThreadRoom) handleBroadcast() {
 }
 
 // WSHandler handles WebSocket connections for a specific thread
-func WSHandler(c *gin.Context) {
+func (h *MessageHandler) WSHandler(c *gin.Context) {
 	ctx := c.Request.Context()
 	threadID := c.Param("threadid")
 
@@ -212,7 +221,7 @@ func WSHandler(c *gin.Context) {
 		fmt.Printf("WebSocket upgrade error: %v\n", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Get or create room for this thread
 	room := getOrCreateRoom(threadID)
@@ -248,7 +257,7 @@ func WSHandler(c *gin.Context) {
 			// Send error back to client
 			errMsg := map[string]string{"error": "invalid message format"}
 			errBytes, _ := json.Marshal(errMsg)
-			conn.WriteMessage(gorillaws.TextMessage, errBytes)
+			_ = conn.WriteMessage(gorillaws.TextMessage, errBytes)
 			continue
 		}
 
@@ -257,7 +266,7 @@ func WSHandler(c *gin.Context) {
 			fmt.Printf("Empty message content from user %s\n", userIDStr)
 			errMsg := map[string]string{"error": "message content cannot be empty"}
 			errBytes, _ := json.Marshal(errMsg)
-			conn.WriteMessage(gorillaws.TextMessage, errBytes)
+			_ = conn.WriteMessage(gorillaws.TextMessage, errBytes)
 			continue
 		}
 
@@ -267,7 +276,7 @@ func WSHandler(c *gin.Context) {
 			fmt.Printf("Error saving message to database (user %s, thread %s): %v\n", userIDStr, threadID, err)
 			errMsg := map[string]string{"error": "failed to save message"}
 			errBytes, _ := json.Marshal(errMsg)
-			conn.WriteMessage(gorillaws.TextMessage, errBytes)
+			_ = conn.WriteMessage(gorillaws.TextMessage, errBytes)
 			continue
 		}
 
@@ -283,7 +292,7 @@ func WSHandler(c *gin.Context) {
 	log.Info(ctx, fmt.Sprintf("WebSocket disconnected: user %s left thread %s", userIDStr, threadID))
 }
 
-func GetTotalUnreadCount(c *gin.Context) {
+func (h *MessageHandler) GetTotalUnreadCount(c *gin.Context) {
 
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
@@ -296,7 +305,7 @@ func GetTotalUnreadCount(c *gin.Context) {
 }
 
 // GetMessageById returns a single message by its ID
-func GetMessageById(c *gin.Context) {
+func (h *MessageHandler) GetMessageById(c *gin.Context) {
 	ctx := c.Request.Context()
 	messageID := c.Param("messageid")
 	userID, exists := c.Get("user_id")

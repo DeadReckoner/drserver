@@ -9,193 +9,224 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func SetupRoutes() *gin.Engine {
+func SetupRoutes(h *handlers.Handlers) *gin.Engine {
 	router := gin.Default()
 
 	setupHealthRoutes(router)
 
-	setupV1Routes(router)
+	setupV1Routes(router, h)
 
 	return router
 }
 
-func setupV1Routes(router *gin.Engine) {
+func setupV1Routes(router *gin.Engine, h *handlers.Handlers) {
 	v1 := router.Group("/api/v1")
 	v1.Use(middleware.AuthMiddleware())
 	v1.Use(middleware.AdminMiddleware())
 
-	setupUserRoutes(v1)
-	setupFriendRoutes(v1)
-	setupRoadmapRoutes(v1)
-	setupHabitRoutes(v1)
-	setupAgentRoutes(v1)
-	setupNotificationRoutes(v1)
-	setupMessageThreadRoutes(v1)
-	setupFeedbackRoutes(v1)
-	setupWebSocketRoutes(v1)
+	setupUserRoutes(v1, h.User)
+	setupFriendRoutes(v1, h.Friend)
+	setupRoadmapRoutes(v1, h.Roadmap, h.Nudge)
+	setupHabitRoutes(v1, h.Habit, h.Nudge)
+	setupAgentRoutes(v1, h.Agent)
+	setupNotificationRoutes(v1, h.Notification)
+	setupMessageThreadRoutes(v1, h.Message)
+	setupFeedbackRoutes(v1, h.Feedback)
+	setupNudgeRoutes(v1, h.Nudge)
+	setupWebSocketRoutes(v1, h.Agent, h.Message)
+	setupTaskRoutes(v1, h.Task)
 }
 
-func setupUserRoutes(rg *gin.RouterGroup) {
+func setupUserRoutes(rg *gin.RouterGroup, h *handlers.UserHandler) {
 	users := rg.Group("/users")
 	{
-		users.POST("", handlers.CreateUser)
-		users.GET("", handlers.GetUser)
-		users.GET("/search", handlers.SearchUsers)
-		users.PATCH("/:id", utils.ValidateUUID("id"), handlers.UpdateUser)
-		users.DELETE("/:id", utils.ValidateUUID("id"), handlers.DeleteUser)
+		users.POST("", h.CreateUser)
+		users.GET("", h.GetUser)
+		users.GET("/search", h.SearchUsers)
+		users.PATCH("/:id", utils.ValidateUUID("id"), h.UpdateUser)
+		users.DELETE("/:id", utils.ValidateUUID("id"), h.DeleteUser)
 	}
 }
 
-func setupFriendRoutes(rg *gin.RouterGroup) {
+func setupFriendRoutes(rg *gin.RouterGroup, h *handlers.FriendHandler) {
 	friends := rg.Group("/friends")
 	{
-		friends.GET("/search", handlers.SearchFriends)
-		friends.GET("/requests", handlers.GetFriendRequests)
-		friends.POST("/request/:id", utils.ValidateUUID("id"), handlers.CreateFriendRequest)
-		friends.GET("/:id/profile", utils.ValidateUUID("id"), handlers.GetFriendProfile)
-		friends.PATCH("/:id", utils.ValidateUUID("id"), handlers.UpdateFriendRequestStatus)
-		friends.GET("", handlers.GetFriends)
-		friends.DELETE("/:id", utils.ValidateUUID("id"), handlers.RemoveFriend)
+		friends.GET("/search", h.SearchFriends)
+		friends.GET("/requests", h.GetFriendRequests)
+		friends.POST("/request/:id", utils.ValidateUUID("id"), h.CreateFriendRequest)
+		friends.GET("/:id/profile", utils.ValidateUUID("id"), h.GetFriendProfile)
+		friends.PATCH("/:id", utils.ValidateUUID("id"), h.UpdateFriendRequestStatus)
+		friends.GET("", h.GetFriends)
+		friends.DELETE("/:id", utils.ValidateUUID("id"), h.RemoveFriend)
 	}
 }
 
-func setupRoadmapRoutes(rg *gin.RouterGroup) {
+func setupRoadmapRoutes(rg *gin.RouterGroup, h *handlers.RoadmapHandler, nudge *handlers.NudgeHandler) {
 	roadmaps := rg.Group("/roadmaps")
 	{
-		roadmaps.POST("", handlers.CreateRoadmap)
-		roadmaps.PUT("/:roadmapid/start", handlers.StartRoadmap)
-		roadmaps.GET("", handlers.GetRoadmapsByUser)
-		roadmaps.GET("/:roadmapid", utils.ValidateUUID("roadmapid"), handlers.GetRoadmap)
-		roadmaps.PATCH("/:roadmapid", utils.ValidateUUID("roadmapid"), handlers.UpdateRoadmap)
-		roadmaps.DELETE("/:roadmapid", utils.ValidateUUID("roadmapid"), handlers.DeleteRoadmap)
+		roadmaps.POST("", h.CreateRoadmap)
+		roadmaps.PUT("/:roadmapid/start", h.StartRoadmap)
+		roadmaps.GET("", h.GetRoadmapsByUser)
+		roadmaps.GET("/:roadmapid", utils.ValidateUUID("roadmapid"), h.GetRoadmap)
+		roadmaps.PATCH("/:roadmapid", utils.ValidateUUID("roadmapid"), h.UpdateRoadmap)
+		roadmaps.DELETE("/:roadmapid", utils.ValidateUUID("roadmapid"), h.DeleteRoadmap)
 
 		// Milestone routes
-		roadmaps.GET("/:roadmapid/milestones", utils.ValidateUUID("roadmapid"), handlers.GetMilestonesByRoadmap)
-		roadmaps.POST("/:roadmapid/milestones", utils.ValidateUUID("roadmapid"), handlers.CreateMilestone)
+		roadmaps.GET("/:roadmapid/milestones", utils.ValidateUUID("roadmapid"), h.GetMilestonesByRoadmap)
+		roadmaps.POST("/:roadmapid/milestones", utils.ValidateUUID("roadmapid"), h.CreateMilestone)
 
 		// Anchor routes
-		roadmaps.POST("/:roadmapid/anchor-request", utils.ValidateUUID("roadmapid"), handlers.CreateAnchorRequest)
-		roadmaps.DELETE("/:roadmapid/anchor", utils.ValidateUUID("roadmapid"), handlers.RemoveAnchor)
+		roadmaps.POST("/:roadmapid/anchor-request", utils.ValidateUUID("roadmapid"), h.CreateAnchorRequest)
+		roadmaps.DELETE("/:roadmapid/anchor", utils.ValidateUUID("roadmapid"), h.RemoveAnchor)
+
+		// Nudge route (anchor nudges roadmap owner)
+		roadmaps.POST("/:roadmapid/nudge", utils.ValidateUUID("roadmapid"), nudge.NudgeRoadmap)
 	}
 
 	// Anchor request routes
 	anchorRequests := rg.Group("/anchor-requests")
 	{
-		anchorRequests.GET("", handlers.GetAnchorRequests)
-		anchorRequests.POST("/:requestid/accept", utils.ValidateUUID("requestid"), handlers.AcceptAnchorRequest)
-		anchorRequests.POST("/:requestid/reject", utils.ValidateUUID("requestid"), handlers.RejectAnchorRequest)
+		anchorRequests.GET("", h.GetAnchorRequests)
+		anchorRequests.POST("/:requestid/accept", utils.ValidateUUID("requestid"), h.AcceptAnchorRequest)
+		anchorRequests.POST("/:requestid/reject", utils.ValidateUUID("requestid"), h.RejectAnchorRequest)
 	}
 
 	milestones := rg.Group("/milestones")
 	{
-		milestones.GET("/:milestoneid", utils.ValidateUUID("milestoneid"), handlers.GetMilestone)
-		milestones.PATCH("/:milestoneid", utils.ValidateUUID("milestoneid"), handlers.UpdateMilestone)
-		milestones.DELETE("/:milestoneid", utils.ValidateUUID("milestoneid"), handlers.DeleteMilestone)
-		milestones.GET("/:milestoneid/tasks", utils.ValidateUUID("milestoneid"), handlers.GetTasksByMilestone)
+		milestones.GET("/:milestoneid", utils.ValidateUUID("milestoneid"), h.GetMilestone)
+		milestones.PATCH("/:milestoneid", utils.ValidateUUID("milestoneid"), h.UpdateMilestone)
+		milestones.DELETE("/:milestoneid", utils.ValidateUUID("milestoneid"), h.DeleteMilestone)
+	}
+}
+
+func setupTaskRoutes(rg *gin.RouterGroup, h *handlers.TaskHandler) {
+	// Task routes under milestones
+	milestones := rg.Group("/milestones")
+	{
+		milestones.GET("/:milestoneid/tasks", utils.ValidateUUID("milestoneid"), h.GetTasksByMilestone)
 	}
 
 	tasks := rg.Group("/tasks")
 	{
-		tasks.POST("", handlers.CreateTask)
-		tasks.GET("/user", handlers.GetTasks)
-		tasks.GET("/:taskid", utils.ValidateUUID("taskid"), handlers.GetTask)
-		tasks.PATCH("/:taskid", utils.ValidateUUID("taskid"), handlers.UpdateTask)
-		tasks.DELETE("/:taskid", utils.ValidateUUID("taskid"), handlers.DeleteTask)
+		tasks.POST("", h.CreateTask)
+		tasks.GET("/user", h.GetTasks)
+		tasks.GET("/:taskid", utils.ValidateUUID("taskid"), h.GetTask)
+		tasks.PATCH("/:taskid", utils.ValidateUUID("taskid"), h.UpdateTask)
+		tasks.DELETE("/:taskid", utils.ValidateUUID("taskid"), h.DeleteTask)
 
-		tasks.POST("/:taskid/steps", utils.ValidateUUID("taskid"), handlers.CreateStep)
-		tasks.PATCH("/:taskid/steps/:stepid", utils.ValidateUUID("taskid"), utils.ValidateUUID("stepid"), handlers.UpdateStep)
-		tasks.DELETE("/:taskid/steps/:stepid", utils.ValidateUUID("taskid"), utils.ValidateUUID("stepid"), handlers.DeleteStep)
+		tasks.POST("/:taskid/steps", utils.ValidateUUID("taskid"), h.CreateStep)
+		tasks.PATCH("/:taskid/steps/:stepid", utils.ValidateUUID("taskid"), utils.ValidateUUID("stepid"), h.UpdateStep)
+		tasks.DELETE("/:taskid/steps/:stepid", utils.ValidateUUID("taskid"), utils.ValidateUUID("stepid"), h.DeleteStep)
+		tasks.POST("/:taskid/steps/complete-all", utils.ValidateUUID("taskid"), h.CompleteAllSteps)
 	}
 }
 
-func setupHabitRoutes(rg *gin.RouterGroup) {
+func setupHabitRoutes(rg *gin.RouterGroup, h *handlers.HabitHandler, nudge *handlers.NudgeHandler) {
 	habits := rg.Group("/habits")
 	{
 		// Habit CRUD operations
-		habits.POST("", handlers.CreateHabit)
-		habits.GET("", handlers.GetHabits)
-		habits.GET("/today", handlers.GetTodaysHabits)
-		habits.GET("/date/:date", handlers.GetHabitsForDate)
-		habits.GET("/range", handlers.GetHabitsForRange)
-		habits.GET("/:habitid", utils.ValidateUUID("habitid"), handlers.GetHabit)
-		habits.PATCH("/:habitid", utils.ValidateUUID("habitid"), handlers.UpdateHabit)
-		habits.DELETE("/:habitid", utils.ValidateUUID("habitid"), handlers.DeleteHabit)
-		habits.POST("/:habitid/archive", utils.ValidateUUID("habitid"), handlers.ArchiveHabit)
+		habits.POST("", h.CreateHabit)
+		habits.GET("", h.GetHabits)
+		habits.GET("/today", h.GetTodaysHabits)
+		habits.GET("/date/:date", h.GetHabitsForDate)
+		habits.GET("/range", h.GetHabitsForRange)
+		habits.GET("/:habitid", utils.ValidateUUID("habitid"), h.GetHabit)
+		habits.PATCH("/:habitid", utils.ValidateUUID("habitid"), h.UpdateHabit)
+		habits.DELETE("/:habitid", utils.ValidateUUID("habitid"), h.DeleteHabit)
+		habits.POST("/:habitid/archive", utils.ValidateUUID("habitid"), h.ArchiveHabit)
 
 		// Completion operations
-		habits.POST("/:habitid/complete", utils.ValidateUUID("habitid"), handlers.CompleteHabit)
-		habits.DELETE("/:habitid/complete", utils.ValidateUUID("habitid"), handlers.UncompleteHabit)
-		habits.GET("/:habitid/completions", utils.ValidateUUID("habitid"), handlers.GetCompletions)
+		habits.POST("/:habitid/complete", utils.ValidateUUID("habitid"), h.CompleteHabit)
+		habits.DELETE("/:habitid/complete", utils.ValidateUUID("habitid"), h.UncompleteHabit)
+		habits.GET("/:habitid/completions", utils.ValidateUUID("habitid"), h.GetCompletions)
 
 		// Statistics
-		habits.GET("/:habitid/stats", utils.ValidateUUID("habitid"), handlers.GetHabitStats)
+		habits.GET("/:habitid/stats", utils.ValidateUUID("habitid"), h.GetHabitStats)
 
 		// Anchor operations
-		habits.POST("/:habitid/anchor-request", utils.ValidateUUID("habitid"), handlers.CreateHabitAnchorRequest)
-		habits.DELETE("/:habitid/anchor", utils.ValidateUUID("habitid"), handlers.RemoveHabitAnchor)
+		habits.POST("/:habitid/anchor-request", utils.ValidateUUID("habitid"), h.CreateHabitAnchorRequest)
+		habits.DELETE("/:habitid/anchor", utils.ValidateUUID("habitid"), h.RemoveHabitAnchor)
+
+		// Nudge route (anchor nudges habit owner)
+		habits.POST("/:habitid/nudge", utils.ValidateUUID("habitid"), nudge.NudgeHabit)
 	}
 }
 
-func setupAgentRoutes(rg *gin.RouterGroup) {
+func setupAgentRoutes(rg *gin.RouterGroup, h *handlers.AgentHandler) {
 	agent := rg.Group("/agent")
 	{
-		agent.POST("/generate", handlers.AgentGenerate)
-		agent.POST("/generateMilestone/:milestoneid", handlers.AgentGenerateMilestone)
+		agent.POST("/generate", h.AgentGenerate)
+		agent.POST("/generateMilestone/:milestoneid", h.AgentGenerateMilestone)
 
-		agent.POST("/generate-async", handlers.AgentGenerateAsync)
+		agent.POST("/generate-async", h.AgentGenerateAsync)
 		sessions := agent.Group("/sessions")
 		{
-			sessions.POST("", handlers.StartAISession)
-			sessions.GET("/:id", utils.ValidateUUID("id"), handlers.GetAISession)
-			sessions.POST("/:id/reply", utils.ValidateUUID("id"), handlers.ReplyAISession)
+			sessions.POST("", h.StartAISession)
+			sessions.GET("/:id", utils.ValidateUUID("id"), h.GetAISession)
+			sessions.POST("/:id/reply", utils.ValidateUUID("id"), h.ReplyAISession)
 		}
 	}
 
 	jobs := rg.Group("/jobs")
 	{
-		jobs.GET("/:jobid/status", utils.ValidateUUID("jobid"), handlers.GetJobStatus)
+		jobs.GET("/:jobid/status", utils.ValidateUUID("jobid"), h.GetJobStatus)
 	}
 }
 
-func setupNotificationRoutes(rg *gin.RouterGroup) {
+func setupNotificationRoutes(rg *gin.RouterGroup, h *handlers.NotificationHandler) {
 	notifications := rg.Group("/notifications")
 	{
-		notifications.GET("", handlers.GetNotifications)
-		notifications.POST("/clear", handlers.ClearNotifications)
-		notifications.PUT("/:alertid/read", utils.ValidateUUID("alertid"), handlers.MarkNotificationRead)
+		notifications.GET("", h.GetNotifications)
+		notifications.POST("/clear", h.ClearNotifications)
+		notifications.PUT("/:alertid/read", utils.ValidateUUID("alertid"), h.MarkNotificationRead)
+		notifications.DELETE("/:alertid", utils.ValidateUUID("alertid"), h.DismissNotification)
 	}
 
 	push := rg.Group("/push")
 	{
-		push.POST("/tokens", handlers.RegisterPushToken)
-		push.DELETE("/tokens/:token", handlers.DeactivatePushToken)
+		push.POST("/tokens", h.RegisterPushToken)
+		push.DELETE("/tokens/:token", h.DeactivatePushToken)
+	}
+
+	badge := rg.Group("/badge")
+	{
+		badge.GET("", h.GetBadgeCount)
+		badge.POST("/refresh", h.RefreshBadge)
 	}
 }
 
-func setupMessageThreadRoutes(rg *gin.RouterGroup) {
+func setupMessageThreadRoutes(rg *gin.RouterGroup, h *handlers.MessageHandler) {
 	threads := rg.Group("/threads")
 	{
-		threads.GET("", handlers.GetThreads)
-		threads.GET("/:threadid/messages", utils.ValidateUUID("threadid"), handlers.GetMessages)
-		threads.GET("/unread", handlers.GetTotalUnreadCount)
-		threads.GET("/message/:messageid", utils.ValidateUUID("messageid"), handlers.GetMessageById)
+		threads.GET("", h.GetThreads)
+		threads.GET("/:threadid/messages", utils.ValidateUUID("threadid"), h.GetMessages)
+		threads.GET("/unread", h.GetTotalUnreadCount)
+		threads.GET("/message/:messageid", utils.ValidateUUID("messageid"), h.GetMessageById)
 	}
 }
 
-func setupFeedbackRoutes(rg *gin.RouterGroup) {
+func setupFeedbackRoutes(rg *gin.RouterGroup, h *handlers.FeedbackHandler) {
 	feedback := rg.Group("/feedback")
 	{
-		feedback.POST("", handlers.CreateFeedback)
+		feedback.POST("", h.CreateFeedback)
 	}
 }
 
-func setupWebSocketRoutes(rg *gin.RouterGroup) {
+func setupNudgeRoutes(rg *gin.RouterGroup, h *handlers.NudgeHandler) {
+	nudges := rg.Group("/nudges")
+	{
+		nudges.GET("", h.GetNudgesReceived)
+		nudges.GET("/sent", h.GetNudgesSent)
+	}
+}
+
+func setupWebSocketRoutes(rg *gin.RouterGroup, agent *handlers.AgentHandler, message *handlers.MessageHandler) {
 	ws := rg.Group("/ws")
 	{
 		// Thread-specific WebSocket connection
-		ws.GET("/messages/:threadid", utils.ValidateUUID("threadid"), handlers.WSHandler)
+		ws.GET("/messages/:threadid", utils.ValidateUUID("threadid"), message.WSHandler)
 
-		ws.GET("/agent/:jobid", utils.ValidateUUID("jobid"), handlers.WSAgentProgress)
+		ws.GET("/agent/:jobid", utils.ValidateUUID("jobid"), agent.WSAgentProgress)
 	}
 }
 

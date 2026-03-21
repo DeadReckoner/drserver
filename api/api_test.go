@@ -18,7 +18,8 @@ func init() {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	router := NewRouter()
+	// Health endpoints don't use the database, so we can pass nil
+	router := NewRouter(nil)
 
 	req, _ := http.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -26,13 +27,15 @@ func TestHealthEndpoint(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
 	assert.Equal(t, "ok", response["status"])
 	assert.Equal(t, "dr-server", response["service"])
 }
 
 func TestHealthzEndpoint(t *testing.T) {
-	router := NewRouter()
+	// Health endpoints don't use the database, so we can pass nil
+	router := NewRouter(nil)
 
 	req, _ := http.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
@@ -40,7 +43,8 @@ func TestHealthzEndpoint(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	err := json.Unmarshal(w.Body.Bytes(), &response)
+	assert.NoError(t, err)
 	assert.Equal(t, "ok", response["status"])
 }
 
@@ -135,7 +139,8 @@ func TestResponseUtilities(t *testing.T) {
 
 		assert.Equal(t, http.StatusNotFound, w.Code)
 		var response map[string]interface{}
-		json.Unmarshal(w.Body.Bytes(), &response)
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
 		assert.Equal(t, "Resource not found", response["message"])
 		assert.Equal(t, float64(404), response["code"])
 	})
@@ -147,7 +152,8 @@ func TestResponseUtilities(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		var response map[string]interface{}
-		json.Unmarshal(w.Body.Bytes(), &response)
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
 		assert.Equal(t, "Operation successful", response["message"])
 		assert.NotNil(t, response["data"])
 	})
@@ -159,7 +165,8 @@ func TestResponseUtilities(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		var response map[string]interface{}
-		json.Unmarshal(w.Body.Bytes(), &response)
+		err := json.Unmarshal(w.Body.Bytes(), &response)
+		assert.NoError(t, err)
 		assert.NotNil(t, response["items"])
 	})
 }

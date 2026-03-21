@@ -15,9 +15,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
-func AgentGenerate(c *gin.Context) {
+type AgentHandler struct {
+	db *gorm.DB
+}
+
+func NewAgentHandler(db *gorm.DB) *AgentHandler {
+	return &AgentHandler{db: db}
+}
+
+func (h *AgentHandler) AgentGenerate(c *gin.Context) {
 	ctx := c.Request.Context()
 	var goalReq types.GoalRequest
 
@@ -46,7 +55,7 @@ func AgentGenerate(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, generated.Roadmap)
 }
 
-func AgentGenerateAsync(c *gin.Context) {
+func (h *AgentHandler) AgentGenerateAsync(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID := c.GetString("user_id")
 
@@ -102,7 +111,7 @@ func AgentGenerateAsync(c *gin.Context) {
 
 }
 
-func WSAgentProgress(c *gin.Context) {
+func (h *AgentHandler) WSAgentProgress(c *gin.Context) {
 	ctx := c.Request.Context()
 	jobID := c.Param("jobid")
 	userID := c.GetString("user_id")
@@ -120,12 +129,12 @@ func WSAgentProgress(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Websocket upgrade failed"})
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	websocket.Manager.AddConnection(ctx, jobID, conn)
 	defer websocket.Manager.RemoveConnection(ctx, jobID, conn)
 
-	conn.WriteJSON(types.ProgressUpdate{
+	_ = conn.WriteJSON(types.ProgressUpdate{
 		Type:     "status",
 		JobID:    job.JobID,
 		Progress: job.Progress,
@@ -141,13 +150,13 @@ func WSAgentProgress(c *gin.Context) {
 		}
 
 		if msg["type"] == "ping" {
-			conn.WriteJSON(map[string]string{"type": "pong"})
+			_ = conn.WriteJSON(map[string]string{"type": "pong"})
 		}
 	}
 
 }
 
-func GetJobStatus(c *gin.Context) {
+func (h *AgentHandler) GetJobStatus(c *gin.Context) {
 	jobID := c.Param("jobid")
 	userID := c.GetString("user_id")
 
@@ -237,7 +246,8 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 			"roadmap_id": roadmapID,
 		},
 	}
-	database.UpdateBackgroundJob(ctx, &job)
+	_ = database.UpdateBackgroundJob(ctx, &job)
+	_ = database.UpdateRoadmapGenerationStatus(ctx, roadmapID, string(types.GenerationStatusCompleted))
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:     "complete",
@@ -273,7 +283,7 @@ func updateJobProgress(jobID string, progress int, status, message string) {
 		job.StartedAt = &now
 	}
 
-	database.UpdateBackgroundJob(ctx, &job)
+	_ = database.UpdateBackgroundJob(ctx, &job)
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:     "progress",
@@ -296,9 +306,9 @@ func handleGenerationError(jobID, roadmapID, userID string, err error) {
 		CompletedAt: &now,
 	}
 
-	database.UpdateBackgroundJob(ctx, &job)
+	_ = database.UpdateBackgroundJob(ctx, &job)
 
-	database.UpdateRoadmapGenerationStatus(ctx, roadmapID, string(types.GenerationStatusFailed))
+	_ = database.UpdateRoadmapGenerationStatus(ctx, roadmapID, string(types.GenerationStatusFailed))
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:    "error",
@@ -339,7 +349,7 @@ func getProgressMessage(status string, progress int) string {
 	return "Finalizing..."
 }
 
-func AgentGenerateMilestone(c *gin.Context) {
+func (h *AgentHandler) AgentGenerateMilestone(c *gin.Context) {
 	ctx := c.Request.Context()
 	milestoneID := c.Param("milestoneid")
 
@@ -378,7 +388,7 @@ func AgentGenerateMilestone(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, milestone)
 }
 
-func StartAISession(c *gin.Context) {
+func (h *AgentHandler) StartAISession(c *gin.Context) {
 	userID := c.GetString("user_id")
 	session := agent.AISession{
 		SessionID: uuid.New(),
@@ -402,7 +412,7 @@ func StartAISession(c *gin.Context) {
 	})
 }
 
-func ReplyAISession(c *gin.Context) {
+func (h *AgentHandler) ReplyAISession(c *gin.Context) {
 	sessionID := c.Param("id")
 	var req struct {
 		Message string `json:"message"`
@@ -442,7 +452,7 @@ func ReplyAISession(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, resp)
 }
 
-func GetAISession(c *gin.Context) {
+func (h *AgentHandler) GetAISession(c *gin.Context) {
 	sessionID := c.Param("id")
 	session, err := agent.LoadAISession(sessionID)
 	if err != nil {

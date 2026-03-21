@@ -12,9 +12,18 @@ import (
 	"dr/server/api/utils"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func CreateRoadmap(c *gin.Context) {
+type RoadmapHandler struct {
+	db *gorm.DB
+}
+
+func NewRoadmapHandler(db *gorm.DB) *RoadmapHandler {
+	return &RoadmapHandler{db: db}
+}
+
+func (h *RoadmapHandler) CreateRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	var newRoadmap types.Roadmap
 
@@ -28,9 +37,6 @@ func CreateRoadmap(c *gin.Context) {
 		newRoadmap.Type = "custom_made"
 	}
 
-	// Set start_date to null (zero time) - it will be set when the roadmap is started
-	newRoadmap.StartDate = time.Time{}
-
 	fmt.Printf("Roadmap received: %+v\n", newRoadmap)
 
 	createdRoadmap, err := database.CreateRoadmap(c, newRoadmap)
@@ -43,12 +49,12 @@ func CreateRoadmap(c *gin.Context) {
 	log.Info(ctx, "Roadmap created successfully")
 }
 
-func GetRoadmapsByUser(c *gin.Context) {
+func (h *RoadmapHandler) GetRoadmapsByUser(c *gin.Context) {
 	roadmaps := database.GetRoadmapsByUser(c)
 	utils.DataResponse(c, http.StatusOK, roadmaps)
 }
 
-func GetRoadmap(c *gin.Context) {
+func (h *RoadmapHandler) GetRoadmap(c *gin.Context) {
 	roadmapID := c.Param("roadmapid")
 	view := c.DefaultQuery("view", "full") // Default to full view
 
@@ -77,7 +83,7 @@ func GetRoadmap(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, roadmap)
 }
 
-func UpdateRoadmap(c *gin.Context) {
+func (h *RoadmapHandler) UpdateRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 	var updatedRoadmap types.Roadmap
@@ -98,7 +104,7 @@ func UpdateRoadmap(c *gin.Context) {
 	log.Info(ctx, "Roadmap updated successfully")
 }
 
-func DeleteRoadmap(c *gin.Context) {
+func (h *RoadmapHandler) DeleteRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
@@ -112,13 +118,13 @@ func DeleteRoadmap(c *gin.Context) {
 	log.Info(ctx, "Roadmap deleted successfully")
 }
 
-func GetMilestonesByRoadmap(c *gin.Context) {
+func (h *RoadmapHandler) GetMilestonesByRoadmap(c *gin.Context) {
 	roadmapID := c.Param("roadmapid")
 	milestones := database.GetMilestonesByRoadmap(c, roadmapID)
 	utils.DataResponse(c, http.StatusOK, milestones)
 }
 
-func GetMilestone(c *gin.Context) {
+func (h *RoadmapHandler) GetMilestone(c *gin.Context) {
 	milestoneID := c.Param("milestoneid")
 	milestone := database.GetMilestone(c, milestoneID)
 
@@ -130,7 +136,7 @@ func GetMilestone(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, milestone)
 }
 
-func UpdateMilestone(c *gin.Context) {
+func (h *RoadmapHandler) UpdateMilestone(c *gin.Context) {
 	ctx := c.Request.Context()
 	milestoneID := c.Param("milestoneid")
 	var updatedMilestone types.Milestone
@@ -149,7 +155,7 @@ func UpdateMilestone(c *gin.Context) {
 	log.Info(ctx, "Milestone updated successfully")
 }
 
-func CreateMilestone(c *gin.Context) {
+func (h *RoadmapHandler) CreateMilestone(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 	var newMilestone types.Milestone
@@ -170,7 +176,7 @@ func CreateMilestone(c *gin.Context) {
 	log.Info(ctx, "Milestone created successfully")
 }
 
-func DeleteMilestone(c *gin.Context) {
+func (h *RoadmapHandler) DeleteMilestone(c *gin.Context) {
 	ctx := c.Request.Context()
 	milestoneID := c.Param("milestoneid")
 
@@ -184,51 +190,86 @@ func DeleteMilestone(c *gin.Context) {
 	log.Info(ctx, "Milestone deleted successfully")
 }
 
-func StartRoadmap(c *gin.Context) {
+func (h *RoadmapHandler) StartRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
-	roadmap := database.GetRoadmap(c, roadmapID)
+	roadmap := database.GetRoadmapFull(c, roadmapID)
 
 	if roadmap.RoadmapID == "" {
 		utils.NotFoundResponse(c, "Roadmap")
 		return
 	}
 
-	roadmap.StartDate = time.Now()
+	date := time.Now()
+	roadmap.StartDate = &date
 
-	for index, milestone := range roadmap.Milestones {
+	// Date all milestones and tasks in phases
+	for phaseIdx := range roadmap.Phases {
+		for milestoneIdx := range roadmap.Phases[phaseIdx].Milestones {
+			milestone := &roadmap.Phases[phaseIdx].Milestones[milestoneIdx]
+			log.Info(ctx, "Starting phase milestone", fmt.Sprintf("Day: %d", milestone.Day))
+			updatedMilestone := h.dateMilestones(c, *roadmap.StartDate, *milestone)
+			roadmap.Phases[phaseIdx].Milestones[milestoneIdx] = updatedMilestone
 
-		fmt.Println("starting milestone ", milestone.Day)
-		roadmap.Milestones[index] = dateMilestones(c, roadmap.StartDate, milestone)
-		for taskIndex, task := range milestone.Tasks {
-			roadmap.Milestones[index].Tasks[taskIndex] = dateTasks(c, roadmap.StartDate, task)
-			log.Info(ctx, "Setting Task Date: ", task.Day, task.Date)
+			for taskIdx := range updatedMilestone.Tasks {
+				task := updatedMilestone.Tasks[taskIdx]
+				updatedTask := h.dateTasks(c, *roadmap.StartDate, task)
+				roadmap.Phases[phaseIdx].Milestones[milestoneIdx].Tasks[taskIdx] = updatedTask
+				log.Info(ctx, "Set task date", fmt.Sprintf("Day: %d, Date: %v", updatedTask.Day, updatedTask.Date))
+			}
 		}
 	}
 
+	// Date all top-level milestones and tasks (backward compatibility)
+	for milestoneIdx := range roadmap.Milestones {
+		milestone := &roadmap.Milestones[milestoneIdx]
+		log.Info(ctx, "Starting top-level milestone", fmt.Sprintf("Day: %d", milestone.Day))
+		updatedMilestone := h.dateMilestones(c, *roadmap.StartDate, *milestone)
+		roadmap.Milestones[milestoneIdx] = updatedMilestone
+
+		for taskIdx := range updatedMilestone.Tasks {
+			task := updatedMilestone.Tasks[taskIdx]
+			updatedTask := h.dateTasks(c, *roadmap.StartDate, task)
+			roadmap.Milestones[milestoneIdx].Tasks[taskIdx] = updatedTask
+			log.Info(ctx, "Set task date", fmt.Sprintf("Day: %d, Date: %v", updatedTask.Day, updatedTask.Date))
+		}
+	}
+
+	// Save the roadmap with start date first (so RecomputeAndSaveStatuses sees it)
 	updatedRoadmap := database.UpdateRoadmap(c, roadmapID, roadmap)
+
+	// Recompute and save all statuses for the roadmap now that it's started
+	// This computes task, milestone, and phase statuses in one unified operation
+	if err := database.RecomputeAndSaveStatuses(roadmapID); err != nil {
+		log.Error(ctx, "Error recomputing statuses", err.Error())
+	}
+
+	// Refresh the roadmap to get the computed statuses
+	updatedRoadmap = database.GetRoadmapFull(c, roadmapID)
 
 	utils.DataResponse(c, http.StatusOK, updatedRoadmap)
 	log.Info(ctx, "Roadmap started successfully")
 }
 
-func dateMilestones(c *gin.Context, startDate time.Time, milestone types.Milestone) types.Milestone {
+func (h *RoadmapHandler) dateMilestones(c *gin.Context, startDate time.Time, milestone types.Milestone) types.Milestone {
 
-	milestone.Date = startDate.AddDate(0, 0, milestone.Day)
+	date := startDate.AddDate(0, 0, milestone.Day)
+	milestone.Date = &date
 
 	return database.UpdateMilestone(c, milestone.MilestoneID, milestone)
 }
 
-func dateTasks(c *gin.Context, startDate time.Time, task types.Task) types.Task {
+func (h *RoadmapHandler) dateTasks(c *gin.Context, startDate time.Time, task types.Task) types.Task {
 
-	task.Date = startDate.AddDate(0, 0, task.Day)
+	date := startDate.AddDate(0, 0, task.Day)
+	task.Date = &date
 
 	return database.UpdateTask(c, task.TaskID, task)
 }
 
 // Anchor handlers
 
-func CreateAnchorRequest(c *gin.Context) {
+func (h *RoadmapHandler) CreateAnchorRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
@@ -266,19 +307,22 @@ func CreateAnchorRequest(c *gin.Context) {
 	go sendAnchorRequestNotification(anchorRequest)
 }
 
-func GetAnchorRequests(c *gin.Context) {
+func (h *RoadmapHandler) GetAnchorRequests(c *gin.Context) {
 	requests := database.GetAnchorRequests(c)
 	utils.DataResponse(c, http.StatusOK, requests)
 }
 
-func AcceptAnchorRequest(c *gin.Context) {
+func (h *RoadmapHandler) AcceptAnchorRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	requestID := c.Param("requestid")
+	userID, _ := c.Get("user_id")
 
 	anchorRequest, err := database.AcceptAnchorRequest(c, requestID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "anchor request not found" {
+			// Clean up any orphaned notification for this request
+			go cleanupOrphanedAnchorNotification(ctx, userID.(string), requestID)
 			utils.NotFoundResponse(c, "Anchor Request")
 			return
 		}
@@ -287,6 +331,8 @@ func AcceptAnchorRequest(c *gin.Context) {
 			return
 		}
 		if errMsg == "anchor request is not pending" {
+			// Request exists but is not pending - clean up notification
+			go cleanupOrphanedAnchorNotification(ctx, userID.(string), requestID)
 			utils.BadRequestResponse(c, errMsg)
 			return
 		}
@@ -304,14 +350,17 @@ func AcceptAnchorRequest(c *gin.Context) {
 	go sendAnchorStatusNotification(anchorRequest, "accepted")
 }
 
-func RejectAnchorRequest(c *gin.Context) {
+func (h *RoadmapHandler) RejectAnchorRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	requestID := c.Param("requestid")
+	userID, _ := c.Get("user_id")
 
 	anchorRequest, err := database.RejectAnchorRequest(c, requestID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "anchor request not found" {
+			// Clean up any orphaned notification for this request
+			go cleanupOrphanedAnchorNotification(ctx, userID.(string), requestID)
 			utils.NotFoundResponse(c, "Anchor Request")
 			return
 		}
@@ -320,6 +369,8 @@ func RejectAnchorRequest(c *gin.Context) {
 			return
 		}
 		if errMsg == "anchor request is not pending" {
+			// Request exists but is not pending - clean up notification
+			go cleanupOrphanedAnchorNotification(ctx, userID.(string), requestID)
 			utils.BadRequestResponse(c, errMsg)
 			return
 		}
@@ -337,7 +388,7 @@ func RejectAnchorRequest(c *gin.Context) {
 	go sendAnchorStatusNotification(anchorRequest, "rejected")
 }
 
-func RemoveAnchor(c *gin.Context) {
+func (h *RoadmapHandler) RemoveAnchor(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
@@ -362,10 +413,11 @@ func RemoveAnchor(c *gin.Context) {
 
 // sendAnchorRequestNotification sends a notification when an anchor request is created
 func sendAnchorRequestNotification(anchorRequest types.AnchorRequest) {
+	ctx := context.Background()
 	// Get requester's name
 	requester, err := database.GetUserByID(anchorRequest.RequesterID)
 	if err != nil {
-		log.Info(nil, "Failed to get requester info for notification:", err)
+		log.Info(ctx, "Failed to get requester info for notification:", err)
 		return
 	}
 
@@ -385,25 +437,27 @@ func sendAnchorRequestNotification(anchorRequest types.AnchorRequest) {
 
 // sendAnchorStatusNotification sends a notification when an anchor request is accepted or rejected
 func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status string) {
+	ctx := context.Background()
 	// Get anchor's name (the person who accepted/rejected)
 	anchor, err := database.GetUserByID(anchorRequest.AnchorID)
 	if err != nil {
-		log.Info(nil, "Failed to get anchor info for notification:", err)
+		log.Info(ctx, "Failed to get anchor info for notification:", err)
 		return
 	}
 
 	anchorName := anchor.FirstName + " " + anchor.LastName
 
 	var notificationType, title, body string
-	if status == "accepted" {
+	switch status {
+	case "accepted":
 		notificationType = "anchor_accepted"
 		title = "Anchor Request Accepted"
 		body = anchorName + " accepted your anchor request"
-	} else if status == "rejected" {
+	case "rejected":
 		notificationType = "anchor_rejected"
 		title = "Anchor Request Declined"
 		body = anchorName + " declined your anchor request"
-	} else {
+	default:
 		return // Unknown status
 	}
 
@@ -444,5 +498,24 @@ func cleanupAnchorRequestNotification(ctx context.Context, anchorRequest types.A
 	)
 	if err != nil {
 		log.Info(ctx, "Failed to cleanup anchor request notification:", err)
+	}
+}
+
+// cleanupOrphanedAnchorNotification cleans up notifications for anchor requests
+// that no longer exist or are no longer pending. This handles cases where the
+// underlying request was deleted or already processed but the notification remains.
+func cleanupOrphanedAnchorNotification(ctx context.Context, userID string, requestID string) {
+	// Try both notification types since we don't know which type it was
+	for _, notifType := range []string{"anchor_request", "habit_anchor_request"} {
+		err := database.DeleteNotificationsByTypeAndData(
+			ctx,
+			userID,
+			notifType,
+			"request_id",
+			requestID,
+		)
+		if err != nil {
+			log.Info(ctx, "Failed to cleanup orphaned notification:", err)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"dr/server/api/utils"
 	"dr/server/database"
 	"dr/server/log"
@@ -10,7 +11,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
+
+type HabitHandler struct {
+	db *gorm.DB
+}
+
+func NewHabitHandler(db *gorm.DB) *HabitHandler {
+	return &HabitHandler{db: db}
+}
 
 // =============================================================================
 // HABIT CRUD HANDLERS
@@ -18,7 +28,7 @@ import (
 
 // CreateHabit creates a new habit
 // POST /api/v1/habits
-func CreateHabit(c *gin.Context) {
+func (h *HabitHandler) CreateHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var req types.CreateHabitRequest
@@ -68,7 +78,7 @@ func CreateHabit(c *gin.Context) {
 
 // GetHabit retrieves a single habit by ID
 // GET /api/v1/habits/:habitid
-func GetHabit(c *gin.Context) {
+func (h *HabitHandler) GetHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -89,7 +99,7 @@ func GetHabit(c *gin.Context) {
 
 // GetHabits retrieves all habits for the user
 // GET /api/v1/habits?include_archived=true
-func GetHabits(c *gin.Context) {
+func (h *HabitHandler) GetHabits(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	// Parse query parameter for including archived habits
@@ -110,7 +120,7 @@ func GetHabits(c *gin.Context) {
 
 // GetTodaysHabits retrieves habits due today with completion status
 // GET /api/v1/habits/today
-func GetTodaysHabits(c *gin.Context) {
+func (h *HabitHandler) GetTodaysHabits(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	log.Info(ctx, "GetTodaysHabits: retrieving habits for today")
@@ -132,7 +142,7 @@ func GetTodaysHabits(c *gin.Context) {
 
 // GetHabitsForDate retrieves habits for a specific date
 // GET /api/v1/habits/date/:date
-func GetHabitsForDate(c *gin.Context) {
+func (h *HabitHandler) GetHabitsForDate(c *gin.Context) {
 	ctx := c.Request.Context()
 	dateStr := c.Param("date")
 
@@ -159,7 +169,7 @@ func GetHabitsForDate(c *gin.Context) {
 
 // GetHabitsForRange retrieves habits for a date range (calendar view)
 // GET /api/v1/habits/range?start=2024-01-01&end=2024-01-31
-func GetHabitsForRange(c *gin.Context) {
+func (h *HabitHandler) GetHabitsForRange(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	startStr := c.Query("start")
@@ -210,7 +220,7 @@ func GetHabitsForRange(c *gin.Context) {
 
 // UpdateHabit updates an existing habit
 // PATCH /api/v1/habits/:habitid
-func UpdateHabit(c *gin.Context) {
+func (h *HabitHandler) UpdateHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -273,7 +283,7 @@ func UpdateHabit(c *gin.Context) {
 
 // DeleteHabit deletes a habit
 // DELETE /api/v1/habits/:habitid
-func DeleteHabit(c *gin.Context) {
+func (h *HabitHandler) DeleteHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -297,7 +307,7 @@ func DeleteHabit(c *gin.Context) {
 
 // ArchiveHabit archives a habit
 // POST /api/v1/habits/:habitid/archive
-func ArchiveHabit(c *gin.Context) {
+func (h *HabitHandler) ArchiveHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -325,7 +335,7 @@ func ArchiveHabit(c *gin.Context) {
 
 // CompleteHabit marks a habit as complete
 // POST /api/v1/habits/:habitid/complete
-func CompleteHabit(c *gin.Context) {
+func (h *HabitHandler) CompleteHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -361,7 +371,7 @@ func CompleteHabit(c *gin.Context) {
 
 // UncompleteHabit removes a completion
 // DELETE /api/v1/habits/:habitid/complete?date=2024-01-15
-func UncompleteHabit(c *gin.Context) {
+func (h *HabitHandler) UncompleteHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -392,7 +402,7 @@ func UncompleteHabit(c *gin.Context) {
 
 // GetCompletions retrieves completion history for a habit
 // GET /api/v1/habits/:habitid/completions?limit=30
-func GetCompletions(c *gin.Context) {
+func (h *HabitHandler) GetCompletions(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -424,7 +434,7 @@ func GetCompletions(c *gin.Context) {
 
 // GetHabitStats retrieves statistics for a habit
 // GET /api/v1/habits/:habitid/stats
-func GetHabitStats(c *gin.Context) {
+func (h *HabitHandler) GetHabitStats(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -481,7 +491,7 @@ func GetHabitStats(c *gin.Context) {
 
 // CreateHabitAnchorRequest creates an anchor request for a habit
 // POST /api/v1/habits/:habitid/anchor-request
-func CreateHabitAnchorRequest(c *gin.Context) {
+func (h *HabitHandler) CreateHabitAnchorRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -523,7 +533,7 @@ func CreateHabitAnchorRequest(c *gin.Context) {
 
 // RemoveHabitAnchor removes an anchor from a habit
 // DELETE /api/v1/habits/:habitid/anchor
-func RemoveHabitAnchor(c *gin.Context) {
+func (h *HabitHandler) RemoveHabitAnchor(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -550,10 +560,11 @@ func RemoveHabitAnchor(c *gin.Context) {
 
 // sendHabitAnchorRequestNotification sends a notification when a habit anchor request is created
 func sendHabitAnchorRequestNotification(anchorRequest types.AnchorRequest) {
+	ctx := context.Background()
 	// Get requester's name
 	requester, err := database.GetUserByID(anchorRequest.RequesterID)
 	if err != nil {
-		log.Info(nil, "Failed to get requester info for notification:", err)
+		log.Info(ctx, "Failed to get requester info for notification:", err)
 		return
 	}
 

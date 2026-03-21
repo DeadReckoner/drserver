@@ -9,9 +9,18 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func SearchFriends(c *gin.Context) {
+type FriendHandler struct {
+	db *gorm.DB
+}
+
+func NewFriendHandler(db *gorm.DB) *FriendHandler {
+	return &FriendHandler{db: db}
+}
+
+func (h *FriendHandler) SearchFriends(c *gin.Context) {
 	email := c.Query("email")
 	if email == "" {
 		utils.BadRequestResponse(c, "email query parameter is required")
@@ -47,7 +56,7 @@ func SearchFriends(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, results)
 }
 
-func CreateFriendRequest(c *gin.Context) {
+func (h *FriendHandler) CreateFriendRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	addresseeID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
@@ -84,12 +93,12 @@ func CreateFriendRequest(c *gin.Context) {
 	go sendFriendRequestNotification(friendship)
 }
 
-func GetFriendRequests(c *gin.Context) {
+func (h *FriendHandler) GetFriendRequests(c *gin.Context) {
 	friendRequests := database.GetFriendRequests(c)
 	utils.DataResponse(c, http.StatusOK, friendRequests)
 }
 
-func GetFriends(c *gin.Context) {
+func (h *FriendHandler) GetFriends(c *gin.Context) {
 	currentUserID, exists := c.Get("user_id")
 	if !exists || currentUserID == "" {
 		utils.InternalErrorResponse(c, nil)
@@ -125,7 +134,7 @@ func GetFriends(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, friends)
 }
 
-func GetFriendProfile(c *gin.Context) {
+func (h *FriendHandler) GetFriendProfile(c *gin.Context) {
 	friendUserID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
 		return
@@ -155,7 +164,7 @@ func GetFriendProfile(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, response)
 }
 
-func RemoveFriend(c *gin.Context) {
+func (h *FriendHandler) RemoveFriend(c *gin.Context) {
 	ctx := c.Request.Context()
 	friendUserID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
@@ -177,12 +186,13 @@ func RemoveFriend(c *gin.Context) {
 	log.Info(ctx, "Friendship removed successfully")
 }
 
-func UpdateFriendRequestStatus(c *gin.Context) {
+func (h *FriendHandler) UpdateFriendRequestStatus(c *gin.Context) {
 	ctx := c.Request.Context()
 	friendshipID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
 		return
 	}
+	userID, _ := c.Get("user_id")
 
 	var req types.UpdateFriendshipStatusRequest
 	if !utils.BindJSONOrAbort(c, &req) {
@@ -193,6 +203,8 @@ func UpdateFriendRequestStatus(c *gin.Context) {
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "friendship not found" {
+			// Clean up any orphaned notification for this friend request
+			go cleanupOrphanedFriendRequestNotification(ctx, userID.(string), friendshipID)
 			utils.NotFoundResponse(c, "Friendship")
 			return
 		}
@@ -201,6 +213,8 @@ func UpdateFriendRequestStatus(c *gin.Context) {
 			return
 		}
 		if errMsg == "friend request is not pending" {
+			// Request exists but is not pending - clean up notification
+			go cleanupOrphanedFriendRequestNotification(ctx, userID.(string), friendshipID)
 			utils.BadRequestResponse(c, errMsg)
 			return
 		}
@@ -224,10 +238,11 @@ func UpdateFriendRequestStatus(c *gin.Context) {
 
 // sendFriendRequestNotification sends a notification when a friend request is created
 func sendFriendRequestNotification(friendship types.Friendship) {
+	ctx := context.Background()
 	// Get requester's name
 	requester, err := database.GetUserByID(friendship.RequesterID)
 	if err != nil {
-		log.Info(nil, "Failed to get requester info for notification:", err)
+		log.Info(ctx, "Failed to get requester info for notification:", err)
 		return
 	}
 
@@ -247,25 +262,27 @@ func sendFriendRequestNotification(friendship types.Friendship) {
 
 // sendFriendStatusNotification sends a notification when a friend request is accepted or rejected
 func sendFriendStatusNotification(friendship types.Friendship, status string) {
+	ctx := context.Background()
 	// Get addressee's name (the person who accepted/rejected)
 	addressee, err := database.GetUserByID(friendship.AddresseeID)
 	if err != nil {
-		log.Info(nil, "Failed to get addressee info for notification:", err)
+		log.Info(ctx, "Failed to get addressee info for notification:", err)
 		return
 	}
 
 	addresseeName := addressee.FirstName + " " + addressee.LastName
 
 	var notificationType, title, body string
-	if status == "accepted" {
+	switch status {
+	case "accepted":
 		notificationType = "friend_accepted"
 		title = "Friend Request Accepted"
 		body = addresseeName + " accepted your friend request"
-	} else if status == "rejected" {
+	case "rejected":
 		notificationType = "friend_rejected"
 		title = "Friend Request Declined"
 		body = addresseeName + " declined your friend request"
-	} else {
+	default:
 		return // Unknown status
 	}
 
@@ -293,5 +310,21 @@ func cleanupFriendRequestNotification(ctx context.Context, friendship types.Frie
 	)
 	if err != nil {
 		log.Info(ctx, "Failed to cleanup friend request notification:", err)
+	}
+}
+
+// cleanupOrphanedFriendRequestNotification cleans up notifications for friend requests
+// that no longer exist or are no longer pending. This handles cases where the
+// underlying request was deleted or already processed but the notification remains.
+func cleanupOrphanedFriendRequestNotification(ctx context.Context, userID string, friendshipID string) {
+	err := database.DeleteNotificationsByTypeAndData(
+		ctx,
+		userID,
+		"friend_request",
+		"friendship_id",
+		friendshipID,
+	)
+	if err != nil {
+		log.Info(ctx, "Failed to cleanup orphaned friend request notification:", err)
 	}
 }
