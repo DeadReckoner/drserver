@@ -1,6 +1,10 @@
 package handlers
 
-import "gorm.io/gorm"
+import (
+	"dr/server/storage"
+
+	"gorm.io/gorm"
+)
 
 // Handlers contains all handler instances with their dependencies injected
 type Handlers struct {
@@ -17,9 +21,9 @@ type Handlers struct {
 }
 
 // NewHandlers creates all handlers with the given database connection
-func NewHandlers(db *gorm.DB) *Handlers {
+func NewHandlers(db *gorm.DB, storageClient *storage.StorageClient) *Handlers {
 	return &Handlers{
-		User:         NewUserHandler(db),
+		User:         NewUserHandler(db, storageClient),
 		Friend:       NewFriendHandler(db),
 		Roadmap:      NewRoadmapHandler(db),
 		Habit:        NewHabitHandler(db),

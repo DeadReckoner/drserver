@@ -58,6 +58,8 @@ type User struct {
 	// FullName is used for Apple/Google sign-in which returns full_name instead of first_name/last_name.
 	// This field is not stored in the database - it's parsed into FirstName/LastName on user creation.
 	FullName string `gorm:"-" json:"full_name,omitempty"`
+
+	ProfileImageURL string `gorm:"column:profile_image_url" json:"profile_image_url,omitempty"`
 }
 
 // ParseFullName splits FullName into FirstName and LastName if they are not already set.

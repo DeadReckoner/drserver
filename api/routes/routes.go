@@ -41,10 +41,13 @@ func setupUserRoutes(rg *gin.RouterGroup, h *handlers.UserHandler) {
 	users := rg.Group("/users")
 	{
 		users.POST("", h.CreateUser)
+		users.POST("/with-image", h.CreateUserWithImage)
 		users.GET("", h.GetUser)
 		users.GET("/search", h.SearchUsers)
 		users.PATCH("/:id", utils.ValidateUUID("id"), h.UpdateUser)
+		users.PATCH("/:id/with-image", utils.ValidateUUID("id"), h.UpdateUserWithImage)
 		users.DELETE("/:id", utils.ValidateUUID("id"), h.DeleteUser)
+		users.DELETE("/:id/image", utils.ValidateUUID("id"), h.DeleteUserImage)
 	}
 }
 
