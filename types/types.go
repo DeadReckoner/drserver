@@ -593,10 +593,7 @@ func (h *Habit) IsDueOn(date time.Time) bool {
 	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	startDateOnly := time.Date(h.StartDate.Year(), h.StartDate.Month(), h.StartDate.Day(), 0, 0, 0, 0, time.UTC)
 
-<<<<<<< HEAD
-	// Check if date is within active period
-=======
->>>>>>> main
+
 	if dateOnly.Before(startDateOnly) {
 		return false
 	}

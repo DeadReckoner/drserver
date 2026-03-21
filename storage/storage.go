@@ -1,26 +1,6 @@
 package storage
 
 import (
-<<<<<<< HEAD
-	storage "github.com/supabase-community/storage-go"
-)
-
-type Options struct {
-	supabaseURL string
-	supbaseKey  string
-	bucketID    string
-}
-
-type bucket interface {
-	getImage() error
-	setImage() error
-}
-
-func NewClient() {
-	store := storage.NewClient("", "", nil)
-
-}
-=======
 	"bytes"
 	"context"
 	"dr/server/log"
@@ -128,4 +108,3 @@ func (s *StorageClient) Delete(ctx context.Context, bucket, path, contentType st
 func (s *StorageClient) PublicURL(bucket, path string) string {
 	return fmt.Sprintf("%s/object/public/%s/%s", s.baseURL, bucket, path)
 }
->>>>>>> main
