@@ -13,9 +13,17 @@ import (
 	"gorm.io/gorm"
 )
 
+type NudgeHandler struct {
+	db *gorm.DB
+}
+
+func NewNudgeHandler(db *gorm.DB) *NudgeHandler {
+	return &NudgeHandler{db: db}
+}
+
 // NudgeRoadmap sends a nudge to the owner of a roadmap.
 // The caller must be the anchor for this roadmap.
-func NudgeRoadmap(c *gin.Context) {
+func (h *NudgeHandler) NudgeRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
@@ -82,7 +90,7 @@ func NudgeRoadmap(c *gin.Context) {
 
 // NudgeHabit sends a nudge to the owner of a habit.
 // The caller must be the anchor for this habit.
-func NudgeHabit(c *gin.Context) {
+func (h *NudgeHandler) NudgeHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
@@ -149,7 +157,7 @@ func NudgeHabit(c *gin.Context) {
 
 // GetNudgesReceived returns nudges received by the current user.
 // Supports ?limit=N query parameter (default 20).
-func GetNudgesReceived(c *gin.Context) {
+func (h *NudgeHandler) GetNudgesReceived(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	userID, exists := c.Get("user_id")
@@ -178,7 +186,7 @@ func GetNudgesReceived(c *gin.Context) {
 
 // GetNudgesSent returns nudges sent by the current user.
 // Supports ?limit=N query parameter (default 20).
-func GetNudgesSent(c *gin.Context) {
+func (h *NudgeHandler) GetNudgesSent(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	userID, exists := c.Get("user_id")

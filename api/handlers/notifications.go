@@ -9,12 +9,21 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
+
+type NotificationHandler struct {
+	db *gorm.DB
+}
+
+func NewNotificationHandler(db *gorm.DB) *NotificationHandler {
+	return &NotificationHandler{db: db}
+}
 
 // GetNotifications returns all notifications for the current user
 // Supports ?unread=true query parameter to filter to only unread notifications
 // Supports ?include_cleared=true query parameter to include cleared notifications
-func GetNotifications(c *gin.Context) {
+func (h *NotificationHandler) GetNotifications(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
 		utils.BadRequestResponse(c, "missing or invalid user_id")
@@ -31,7 +40,7 @@ func GetNotifications(c *gin.Context) {
 // ClearNotifications marks all non-request notifications as cleared for the current user.
 // Also cleans up any orphaned request notifications where the underlying request
 // no longer exists or is no longer pending.
-func ClearNotifications(c *gin.Context) {
+func (h *NotificationHandler) ClearNotifications(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
@@ -61,7 +70,7 @@ func ClearNotifications(c *gin.Context) {
 }
 
 // MarkNotificationRead marks a specific notification as read
-func MarkNotificationRead(c *gin.Context) {
+func (h *NotificationHandler) MarkNotificationRead(c *gin.Context) {
 	ctx := c.Request.Context()
 	notificationID := c.Param("alertid")
 	userID, exists := c.Get("user_id")
@@ -85,7 +94,7 @@ func MarkNotificationRead(c *gin.Context) {
 // Unlike ClearNotifications which excludes request types, this endpoint
 // allows dismissing any individual notification including orphaned request
 // notifications where the underlying request is no longer valid.
-func DismissNotification(c *gin.Context) {
+func (h *NotificationHandler) DismissNotification(c *gin.Context) {
 	ctx := c.Request.Context()
 	notificationID := c.Param("alertid")
 	userID, exists := c.Get("user_id")
@@ -109,7 +118,7 @@ func DismissNotification(c *gin.Context) {
 }
 
 // RegisterPushToken registers or updates a push notification token for the user
-func RegisterPushToken(c *gin.Context) {
+func (h *NotificationHandler) RegisterPushToken(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
@@ -151,7 +160,7 @@ func RegisterPushToken(c *gin.Context) {
 }
 
 // DeactivatePushToken deactivates a push notification token
-func DeactivatePushToken(c *gin.Context) {
+func (h *NotificationHandler) DeactivatePushToken(c *gin.Context) {
 	ctx := c.Request.Context()
 	expoToken := c.Param("token")
 
@@ -173,7 +182,7 @@ func DeactivatePushToken(c *gin.Context) {
 
 // RefreshBadge calculates the current badge count and sends a silent push to update the app badge.
 // This should be called when the user reads messages, completes tasks/habits, etc.
-func RefreshBadge(c *gin.Context) {
+func (h *NotificationHandler) RefreshBadge(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
 		utils.BadRequestResponse(c, "missing or invalid user_id")
@@ -202,7 +211,7 @@ func RefreshBadge(c *gin.Context) {
 
 // GetBadgeCount returns the current badge count without sending a push notification.
 // Useful for the mobile app to display badge count in the UI.
-func GetBadgeCount(c *gin.Context) {
+func (h *NotificationHandler) GetBadgeCount(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
 		utils.BadRequestResponse(c, "missing or invalid user_id")

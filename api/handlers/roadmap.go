@@ -12,9 +12,18 @@ import (
 	"dr/server/api/utils"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func CreateRoadmap(c *gin.Context) {
+type RoadmapHandler struct {
+	db *gorm.DB
+}
+
+func NewRoadmapHandler(db *gorm.DB) *RoadmapHandler {
+	return &RoadmapHandler{db: db}
+}
+
+func (h *RoadmapHandler) CreateRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	var newRoadmap types.Roadmap
 
@@ -40,12 +49,12 @@ func CreateRoadmap(c *gin.Context) {
 	log.Info(ctx, "Roadmap created successfully")
 }
 
-func GetRoadmapsByUser(c *gin.Context) {
+func (h *RoadmapHandler) GetRoadmapsByUser(c *gin.Context) {
 	roadmaps := database.GetRoadmapsByUser(c)
 	utils.DataResponse(c, http.StatusOK, roadmaps)
 }
 
-func GetRoadmap(c *gin.Context) {
+func (h *RoadmapHandler) GetRoadmap(c *gin.Context) {
 	roadmapID := c.Param("roadmapid")
 	view := c.DefaultQuery("view", "full") // Default to full view
 
@@ -74,7 +83,7 @@ func GetRoadmap(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, roadmap)
 }
 
-func UpdateRoadmap(c *gin.Context) {
+func (h *RoadmapHandler) UpdateRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 	var updatedRoadmap types.Roadmap
@@ -95,7 +104,7 @@ func UpdateRoadmap(c *gin.Context) {
 	log.Info(ctx, "Roadmap updated successfully")
 }
 
-func DeleteRoadmap(c *gin.Context) {
+func (h *RoadmapHandler) DeleteRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
@@ -109,13 +118,13 @@ func DeleteRoadmap(c *gin.Context) {
 	log.Info(ctx, "Roadmap deleted successfully")
 }
 
-func GetMilestonesByRoadmap(c *gin.Context) {
+func (h *RoadmapHandler) GetMilestonesByRoadmap(c *gin.Context) {
 	roadmapID := c.Param("roadmapid")
 	milestones := database.GetMilestonesByRoadmap(c, roadmapID)
 	utils.DataResponse(c, http.StatusOK, milestones)
 }
 
-func GetMilestone(c *gin.Context) {
+func (h *RoadmapHandler) GetMilestone(c *gin.Context) {
 	milestoneID := c.Param("milestoneid")
 	milestone := database.GetMilestone(c, milestoneID)
 
@@ -127,7 +136,7 @@ func GetMilestone(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, milestone)
 }
 
-func UpdateMilestone(c *gin.Context) {
+func (h *RoadmapHandler) UpdateMilestone(c *gin.Context) {
 	ctx := c.Request.Context()
 	milestoneID := c.Param("milestoneid")
 	var updatedMilestone types.Milestone
@@ -146,7 +155,7 @@ func UpdateMilestone(c *gin.Context) {
 	log.Info(ctx, "Milestone updated successfully")
 }
 
-func CreateMilestone(c *gin.Context) {
+func (h *RoadmapHandler) CreateMilestone(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 	var newMilestone types.Milestone
@@ -167,7 +176,7 @@ func CreateMilestone(c *gin.Context) {
 	log.Info(ctx, "Milestone created successfully")
 }
 
-func DeleteMilestone(c *gin.Context) {
+func (h *RoadmapHandler) DeleteMilestone(c *gin.Context) {
 	ctx := c.Request.Context()
 	milestoneID := c.Param("milestoneid")
 
@@ -181,7 +190,7 @@ func DeleteMilestone(c *gin.Context) {
 	log.Info(ctx, "Milestone deleted successfully")
 }
 
-func StartRoadmap(c *gin.Context) {
+func (h *RoadmapHandler) StartRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 	roadmap := database.GetRoadmapFull(c, roadmapID)
@@ -199,12 +208,12 @@ func StartRoadmap(c *gin.Context) {
 		for milestoneIdx := range roadmap.Phases[phaseIdx].Milestones {
 			milestone := &roadmap.Phases[phaseIdx].Milestones[milestoneIdx]
 			log.Info(ctx, "Starting phase milestone", fmt.Sprintf("Day: %d", milestone.Day))
-			updatedMilestone := dateMilestones(c, *roadmap.StartDate, *milestone)
+			updatedMilestone := h.dateMilestones(c, *roadmap.StartDate, *milestone)
 			roadmap.Phases[phaseIdx].Milestones[milestoneIdx] = updatedMilestone
 
 			for taskIdx := range updatedMilestone.Tasks {
 				task := updatedMilestone.Tasks[taskIdx]
-				updatedTask := dateTasks(c, *roadmap.StartDate, task)
+				updatedTask := h.dateTasks(c, *roadmap.StartDate, task)
 				roadmap.Phases[phaseIdx].Milestones[milestoneIdx].Tasks[taskIdx] = updatedTask
 				log.Info(ctx, "Set task date", fmt.Sprintf("Day: %d, Date: %v", updatedTask.Day, updatedTask.Date))
 			}
@@ -215,12 +224,12 @@ func StartRoadmap(c *gin.Context) {
 	for milestoneIdx := range roadmap.Milestones {
 		milestone := &roadmap.Milestones[milestoneIdx]
 		log.Info(ctx, "Starting top-level milestone", fmt.Sprintf("Day: %d", milestone.Day))
-		updatedMilestone := dateMilestones(c, *roadmap.StartDate, *milestone)
+		updatedMilestone := h.dateMilestones(c, *roadmap.StartDate, *milestone)
 		roadmap.Milestones[milestoneIdx] = updatedMilestone
 
 		for taskIdx := range updatedMilestone.Tasks {
 			task := updatedMilestone.Tasks[taskIdx]
-			updatedTask := dateTasks(c, *roadmap.StartDate, task)
+			updatedTask := h.dateTasks(c, *roadmap.StartDate, task)
 			roadmap.Milestones[milestoneIdx].Tasks[taskIdx] = updatedTask
 			log.Info(ctx, "Set task date", fmt.Sprintf("Day: %d, Date: %v", updatedTask.Day, updatedTask.Date))
 		}
@@ -242,7 +251,7 @@ func StartRoadmap(c *gin.Context) {
 	log.Info(ctx, "Roadmap started successfully")
 }
 
-func dateMilestones(c *gin.Context, startDate time.Time, milestone types.Milestone) types.Milestone {
+func (h *RoadmapHandler) dateMilestones(c *gin.Context, startDate time.Time, milestone types.Milestone) types.Milestone {
 
 	date := startDate.AddDate(0, 0, milestone.Day)
 	milestone.Date = &date
@@ -250,7 +259,7 @@ func dateMilestones(c *gin.Context, startDate time.Time, milestone types.Milesto
 	return database.UpdateMilestone(c, milestone.MilestoneID, milestone)
 }
 
-func dateTasks(c *gin.Context, startDate time.Time, task types.Task) types.Task {
+func (h *RoadmapHandler) dateTasks(c *gin.Context, startDate time.Time, task types.Task) types.Task {
 
 	date := startDate.AddDate(0, 0, task.Day)
 	task.Date = &date
@@ -260,7 +269,7 @@ func dateTasks(c *gin.Context, startDate time.Time, task types.Task) types.Task 
 
 // Anchor handlers
 
-func CreateAnchorRequest(c *gin.Context) {
+func (h *RoadmapHandler) CreateAnchorRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
@@ -298,12 +307,12 @@ func CreateAnchorRequest(c *gin.Context) {
 	go sendAnchorRequestNotification(anchorRequest)
 }
 
-func GetAnchorRequests(c *gin.Context) {
+func (h *RoadmapHandler) GetAnchorRequests(c *gin.Context) {
 	requests := database.GetAnchorRequests(c)
 	utils.DataResponse(c, http.StatusOK, requests)
 }
 
-func AcceptAnchorRequest(c *gin.Context) {
+func (h *RoadmapHandler) AcceptAnchorRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	requestID := c.Param("requestid")
 	userID, _ := c.Get("user_id")
@@ -341,7 +350,7 @@ func AcceptAnchorRequest(c *gin.Context) {
 	go sendAnchorStatusNotification(anchorRequest, "accepted")
 }
 
-func RejectAnchorRequest(c *gin.Context) {
+func (h *RoadmapHandler) RejectAnchorRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	requestID := c.Param("requestid")
 	userID, _ := c.Get("user_id")
@@ -379,7 +388,7 @@ func RejectAnchorRequest(c *gin.Context) {
 	go sendAnchorStatusNotification(anchorRequest, "rejected")
 }
 
-func RemoveAnchor(c *gin.Context) {
+func (h *RoadmapHandler) RemoveAnchor(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 

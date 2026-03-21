@@ -10,9 +10,18 @@ import (
 	"dr/server/api/utils"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func CreateUser(c *gin.Context) {
+type UserHandler struct {
+	db *gorm.DB
+}
+
+func NewUserHandler(db *gorm.DB) *UserHandler {
+	return &UserHandler{db: db}
+}
+
+func (h *UserHandler) CreateUser(c *gin.Context) {
 	ctx := c.Request.Context()
 	var newUser types.User
 
@@ -36,7 +45,7 @@ func CreateUser(c *gin.Context) {
 	log.Info(ctx, "User upserted successfully")
 }
 
-func UpdateUser(c *gin.Context) {
+func (h *UserHandler) UpdateUser(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
@@ -62,7 +71,7 @@ func UpdateUser(c *gin.Context) {
 	log.Info(ctx, "User updated successfully")
 }
 
-func GetUser(c *gin.Context) {
+func (h *UserHandler) GetUser(c *gin.Context) {
 	ctx := c.Request.Context()
 	user := database.GetUser(c)
 
@@ -75,7 +84,7 @@ func GetUser(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, user)
 }
 
-func DeleteUser(c *gin.Context) {
+func (h *UserHandler) DeleteUser(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
@@ -94,7 +103,7 @@ func DeleteUser(c *gin.Context) {
 	log.Info(ctx, "User deleted successfully")
 }
 
-func SearchUsers(c *gin.Context) {
+func (h *UserHandler) SearchUsers(c *gin.Context) {
 	email := c.Query("email")
 	if email == "" {
 		utils.BadRequestResponse(c, "email query parameter is required")

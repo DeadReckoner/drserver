@@ -18,7 +18,8 @@ func init() {
 }
 
 func TestHealthEndpoint(t *testing.T) {
-	router := NewRouter()
+	// Health endpoints don't use the database, so we can pass nil
+	router := NewRouter(nil)
 
 	req, _ := http.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
@@ -33,7 +34,8 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestHealthzEndpoint(t *testing.T) {
-	router := NewRouter()
+	// Health endpoints don't use the database, so we can pass nil
+	router := NewRouter(nil)
 
 	req, _ := http.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()

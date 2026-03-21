@@ -9,9 +9,18 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-func SearchFriends(c *gin.Context) {
+type FriendHandler struct {
+	db *gorm.DB
+}
+
+func NewFriendHandler(db *gorm.DB) *FriendHandler {
+	return &FriendHandler{db: db}
+}
+
+func (h *FriendHandler) SearchFriends(c *gin.Context) {
 	email := c.Query("email")
 	if email == "" {
 		utils.BadRequestResponse(c, "email query parameter is required")
@@ -47,7 +56,7 @@ func SearchFriends(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, results)
 }
 
-func CreateFriendRequest(c *gin.Context) {
+func (h *FriendHandler) CreateFriendRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	addresseeID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
@@ -84,12 +93,12 @@ func CreateFriendRequest(c *gin.Context) {
 	go sendFriendRequestNotification(friendship)
 }
 
-func GetFriendRequests(c *gin.Context) {
+func (h *FriendHandler) GetFriendRequests(c *gin.Context) {
 	friendRequests := database.GetFriendRequests(c)
 	utils.DataResponse(c, http.StatusOK, friendRequests)
 }
 
-func GetFriends(c *gin.Context) {
+func (h *FriendHandler) GetFriends(c *gin.Context) {
 	currentUserID, exists := c.Get("user_id")
 	if !exists || currentUserID == "" {
 		utils.InternalErrorResponse(c, nil)
@@ -125,7 +134,7 @@ func GetFriends(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, friends)
 }
 
-func GetFriendProfile(c *gin.Context) {
+func (h *FriendHandler) GetFriendProfile(c *gin.Context) {
 	friendUserID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
 		return
@@ -155,7 +164,7 @@ func GetFriendProfile(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, response)
 }
 
-func RemoveFriend(c *gin.Context) {
+func (h *FriendHandler) RemoveFriend(c *gin.Context) {
 	ctx := c.Request.Context()
 	friendUserID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
@@ -177,7 +186,7 @@ func RemoveFriend(c *gin.Context) {
 	log.Info(ctx, "Friendship removed successfully")
 }
 
-func UpdateFriendRequestStatus(c *gin.Context) {
+func (h *FriendHandler) UpdateFriendRequestStatus(c *gin.Context) {
 	ctx := c.Request.Context()
 	friendshipID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {

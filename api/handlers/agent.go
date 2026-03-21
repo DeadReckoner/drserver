@@ -15,9 +15,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
-func AgentGenerate(c *gin.Context) {
+type AgentHandler struct {
+	db *gorm.DB
+}
+
+func NewAgentHandler(db *gorm.DB) *AgentHandler {
+	return &AgentHandler{db: db}
+}
+
+func (h *AgentHandler) AgentGenerate(c *gin.Context) {
 	ctx := c.Request.Context()
 	var goalReq types.GoalRequest
 
@@ -46,7 +55,7 @@ func AgentGenerate(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, generated.Roadmap)
 }
 
-func AgentGenerateAsync(c *gin.Context) {
+func (h *AgentHandler) AgentGenerateAsync(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID := c.GetString("user_id")
 
@@ -102,7 +111,7 @@ func AgentGenerateAsync(c *gin.Context) {
 
 }
 
-func WSAgentProgress(c *gin.Context) {
+func (h *AgentHandler) WSAgentProgress(c *gin.Context) {
 	ctx := c.Request.Context()
 	jobID := c.Param("jobid")
 	userID := c.GetString("user_id")
@@ -147,7 +156,7 @@ func WSAgentProgress(c *gin.Context) {
 
 }
 
-func GetJobStatus(c *gin.Context) {
+func (h *AgentHandler) GetJobStatus(c *gin.Context) {
 	jobID := c.Param("jobid")
 	userID := c.GetString("user_id")
 
@@ -340,7 +349,7 @@ func getProgressMessage(status string, progress int) string {
 	return "Finalizing..."
 }
 
-func AgentGenerateMilestone(c *gin.Context) {
+func (h *AgentHandler) AgentGenerateMilestone(c *gin.Context) {
 	ctx := c.Request.Context()
 	milestoneID := c.Param("milestoneid")
 
@@ -379,7 +388,7 @@ func AgentGenerateMilestone(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, milestone)
 }
 
-func StartAISession(c *gin.Context) {
+func (h *AgentHandler) StartAISession(c *gin.Context) {
 	userID := c.GetString("user_id")
 	session := agent.AISession{
 		SessionID: uuid.New(),
@@ -403,7 +412,7 @@ func StartAISession(c *gin.Context) {
 	})
 }
 
-func ReplyAISession(c *gin.Context) {
+func (h *AgentHandler) ReplyAISession(c *gin.Context) {
 	sessionID := c.Param("id")
 	var req struct {
 		Message string `json:"message"`
@@ -443,7 +452,7 @@ func ReplyAISession(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, resp)
 }
 
-func GetAISession(c *gin.Context) {
+func (h *AgentHandler) GetAISession(c *gin.Context) {
 	sessionID := c.Param("id")
 	session, err := agent.LoadAISession(sessionID)
 	if err != nil {
