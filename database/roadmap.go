@@ -194,6 +194,12 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 		Preload("Phases.Milestones", func(db *gorm.DB) *gorm.DB {
 			return db.Order("order_index ASC")
 		}).
+		Preload("Phases.Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Phases.Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
 		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
 			return db.Order("day ASC")
 		}).
