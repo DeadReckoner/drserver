@@ -7,6 +7,7 @@ import (
 	"dr/server/types"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"dr/server/api/utils"
@@ -17,6 +18,17 @@ import (
 
 type RoadmapHandler struct {
 	db *gorm.DB
+}
+
+type anchorUserResponse struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+type roadmapWithAnchorResponse struct {
+	types.Roadmap
+	Anchor *anchorUserResponse `json:"anchor,omitempty"`
 }
 
 func NewRoadmapHandler(db *gorm.DB) *RoadmapHandler {
@@ -55,6 +67,7 @@ func (h *RoadmapHandler) GetRoadmapsByUser(c *gin.Context) {
 }
 
 func (h *RoadmapHandler) GetRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 	view := c.DefaultQuery("view", "full") // Default to full view
 
@@ -80,7 +93,32 @@ func (h *RoadmapHandler) GetRoadmap(c *gin.Context) {
 		return
 	}
 
-	utils.DataResponse(c, http.StatusOK, roadmap)
+	anchor := h.getAnchorUserResponse(ctx, roadmap.AnchorID)
+
+	utils.DataResponse(c, http.StatusOK, roadmapWithAnchorResponse{
+		Roadmap: roadmap,
+		Anchor:  anchor,
+	})
+}
+
+func (h *RoadmapHandler) getAnchorUserResponse(ctx context.Context, anchorID *string) *anchorUserResponse {
+	if anchorID == nil || *anchorID == "" {
+		return nil
+	}
+
+	anchorUser, err := database.GetUserByID(*anchorID)
+	if err != nil {
+		log.Warn(ctx, "Failed to fetch anchor user for roadmap response", err.Error())
+		return nil
+	}
+
+	name := strings.TrimSpace(anchorUser.FirstName + " " + anchorUser.LastName)
+
+	return &anchorUserResponse{
+		ID:    anchorUser.UserID,
+		Name:  name,
+		Email: anchorUser.Email,
+	}
 }
 
 func (h *RoadmapHandler) UpdateRoadmap(c *gin.Context) {
