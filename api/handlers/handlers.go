@@ -14,6 +14,7 @@ type Handlers struct {
 	Message      *MessageHandler
 	Feedback     *FeedbackHandler
 	Nudge        *NudgeHandler
+	Metrics      *MetricsHandler
 }
 
 // NewHandlers creates all handlers with the given database connection
@@ -29,5 +30,6 @@ func NewHandlers(db *gorm.DB) *Handlers {
 		Message:      NewMessageHandler(db),
 		Feedback:     NewFeedbackHandler(db),
 		Nudge:        NewNudgeHandler(db),
+		Metrics:      NewMetricsHandler(db),
 	}
 }

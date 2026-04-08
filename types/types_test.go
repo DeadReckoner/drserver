@@ -2,6 +2,7 @@ package types
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -59,6 +60,49 @@ func TestUserParseFullName(t *testing.T) {
 			assert.Equal(t, test.wantFirst, test.user.FirstName)
 			assert.Equal(t, test.wantLast, test.user.LastName)
 		})
+	}
+
+}
+
+// type CreateHabitRequest struct {
+// 	Title          string         `json:"title" binding:"required"`
+// 	Description    string         `json:"description"`
+// 	RecurrenceType RecurrenceType `json:"recurrence_type" binding:"required"`
+// 	DaysOfWeek     int            `json:"days_of_week"`
+// 	DayOfMonth     *int           `json:"day_of_month"`
+// 	DueDate        *time.Time     `json:"due_date"`
+// 	StartDate      *time.Time     `json:"start_date"`
+// 	EndDate        *time.Time     `json:"end_date"`
+// }
+
+// TODO add more test cases
+func TestCreateHabitRequest_Validate(t *testing.T) {
+
+	tests := []struct {
+		name    string
+		req     CreateHabitRequest
+		wantErr error
+	}{
+		{"happy path: daily", CreateHabitRequest{
+			Title:          "happy path: daily",
+			RecurrenceType: RecurrenceDaily,
+			DueDate:        &time.Time{},
+		}, nil},
+		{"sad path: due date nil", CreateHabitRequest{
+			Title:          "happy path: daily",
+			RecurrenceType: RecurrenceNone,
+			DueDate:        nil,
+		}, ErrDueDateRequired},
+		{"sad path: due date nil", CreateHabitRequest{
+			Title:          "happy path: daily",
+			RecurrenceType: "invalid",
+			DueDate:        nil,
+		}, ErrInvalidRecurrenceType},
+	}
+
+	for _, test := range tests {
+		err := test.req.Validate()
+		assert.Equal(t, test.wantErr, err)
 	}
 
 }

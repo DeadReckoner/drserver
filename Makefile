@@ -1,8 +1,8 @@
 
-.PHONY: all tidy vet fmt build test clean
+.PHONY: all tidy vet fmt build test clean start_server
 
 all: tidy fmt lint build test clean
-local: tidy fmt lint test run
+run: tidy fmt lint test start_server
 ci: tidy fmt build test clean
 
 
@@ -21,12 +21,11 @@ lint:
 build:
 	go build .
 
-run:
+start_server:
 	go run .
 
-
 test:
-	go test -cover ./...
+	go test -count=1 -cover ./...
 
 clean:
 	rm -f ./server

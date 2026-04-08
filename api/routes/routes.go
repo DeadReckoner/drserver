@@ -220,6 +220,15 @@ func setupNudgeRoutes(rg *gin.RouterGroup, h *handlers.NudgeHandler) {
 	}
 }
 
+func setUpMetricRoutes(rg *gin.RouterGroup, h *handlers.MetricsHandler) {
+	metrics := rg.Group("/metrics")
+	{
+		metrics.GET("/")
+		metrics.GET("/:roadmapid")
+	}
+
+}
+
 func setupWebSocketRoutes(rg *gin.RouterGroup, agent *handlers.AgentHandler, message *handlers.MessageHandler) {
 	ws := rg.Group("/ws")
 	{
