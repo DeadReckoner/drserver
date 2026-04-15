@@ -477,6 +477,49 @@ type GoalRequest struct {
 	AdditionalContext    string `json:"additionalContext"`
 }
 
+// MilestoneReviewAnswers captures the user's answers to the 7 hardcoded review
+// questions shown in the mobile UI when completing a milestone. All fields are
+// free-form strings; empty strings are allowed (user skipped that question).
+type MilestoneReviewAnswers struct {
+	CompletionStatus string `json:"completionStatus"` // Q1: did they complete everything / check off what was needed
+	WhatWorked       string `json:"whatWorked"`       // Q2: what felt smooth/effective/motivating
+	WhatDidntWork    string `json:"whatDidntWork"`    // Q3: what felt confusing/difficult/unnecessary
+	Obstacles        string `json:"obstacles"`        // Q4: practical or personal obstacles
+	PaceFeedback     string `json:"paceFeedback"`     // Q5: workload and pace feedback
+	ClarityFeedback  string `json:"clarityFeedback"`  // Q6: were the instructions clear
+	GoingForward     string `json:"goingForward"`     // Q7: preferences for next milestone + life changes
+}
+
+// GenerateNextMilestoneRequest is the request body for the async next-milestone
+// endpoint. Embeds GoalRequest (same goal metadata as initial generation) plus
+// the user's review answers for the prior milestone.
+type GenerateNextMilestoneRequest struct {
+	GoalRequest
+	Review MilestoneReviewAnswers `json:"review"`
+}
+
+// MilestoneAdjustments is the AI's proposed adjustments to a milestone based
+// on user review answers. Because OpenAI strict-schema mode requires every
+// field be in `required`, we use sentinel values to mean "unchanged":
+//   - empty string for strings
+//   - 0 for integers
+//   - empty array for arrays
+//
+// The top-level Adjusted flag is a second gate: callers should ignore all
+// fields unless Adjusted is true.
+type MilestoneAdjustments struct {
+	Adjusted          bool    `json:"adjusted"`
+	SubGoal           string  `json:"sub_goal,omitempty"`
+	Description       string  `json:"description,omitempty"`
+	AcceptanceTest    string  `json:"acceptance_test,omitempty"`
+	DurationDaysMin   int     `json:"duration_days_min,omitempty"`
+	DurationDaysMax   int     `json:"duration_days_max,omitempty"`
+	ResourcesForecast string  `json:"resources_forecast,omitempty"`
+	Spikes            []Spike `json:"spikes,omitempty"` // non-empty = replace existing
+	Risks             []Risk  `json:"risks,omitempty"`  // non-empty = replace existing
+	Rationale         string  `json:"rationale,omitempty"`
+}
+
 type OpenAIContent struct {
 	Type        string `json:"type"`
 	Annotations []any  `json:"annotations"`

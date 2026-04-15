@@ -1923,6 +1923,75 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/agent/generate-next-milestone-async/{milestoneid}:
+    post:
+      summary: Generate the next milestone asynchronously with user review feedback
+      tags: [AI Agent]
+      description: |
+        Generates tasks (and optionally adjusts strategic fields) for a milestone
+        that already exists in the roadmap but has no tasks yet. The user provides
+        answers to the 7 hardcoded review questions from the mobile UI about how
+        the prior milestone went; the AI uses that feedback to:
+
+        1. Optionally adjust this milestone's strategic fields (sub_goal,
+           description, acceptance_test, duration, resources_forecast, spikes,
+           risks) — only when the feedback warrants it.
+        2. Generate 10-14 tasks (with nested steps) tuned to the user's pacing
+           and clarity preferences.
+
+        Returns immediately with a job_id. Client subscribes to
+        `/ws/agent/{jobid}` for progress. Re-invoking on the same milestone
+        wipes existing tasks and replaces them with the new set.
+      parameters:
+        - name: milestoneid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: ID of the milestone to generate tasks for
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateNextMilestoneRequest'
+      responses:
+        '202':
+          description: Generation started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "pending"
+                  job_id:
+                    type: string
+                    format: uuid
+                    example: "123e4567-e89b-12d3-a456-426614174000"
+                  milestone_id:
+                    type: string
+                    format: uuid
+                    example: "123e4567-e89b-12d3-a456-426614174001"
+                  roadmap_id:
+                    type: string
+                    format: uuid
+                    example: "123e4567-e89b-12d3-a456-426614174002"
+                  message:
+                    type: string
+                    example: "Your next milestone is being generated"
+                  ws_url:
+                    type: string
+                    example: "ws/agent/123e4567-e89b-12d3-a456-426614174000"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/agent/sessions:
     post:
       summary: Start new AI conversation session
@@ -3369,6 +3438,61 @@ components:
         currentSkillLevel:
           type: string
           example: "Beginner"
+        additionalContext:
+          type: string
+          example: "I learn best with hands-on projects"
+
+    MilestoneReviewAnswers:
+      type: object
+      description: |
+        User's free-form answers to the 7 hardcoded milestone-review questions
+        shown in the mobile UI. All fields are optional (empty string means the
+        user skipped that question). The server passes these answers to the AI
+        so it can adjust the next milestone's pacing, clarity, and structure.
+      properties:
+        completionStatus:
+          type: string
+          description: "Q1: How did things go? Did they complete everything or just check off what they needed?"
+          example: "Mostly completed, skipped a few tasks that felt redundant"
+        whatWorked:
+          type: string
+          description: "Q2: What parts felt smooth, effective, or motivating?"
+          example: "Short daily tasks kept me consistent"
+        whatDidntWork:
+          type: string
+          description: "Q3: What felt confusing, difficult, unnecessary, or out of alignment?"
+          example: "The theory-heavy tasks felt disconnected from the practical ones"
+        obstacles:
+          type: string
+          description: "Q4: Obstacles encountered (practical or personal)"
+          example: "Had a work trip mid-week that threw off the schedule"
+        paceFeedback:
+          type: string
+          description: "Q5: Workload and pace — too easy, just right, or heavier than expected?"
+          example: "A bit heavier than expected — I'd prefer slightly fewer tasks per day"
+        clarityFeedback:
+          type: string
+          description: "Q6: Were the instructions clear? Which parts needed more explanation?"
+          example: "Steps 2 and 3 of the 'setup environment' task needed more detail"
+        goingForward:
+          type: string
+          description: "Q7: Preferences for next milestone + any life/priority changes"
+          example: "I'd like more hands-on projects; also, I can now dedicate 15 hours/week"
+
+    GenerateNextMilestoneRequest:
+      type: object
+      description: |
+        Request body for POST /api/v1/agent/generate-next-milestone-async/{milestoneid}.
+        Embeds all GoalRequest fields (same goal metadata as initial generation) plus
+        the user's answers to the 7 milestone-review questions.
+      allOf:
+        - $ref: '#/components/schemas/GoalRequest'
+        - type: object
+          required:
+            - review
+          properties:
+            review:
+              $ref: '#/components/schemas/MilestoneReviewAnswers'
 
     AISession:
       type: object
@@ -3422,7 +3546,7 @@ components:
           example: "123e4567-e89b-12d3-a456-426614174000"
         type:
           type: string
-          enum: [roadmap_generation]
+          enum: [roadmap_generation, milestone_generation]
           description: Type of background job
           example: "roadmap_generation"
         status:

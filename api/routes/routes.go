@@ -162,6 +162,7 @@ func setupAgentRoutes(rg *gin.RouterGroup, h *handlers.AgentHandler) {
 		agent.POST("/generateMilestone/:milestoneid", h.AgentGenerateMilestone)
 
 		agent.POST("/generate-async", h.AgentGenerateAsync)
+		agent.POST("/generate-next-milestone-async/:milestoneid", utils.ValidateUUID("milestoneid"), h.AgentGenerateNextMilestoneAsync)
 		sessions := agent.Group("/sessions")
 		{
 			sessions.POST("", h.StartAISession)
