@@ -134,7 +134,7 @@ func GenerateMilestoneTasksFromGoalRequest(ctx context.Context, goalReq types.Go
 
 	// Generate tasks using the milestone as context
 	log.Info(ctx, "Calling OpenAI API for milestone tasks generation", "")
-	tasksResp, err := generateMilestoneTasks(ctx, prompt, milestone)
+	tasksResp, err := generateMilestoneTasks(ctx, prompt, milestone, "")
 	if err != nil {
 		log.Info(ctx, "Milestone tasks API call failed", fmt.Sprintf("Error: %v", err))
 		return nil, fmt.Errorf("failed to generate milestone tasks: %w", err)
@@ -188,7 +188,7 @@ func generateRoadmapFromPrompt(ctx context.Context, userPrompt string) (*Generat
 	}
 
 	if firstMilestone != nil {
-		tasksResp, err := generateMilestoneTasks(ctx, userPrompt, firstMilestone)
+		tasksResp, err := generateMilestoneTasks(ctx, userPrompt, firstMilestone, "")
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate milestone tasks: %w", err)
 		}
@@ -404,9 +404,14 @@ func generateStrategicRoadmap(ctx context.Context, userPrompt string) ([]byte, e
 // generateMilestoneTasks creates detailed tasks for a specific milestone
 // Takes a milestone as input and generates 10-14 detailed tasks
 //
-// INPUT: milestone - The milestone to generate tasks for
+// INPUT:
+//   - milestone: The milestone to generate tasks for
+//   - reviewContext: Optional user feedback from prior milestone review (empty for
+//     initial generation). When non-empty, injected into the system prompt so the
+//     model can tune pacing, clarity, and task count to the user's preferences.
+//
 // OUTPUT: Raw JSON response with tasks and steps
-func generateMilestoneTasks(ctx context.Context, userPrompt string, milestone *types.Milestone) ([]byte, error) {
+func generateMilestoneTasks(ctx context.Context, userPrompt string, milestone *types.Milestone, reviewContext string) ([]byte, error) {
 	// Convert the milestone into a text summary to inject into the AI prompt
 	milestoneContext := buildMilestoneContext(milestone)
 
@@ -475,6 +480,15 @@ func generateMilestoneTasks(ctx context.Context, userPrompt string, milestone *t
 		"additionalProperties": false,
 	}
 
+	reviewSection := ""
+	if reviewContext != "" {
+		reviewSection = fmt.Sprintf(`
+
+									USER REVIEW OF PRIOR MILESTONE (adjust pacing/clarity/approach accordingly):
+									%s
+`, reviewContext)
+	}
+
 	systemPrompt := fmt.Sprintf(`You are a Goal Achievement Coach Agent focused on creating detailed, actionable tactical plans.
 
 									CORE DIRECTIVES:
@@ -484,7 +498,7 @@ func generateMilestoneTasks(ctx context.Context, userPrompt string, milestone *t
 									- Be empowering: Include rationales that help users understand WHY each task matters
 
 									MILESTONE CONTEXT:
-									%s
+									%s%s
 
 									YOUR TASK - GENERATE TASKS:
 									Generate 10-14 specific, actionable tasks for this milestone.
@@ -510,7 +524,7 @@ func generateMilestoneTasks(ctx context.Context, userPrompt string, milestone *t
 									FORMATTING:
 									- Set all 'completed' fields to false
 									- Day numbers should be sequential starting from day 1
-									- Dependencies should be exact task titles from earlier tasks in the list`, milestoneContext)
+									- Dependencies should be exact task titles from earlier tasks in the list`, milestoneContext, reviewSection)
 
 	reqBody := AIRequest{
 		Model: "gpt-5-mini",
@@ -642,6 +656,269 @@ func parseMilestoneTasksResponse(rawResp []byte) ([]types.Task, error) {
 	}
 
 	return result.Tasks, nil
+}
+
+// buildReviewContext formats the user's prior-milestone review answers into a
+// plain-text block to inject into AI prompts. Empty answers are skipped so the
+// model sees only what the user actually said.
+func buildReviewContext(review types.MilestoneReviewAnswers) string {
+	out := ""
+	appendIf := func(label, value string) {
+		if value == "" {
+			return
+		}
+		out += fmt.Sprintf("- %s: %s\n", label, value)
+	}
+	appendIf("Completion status", review.CompletionStatus)
+	appendIf("What worked well", review.WhatWorked)
+	appendIf("What didn't work", review.WhatDidntWork)
+	appendIf("Obstacles", review.Obstacles)
+	appendIf("Workload/pace feedback", review.PaceFeedback)
+	appendIf("Instruction clarity", review.ClarityFeedback)
+	appendIf("Preferences for next milestone / life changes", review.GoingForward)
+	if out == "" {
+		return "(User did not provide review feedback.)"
+	}
+	return out
+}
+
+// GenerateNextMilestoneFromReview is the public entry point for the
+// "generate next milestone" flow. It runs two OpenAI calls in sequence:
+//
+//  1. Adjustments call: given goal + current milestone + review answers,
+//     decide whether to adjust milestone strategic fields (sub_goal,
+//     description, acceptance test, duration, resources, spikes, risks).
+//  2. Tasks call: generate 10-14 tasks/steps for the (possibly adjusted)
+//     milestone, with review context injected so pacing/clarity reflects
+//     user feedback.
+//
+// The returned MilestoneAdjustments is safe to apply directly — any fields
+// with sentinel values ("" / 0 / empty array) should be treated as unchanged
+// by the caller. The returned milestone copy already has adjustments applied
+// in-memory (but the DB write is the caller's responsibility).
+func GenerateNextMilestoneFromReview(
+	ctx context.Context,
+	goalReq types.GoalRequest,
+	milestone *types.Milestone,
+	review types.MilestoneReviewAnswers,
+) (*types.MilestoneAdjustments, []types.Task, error) {
+	log.Info(ctx, "Starting next milestone generation",
+		fmt.Sprintf("Goal: %s, Milestone: %s", goalReq.GoalName, milestone.SubGoal))
+
+	prompt := buildGoalPrompt(goalReq)
+	reviewContext := buildReviewContext(review)
+
+	// STEP 1: Adjustments call
+	adjResp, err := generateMilestoneAdjustments(ctx, prompt, milestone, reviewContext)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate milestone adjustments: %w", err)
+	}
+	adjustments, err := parseMilestoneAdjustmentsResponse(adjResp)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse milestone adjustments: %w", err)
+	}
+	log.Info(ctx, "Milestone adjustments parsed",
+		fmt.Sprintf("Adjusted: %v, Rationale: %s", adjustments.Adjusted, adjustments.Rationale))
+
+	// Apply adjustments to an in-memory copy of the milestone so task generation
+	// reflects the new strategic context. Sentinel values mean "unchanged".
+	adjusted := *milestone
+	if adjustments.Adjusted {
+		if adjustments.SubGoal != "" {
+			adjusted.SubGoal = adjustments.SubGoal
+		}
+		if adjustments.Description != "" {
+			adjusted.Description = adjustments.Description
+		}
+		if adjustments.AcceptanceTest != "" {
+			adjusted.AcceptanceTest = adjustments.AcceptanceTest
+		}
+		if adjustments.DurationDaysMin > 0 {
+			adjusted.DurationDaysMin = adjustments.DurationDaysMin
+		}
+		if adjustments.DurationDaysMax > 0 {
+			adjusted.DurationDaysMax = adjustments.DurationDaysMax
+		}
+		if adjustments.ResourcesForecast != "" {
+			rf := adjustments.ResourcesForecast
+			adjusted.ResourcesForecast = &rf
+		}
+		if len(adjustments.Spikes) > 0 {
+			adjusted.Spikes = adjustments.Spikes
+		}
+		if len(adjustments.Risks) > 0 {
+			adjusted.Risks = adjustments.Risks
+		}
+	}
+
+	// STEP 2: Tasks call, with review context injected
+	tasksResp, err := generateMilestoneTasks(ctx, prompt, &adjusted, reviewContext)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate milestone tasks: %w", err)
+	}
+	tasks, err := parseMilestoneTasksResponse(tasksResp)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse milestone tasks: %w", err)
+	}
+	log.Info(ctx, "Next milestone tasks parsed", fmt.Sprintf("Tasks: %d", len(tasks)))
+
+	return adjustments, tasks, nil
+}
+
+// generateMilestoneAdjustments asks the model whether any strategic fields of
+// the current milestone should be tweaked in light of the user's review.
+//
+// Strict-schema note: OpenAI strict mode requires every property appear in the
+// `required` array, so there is no true "optional" field. We use sentinel
+// values to mean "unchanged":
+//   - empty string for strings
+//   - 0 for integers
+//   - empty array for arrays
+//
+// The top-level `adjusted` boolean is a second gate — callers ignore all
+// fields when `adjusted` is false.
+func generateMilestoneAdjustments(ctx context.Context, userPrompt string, milestone *types.Milestone, reviewContext string) ([]byte, error) {
+	milestoneContext := buildMilestoneContext(milestone)
+
+	schema := map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"adjusted": map[string]interface{}{
+				"type": "boolean",
+			},
+			"sub_goal": map[string]interface{}{
+				"type": "string",
+			},
+			"description": map[string]interface{}{
+				"type": "string",
+			},
+			"acceptance_test": map[string]interface{}{
+				"type": "string",
+			},
+			"duration_days_min": map[string]interface{}{
+				"type": "integer",
+			},
+			"duration_days_max": map[string]interface{}{
+				"type": "integer",
+			},
+			"resources_forecast": map[string]interface{}{
+				"type": "string",
+			},
+			"spikes": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"description": map[string]interface{}{
+							"type": "string",
+						},
+						"timebox_days": map[string]interface{}{
+							"type": "integer",
+						},
+					},
+					"required":             []string{"description", "timebox_days"},
+					"additionalProperties": false,
+				},
+			},
+			"risks": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"description": map[string]interface{}{
+							"type": "string",
+						},
+						"severity": map[string]interface{}{
+							"type": "string",
+							"enum": []string{"low", "medium", "high"},
+						},
+					},
+					"required":             []string{"description", "severity"},
+					"additionalProperties": false,
+				},
+			},
+			"rationale": map[string]interface{}{
+				"type": "string",
+			},
+		},
+		"required":             []string{"adjusted", "sub_goal", "description", "acceptance_test", "duration_days_min", "duration_days_max", "resources_forecast", "spikes", "risks", "rationale"},
+		"additionalProperties": false,
+	}
+
+	systemPrompt := fmt.Sprintf(`You are a Goal Achievement Coach Agent reviewing a user's feedback on a completed milestone.
+
+								YOUR TASK:
+								Decide whether the NEXT milestone's strategic fields should be adjusted based on the user's review of the PRIOR milestone. The next milestone was generated during initial roadmap planning; you may refine it if the user's feedback warrants.
+
+								NEXT MILESTONE (as currently planned):
+								%s
+
+								USER REVIEW OF PRIOR MILESTONE:
+								%s
+
+								OUTPUT RULES (CRITICAL — the response schema has no optional fields):
+								- Set "adjusted" to true ONLY if at least one substantive change is being made. If the milestone is fine as-is, set "adjusted" to false and use sentinel values for every other field.
+								- For fields you do NOT want to change, use these sentinel values:
+								  * strings: "" (empty string) — do NOT restate the existing value
+								  * integers: 0
+								  * arrays: [] (empty array)
+								- For fields you DO want to change, emit the new value.
+								- "spikes" and "risks": if non-empty, the entire array REPLACES the existing list. Only include these if the user's feedback clearly surfaces new investigations or risks.
+								- "rationale": a one-sentence explanation of what you adjusted and why (or "" if no adjustments).
+
+								GUIDELINES:
+								- Respect the user's pace preference (e.g., if they want slower pacing, consider increasing duration_days_min/max).
+								- If instructions were unclear, consider clarifying the description or acceptance_test.
+								- Keep changes minimal and proportionate to the feedback. Do not redesign the milestone.
+								- If the user did not provide review feedback, set "adjusted" to false.`, milestoneContext, reviewContext)
+
+	reqBody := AIRequest{
+		Model: "gpt-5-nano",
+		Input: []Message{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
+		},
+	}
+	reqBody.Text.Format.Type = "json_schema"
+	reqBody.Text.Format.Name = "milestone_adjustments"
+	reqBody.Text.Format.Schema = schema
+	reqBody.Text.Format.Strict = true
+
+	return makeOpenAIRequest(ctx, reqBody)
+}
+
+// parseMilestoneAdjustmentsResponse extracts MilestoneAdjustments from OpenAI's
+// response envelope.
+func parseMilestoneAdjustmentsResponse(rawResp []byte) (*types.MilestoneAdjustments, error) {
+	var apiResp types.OpenAIResponse
+	if err := json.Unmarshal(rawResp, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse OpenAI response: %w", err)
+	}
+
+	if len(apiResp.Output) == 0 {
+		return nil, fmt.Errorf("no output found in OpenAI response")
+	}
+
+	var messageContent []types.OpenAIContent
+	for _, output := range apiResp.Output {
+		if output.Type == "message" && len(output.Content) > 0 {
+			messageContent = output.Content
+			break
+		}
+	}
+
+	if len(messageContent) == 0 {
+		return nil, fmt.Errorf("no content found in OpenAI output")
+	}
+
+	rawJSON := messageContent[0].Text
+
+	var adj types.MilestoneAdjustments
+	if err := json.Unmarshal([]byte(rawJSON), &adj); err != nil {
+		return nil, fmt.Errorf("failed to parse milestone adjustments JSON: %w", err)
+	}
+
+	return &adj, nil
 }
 
 // makeOpenAIRequest is the shared HTTP client for all OpenAI API calls

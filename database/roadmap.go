@@ -482,6 +482,34 @@ func GetMilestonesByRoadmap(c *gin.Context, roadmapID string) []types.Milestone 
 	return milestones
 }
 
+// GetMilestoneForGeneration loads a milestone with its strategic metadata
+// (Spikes, Risks) and Tasks/Steps preloaded. Intended for background AI
+// generation flows that need the full strategic context to build prompts.
+// Returns an empty milestone if not found or not owned by userID.
+func GetMilestoneForGeneration(userID, milestoneID string) types.Milestone {
+	var milestone types.Milestone
+	if userID == "" {
+		return types.Milestone{}
+	}
+
+	result := db.Where("user_id = ?", userID).Where("milestone_id = ?", milestoneID).
+		Preload("Spikes").
+		Preload("Risks").
+		Preload("Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
+		First(&milestone)
+
+	if result.Error != nil {
+		log.Println("Error fetching milestone for generation:", result.Error)
+	}
+
+	return milestone
+}
+
 func GetMilestone(c *gin.Context, milestoneID string) types.Milestone {
 	var milestone types.Milestone
 	user_id, exists := c.Get("user_id")
@@ -769,4 +797,183 @@ func UpdateRoadmapGenerationStatus(ctx context.Context, roadmapID, status string
 	return db.Model(&types.Roadmap{}).
 		Where("roadmap_id = ?", roadmapID).
 		Update("generation_status", status).Error
+}
+
+// SaveNextMilestone persists the AI-generated adjustments and new tasks for a
+// milestone in the "generate next milestone" flow. Runs inside a transaction:
+//
+//  1. If adjustments.Adjusted, apply non-sentinel scalar field overrides to the
+//     milestone row, and replace Spikes/Risks when non-empty arrays are returned.
+//  2. Delete any existing tasks for this milestone (steps cascade via
+//     OnDelete:CASCADE on types.Task.Steps).
+//  3. Insert the new tasks with fresh UUIDs, correct foreign keys, and nested
+//     steps.
+//
+// After commit, recompute phase/roadmap statuses.
+//
+// TODO: revisit Spikes/Risks replace-all behavior — may clobber user edits.
+// Consider merge strategy or only replacing when review explicitly surfaces
+// new items.
+func SaveNextMilestone(
+	ctx context.Context,
+	milestoneID string,
+	adjustments *types.MilestoneAdjustments,
+	tasks []types.Task,
+) error {
+	// Load the existing milestone for foreign-key values (roadmap_id, user_id).
+	var existing types.Milestone
+	if err := db.Where("milestone_id = ?", milestoneID).First(&existing).Error; err != nil {
+		return err
+	}
+
+	err := db.Transaction(func(tx *gorm.DB) error {
+		// 1. Apply milestone adjustments (if any)
+		if adjustments != nil && adjustments.Adjusted {
+			updates := map[string]interface{}{}
+			if adjustments.SubGoal != "" {
+				updates["sub_goal"] = adjustments.SubGoal
+			}
+			if adjustments.Description != "" {
+				updates["description"] = adjustments.Description
+			}
+			if adjustments.AcceptanceTest != "" {
+				updates["acceptance_test"] = adjustments.AcceptanceTest
+			}
+			if adjustments.DurationDaysMin > 0 {
+				updates["duration_days_min"] = adjustments.DurationDaysMin
+			}
+			if adjustments.DurationDaysMax > 0 {
+				updates["duration_days_max"] = adjustments.DurationDaysMax
+			}
+			if adjustments.ResourcesForecast != "" {
+				updates["resources_forecast"] = adjustments.ResourcesForecast
+			}
+
+			if len(updates) > 0 {
+				if err := tx.Model(&types.Milestone{}).
+					Where("milestone_id = ?", milestoneID).
+					Updates(updates).Error; err != nil {
+					return err
+				}
+			}
+
+			// Replace Spikes if a non-empty array is returned
+			if len(adjustments.Spikes) > 0 {
+				if err := tx.Where("milestone_id = ?", milestoneID).Delete(&types.Spike{}).Error; err != nil {
+					return err
+				}
+				newSpikes := make([]types.Spike, len(adjustments.Spikes))
+				for i, s := range adjustments.Spikes {
+					newSpikes[i] = types.Spike{
+						SpikeID:     uuid.NewString(),
+						MilestoneID: milestoneID,
+						Description: s.Description,
+						TimeboxDays: s.TimeboxDays,
+					}
+				}
+				if err := tx.Create(&newSpikes).Error; err != nil {
+					return err
+				}
+			}
+
+			// Replace Risks if a non-empty array is returned
+			if len(adjustments.Risks) > 0 {
+				if err := tx.Where("milestone_id = ?", milestoneID).Delete(&types.Risk{}).Error; err != nil {
+					return err
+				}
+				newRisks := make([]types.Risk, len(adjustments.Risks))
+				for i, r := range adjustments.Risks {
+					newRisks[i] = types.Risk{
+						RiskID:      uuid.NewString(),
+						MilestoneID: milestoneID,
+						Description: r.Description,
+						Severity:    r.Severity,
+					}
+				}
+				if err := tx.Create(&newRisks).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		// 2. Delete existing tasks for this milestone. Steps cascade via
+		// OnDelete:CASCADE on the Task->Steps foreign key.
+		if err := tx.Where("milestone_id = ?", milestoneID).Delete(&types.Task{}).Error; err != nil {
+			return err
+		}
+
+		// 3. Compute anchor date for new tasks. The roadmap is already started,
+		// so we need to set dates directly rather than waiting for a /start call.
+		//
+		// Anchor = later of milestone.Date or today — this respects the original
+		// plan when the user is on schedule, but avoids placing tasks in the past
+		// if they've fallen behind. Normalized to midnight UTC for day precision.
+		nowUTC := time.Now().UTC()
+		todayAnchor := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+		anchor := todayAnchor
+		if existing.Date != nil {
+			milestoneAnchor := time.Date(existing.Date.Year(), existing.Date.Month(), existing.Date.Day(), 0, 0, 0, 0, time.UTC)
+			if milestoneAnchor.After(todayAnchor) {
+				anchor = milestoneAnchor
+			}
+		}
+
+		// 4. Assign IDs/foreign keys + dates, then insert new tasks with nested steps.
+		var earliestTaskDate *time.Time
+		if len(tasks) > 0 {
+			for i := range tasks {
+				tasks[i].TaskID = uuid.NewString()
+				tasks[i].MilestoneID = milestoneID
+				tasks[i].RoadmapID = existing.RoadmapID
+				tasks[i].UserID = existing.UserID
+				if tasks[i].Status == "" {
+					tasks[i].Status = string(types.StatusNotStarted)
+				}
+
+				// task.Day is milestone-relative (1-14 per the AI prompt).
+				// Map Day=1 to the anchor date so tasks start immediately.
+				offset := tasks[i].Day - 1
+				if offset < 0 {
+					offset = 0
+				}
+				taskDate := anchor.AddDate(0, 0, offset)
+				tasks[i].Date = &taskDate
+				if earliestTaskDate == nil || taskDate.Before(*earliestTaskDate) {
+					td := taskDate
+					earliestTaskDate = &td
+				}
+
+				for j := range tasks[i].Steps {
+					tasks[i].Steps[j].StepID = uuid.NewString()
+					tasks[i].Steps[j].TaskID = tasks[i].TaskID
+				}
+			}
+
+			if err := tx.Create(&tasks).Error; err != nil {
+				return err
+			}
+		}
+
+		// 5. Re-date the milestone to match the earliest task date, so the UI
+		// reflects the actual start of tactical work (not a stale planned date).
+		if earliestTaskDate != nil {
+			if err := tx.Model(&types.Milestone{}).
+				Where("milestone_id = ?", milestoneID).
+				Update("date", *earliestTaskDate).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// Recompute statuses outside the transaction (it reloads the roadmap).
+	if recomputeErr := RecomputeAndSaveStatuses(existing.RoadmapID); recomputeErr != nil {
+		log.Printf("SaveNextMilestone: failed to recompute statuses for roadmap %s: %v", existing.RoadmapID, recomputeErr)
+	}
+
+	return nil
 }

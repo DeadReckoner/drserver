@@ -388,6 +388,181 @@ func (h *AgentHandler) AgentGenerateMilestone(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, milestone)
 }
 
+// AgentGenerateNextMilestoneAsync kicks off an async job to generate tasks
+// (and, if warranted by the user's review, adjusted strategic fields) for the
+// given milestone. The milestone must already exist in the DB — this endpoint
+// does NOT create a roadmap. Progress is broadcast over the existing
+// /ws/agent/:jobid websocket.
+//
+// TODO: prevent concurrent next-milestone jobs for the same milestone_id
+// (unique active-job check).
+func (h *AgentHandler) AgentGenerateNextMilestoneAsync(c *gin.Context) {
+	ctx := c.Request.Context()
+	userID := c.GetString("user_id")
+	milestoneID := c.Param("milestoneid")
+
+	var req types.GenerateNextMilestoneRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	milestone := database.GetMilestone(c, milestoneID)
+	if milestone.MilestoneID == "" {
+		utils.NotFoundResponse(c, "Milestone")
+		return
+	}
+
+	log.Info(ctx, "Next milestone generation request received",
+		fmt.Sprintf("UserID: %s, MilestoneID: %s, SubGoal: %s", userID, milestoneID, milestone.SubGoal))
+
+	job := types.BackgroundJob{
+		JobID:    uuid.NewString(),
+		UserID:   userID,
+		Type:     string(types.JobTypeMilestone),
+		Status:   string(types.JobStatusPending),
+		Progress: 0,
+		Payload:  req,
+	}
+
+	if err := database.CreateBackgroundJob(c, &job); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job"})
+		return
+	}
+
+	bgCtx := log.WithLogger(context.Background(), log.NewLogger(job.JobID))
+	go processNextMilestoneGeneration(bgCtx, job.JobID, milestoneID, userID, req)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"status":       job.Status,
+		"job_id":       job.JobID,
+		"milestone_id": milestoneID,
+		"roadmap_id":   milestone.RoadmapID,
+		"message":      "Your next milestone is being generated",
+		"ws_url":       fmt.Sprintf("ws/agent/%s", job.JobID),
+	})
+}
+
+// processNextMilestoneGeneration runs the two-step AI flow (adjustments +
+// tasks) for the "generate next milestone" endpoint, broadcasting progress
+// over the existing websocket infrastructure.
+func processNextMilestoneGeneration(ctx context.Context, jobID, milestoneID, userID string, req types.GenerateNextMilestoneRequest) {
+	log.Info(ctx, "Starting next milestone generation process",
+		fmt.Sprintf("JobID: %s, MilestoneID: %s, UserID: %s", jobID, milestoneID, userID))
+
+	updateJobProgress(jobID, 5, string(types.JobStatusProcessing), "Reviewing your milestone feedback...")
+
+	// Reload milestone with Spikes/Risks preloaded so buildMilestoneContext
+	// has full strategic context for the adjustments prompt.
+	milestone := database.GetMilestoneForGeneration(userID, milestoneID)
+	if milestone.MilestoneID == "" {
+		handleNextMilestoneError(jobID, milestoneID, userID, fmt.Errorf("milestone not found"))
+		return
+	}
+
+	updateJobProgress(jobID, 15, string(types.JobStatusProcessing), "Analyzing what to adjust...")
+
+	adjustments, tasks, err := agent.GenerateNextMilestoneFromReview(ctx, req.GoalRequest, &milestone, req.Review)
+	if err != nil {
+		log.Info(ctx, "Next milestone generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
+		handleNextMilestoneError(jobID, milestoneID, userID, err)
+		return
+	}
+
+	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
+		Type:     "progress",
+		JobID:    jobID,
+		Progress: 45,
+		Status:   string(types.JobStatusProcessing),
+		Message:  "Milestone reviewed — generating tasks...",
+		Data: map[string]any{
+			"adjusted":  adjustments.Adjusted,
+			"rationale": adjustments.Rationale,
+		},
+	})
+
+	updateJobProgress(jobID, 80, string(types.JobStatusProcessing), "Saving tasks...")
+
+	if err := database.SaveNextMilestone(ctx, milestoneID, adjustments, tasks); err != nil {
+		log.Info(ctx, "Next milestone save failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
+		handleNextMilestoneError(jobID, milestoneID, userID, err)
+		return
+	}
+
+	updateJobProgress(jobID, 95, string(types.JobStatusProcessing), "Finalizing...")
+
+	now := time.Now()
+	job := types.BackgroundJob{
+		JobID:       jobID,
+		Status:      string(types.JobStatusCompleted),
+		Progress:    100,
+		CompletedAt: &now,
+		Result: map[string]any{
+			"milestone_id": milestoneID,
+			"roadmap_id":   milestone.RoadmapID,
+			"adjusted":     adjustments.Adjusted,
+		},
+	}
+	_ = database.UpdateBackgroundJob(ctx, &job)
+
+	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
+		Type:     "complete",
+		JobID:    jobID,
+		Progress: 100,
+		Status:   string(types.JobStatusCompleted),
+		Message:  "Your next milestone is ready!",
+		Data: map[string]any{
+			"milestone_id": milestoneID,
+			"roadmap_id":   milestone.RoadmapID,
+			"adjusted":     adjustments.Adjusted,
+		},
+	})
+
+	log.Info(ctx, "Sending next milestone completion push notification",
+		fmt.Sprintf("UserID: %s, MilestoneID: %s", userID, milestoneID))
+	utils.SendPushNotification(userID, "next_milestone_complete",
+		"Your next milestone is ready!",
+		fmt.Sprintf("%s is ready to start.", milestone.SubGoal),
+		map[string]any{
+			"milestone_id": milestoneID,
+			"roadmap_id":   milestone.RoadmapID,
+		})
+}
+
+// handleNextMilestoneError marks the job failed and notifies the user, WITHOUT
+// touching the roadmap's generation_status (the roadmap itself is already
+// generated and should not be marked failed).
+func handleNextMilestoneError(jobID, milestoneID, userID string, err error) {
+	ctx := log.WithLogger(context.Background(), log.NewLogger(jobID))
+	log.Info(ctx, "Handling next milestone generation error",
+		fmt.Sprintf("JobID: %s, MilestoneID: %s, Error: %v", jobID, milestoneID, err))
+	now := time.Now()
+
+	job := types.BackgroundJob{
+		JobID:       jobID,
+		Status:      string(types.JobStatusFailed),
+		Error:       err.Error(),
+		CompletedAt: &now,
+	}
+	_ = database.UpdateBackgroundJob(ctx, &job)
+
+	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
+		Type:    "error",
+		JobID:   jobID,
+		Status:  string(types.JobStatusFailed),
+		Message: "Failed to generate next milestone",
+		Data:    map[string]string{"error": err.Error()},
+	})
+
+	utils.SendPushNotification(userID, "next_milestone_failed",
+		"Next Milestone Generation Failed",
+		"We encountered an issue. Please try again.",
+		map[string]any{
+			"milestone_id": milestoneID,
+			"error":        err.Error(),
+		})
+}
+
 func (h *AgentHandler) StartAISession(c *gin.Context) {
 	userID := c.GetString("user_id")
 	session := agent.AISession{
