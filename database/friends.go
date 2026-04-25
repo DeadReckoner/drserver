@@ -175,11 +175,30 @@ func GetFriendProfile(c *gin.Context, friendUserID string) (types.User, []types.
 	// Friends can only see roadmaps they are anchoring for accountability
 	var roadmaps []types.Roadmap
 	db.Where("user_id = ? AND anchor_id = ?", friendUserID, userIDStr).
+		Preload("Phases", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.Milestones", func(db *gorm.DB) *gorm.DB {
+			return db.Order("order_index ASC")
+		}).
+		Preload("Phases.Milestones.Spikes").
+		Preload("Phases.Milestones.Risks").
+		Preload("Phases.Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
+			return db.Order("day ASC")
+		}).
+		Preload("Phases.Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
 		Preload("Milestones", func(db *gorm.DB) *gorm.DB {
 			return db.Order("day ASC")
 		}).
+		Preload("Milestones.Spikes").
+		Preload("Milestones.Risks").
 		Preload("Milestones.Tasks", func(db *gorm.DB) *gorm.DB {
 			return db.Order("day ASC")
+		}).
+		Preload("Milestones.Tasks.Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
 		}).
 		Find(&roadmaps)
 
