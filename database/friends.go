@@ -142,11 +142,11 @@ func GetFriends(c *gin.Context) []types.Friendship {
 	return friendships
 }
 
-// GetFriendProfile returns a friend's profile with allowed roadmaps
-func GetFriendProfile(c *gin.Context, friendUserID string) (types.User, []types.Roadmap, error) {
+// GetFriendProfile returns a friend's profile with allowed roadmaps and habits
+func GetFriendProfile(c *gin.Context, friendUserID string) (types.User, []types.Roadmap, []types.Habit, error) {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
-		return types.User{}, nil, errors.New("missing or invalid user_id")
+		return types.User{}, nil, nil, errors.New("missing or invalid user_id")
 	}
 
 	userIDStr := userID.(string)
@@ -160,15 +160,15 @@ func GetFriendProfile(c *gin.Context, friendUserID string) (types.User, []types.
 
 	if result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
-			return types.User{}, nil, errors.New("you are not friends with this user")
+			return types.User{}, nil, nil, errors.New("you are not friends with this user")
 		}
-		return types.User{}, nil, result.Error
+		return types.User{}, nil, nil, result.Error
 	}
 
 	// Get friend's user info
 	var friendUser types.User
 	if err := db.Where("user_id = ?", friendUserID).First(&friendUser).Error; err != nil {
-		return types.User{}, nil, err
+		return types.User{}, nil, nil, err
 	}
 
 	// Get roadmaps where the current user is the anchor
@@ -202,7 +202,13 @@ func GetFriendProfile(c *gin.Context, friendUserID string) (types.User, []types.
 		}).
 		Find(&roadmaps)
 
-	return friendUser, roadmaps, nil
+	// Get habits where the current user is the anchor
+	var habits []types.Habit
+	db.Where("user_id = ? AND anchor_id = ? AND archived = false", friendUserID, userIDStr).
+		Preload("Completions").
+		Find(&habits)
+
+	return friendUser, roadmaps, habits, nil
 }
 
 // RemoveFriend deletes a friendship between the current user and the specified friend.

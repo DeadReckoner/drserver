@@ -140,7 +140,7 @@ func (h *FriendHandler) GetFriendProfile(c *gin.Context) {
 		return
 	}
 
-	friendUser, roadmaps, err := database.GetFriendProfile(c, friendUserID)
+	friendUser, roadmaps, habits, err := database.GetFriendProfile(c, friendUserID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "you are not friends with this user" {
@@ -158,6 +158,7 @@ func (h *FriendHandler) GetFriendProfile(c *gin.Context) {
 	response := types.FriendProfileResponse{
 		User:            friendUser,
 		AllowedRoadmaps: roadmaps,
+		AllowedHabits:   habits,
 		ThreadID:        threadID,
 	}
 
