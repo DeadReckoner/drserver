@@ -7,10 +7,13 @@ This document describes the new lifecycle management and sharing features for ro
 - [Lifecycle Controls](#lifecycle-controls)
   - [Restart Roadmap](#restart-roadmap)
   - [Shift Dates](#shift-dates)
+  - [Realign Dates](#realign-dates)
+  - [Shift vs Realign](#shift-vs-realign)
   - [Pause Roadmap](#pause-roadmap)
   - [Resume Roadmap](#resume-roadmap)
   - [Archive Roadmap](#archive-roadmap)
   - [Restore Roadmap](#restore-roadmap)
+- [Overdue Tasks](#overdue-tasks)
 - [Sharing](#sharing)
   - [Generate Share Link](#generate-share-link)
   - [Revoke Share Link](#revoke-share-link)
@@ -130,6 +133,132 @@ Content-Type: application/json
 **Errors:**
 - `404` - Roadmap not found
 - `400` - "roadmap has not been started"
+
+---
+
+### Realign Dates
+
+Realigns incomplete task dates so the first incomplete task is scheduled for today (or today + offset). **Only affects incomplete tasks and their associated milestones.** Completed tasks retain their original historical dates.
+
+**Endpoint:** `POST /api/v1/roadmaps/:roadmapid/realign`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body (optional):**
+```json
+{
+  "offset_days": 0
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `offset_days` | integer | No | `0` | Days from today for the first task. `0` = today, `2` = 2 days from now |
+
+**Response (200 OK):**
+```json
+{
+  "data": {
+    "roadmap": {
+      "roadmap_id": "uuid",
+      "start_date": "2026-04-20T00:00:00Z",
+      "phases": [...],
+      "milestones": [...]
+    },
+    "days_shifted": 4
+  }
+}
+```
+
+| Response Field | Description |
+|----------------|-------------|
+| `roadmap` | The updated roadmap with realigned dates |
+| `days_shifted` | Number of days tasks were shifted (can be positive or negative) |
+
+**Preconditions:**
+- Roadmap must have been started
+- Roadmap must have at least one incomplete task with a date
+
+**What happens:**
+1. Finds the first incomplete task (ordered by date)
+2. Calculates the shift needed to make that task due on `today + offset_days`
+3. Shifts **only incomplete task dates** by that amount
+4. Shifts milestone dates for milestones that have incomplete tasks
+5. Does NOT modify: `start_date`, completed task dates, or milestones with all tasks completed
+6. Recomputes all statuses
+
+**Example:**
+```
+Today: April 26
+First incomplete task date: April 22 (4 days overdue)
+
+POST /realign with {}
+→ Shifts incomplete tasks forward by 4 days
+→ First task now due April 26 (today)
+→ Response: { "days_shifted": 4 }
+
+POST /realign with {"offset_days": 2}
+→ Shifts incomplete tasks forward by 6 days
+→ First task now due April 28 (2 days from now)
+→ Response: { "days_shifted": 6 }
+```
+
+**Errors:**
+- `404` - Roadmap not found
+- `400` - "roadmap has not been started"
+- `400` - "no incomplete tasks found"
+
+---
+
+### Shift vs Realign
+
+These two endpoints serve different purposes. Choose the right one based on your use case:
+
+| Aspect | Shift | Realign |
+|--------|-------|---------|
+| **Purpose** | Move the entire roadmap timeline | Catch up on missed tasks |
+| **What moves** | Everything: `start_date`, all milestones, all tasks | Only incomplete tasks + their milestones |
+| **Completed tasks** | Shifted (dates change) | Unchanged (historical dates preserved) |
+| **Input** | `days` - explicit number of days to shift | `offset_days` - target offset from today |
+| **Calculation** | Direct: shift by exactly N days | Automatic: calculates days needed to realign |
+
+**When to use Shift:**
+- "I want to push my entire roadmap back 7 days"
+- "I need to start everything 2 weeks earlier"
+- "Move all dates forward/backward by a specific amount"
+
+**When to use Realign:**
+- "I fell behind and want to catch up starting today"
+- "I missed some tasks but want to keep my completed task history"
+- "Give me 2 extra days before the next task is due"
+
+**Visual Example:**
+
+```
+Original Timeline (Today is April 26):
+  Task 1: April 20 ✓ (completed)
+  Task 2: April 22 ✗ (incomplete, overdue)
+  Task 3: April 24 ✗ (incomplete, overdue)
+  Task 4: April 28 ✗ (incomplete)
+
+After SHIFT with {"days": 6}:
+  Task 1: April 26 ✓ (completed - date changed!)
+  Task 2: April 28 ✗
+  Task 3: April 30 ✗
+  Task 4: May 4 ✗
+  start_date also shifts forward by 6 days
+
+After REALIGN with {"offset_days": 0}:
+  Task 1: April 20 ✓ (completed - date unchanged!)
+  Task 2: April 26 ✗ (now due today)
+  Task 3: April 28 ✗
+  Task 4: May 2 ✗
+  start_date unchanged
+```
 
 ---
 
@@ -289,6 +418,73 @@ Content-Type: application/json
 **Errors:**
 - `404` - Roadmap not found
 - `400` - "roadmap is not archived"
+
+---
+
+## Overdue Tasks
+
+Retrieve all incomplete tasks that are past their scheduled date.
+
+### Get Overdue Tasks
+
+**Endpoint:** `GET /api/v1/tasks/overdue`
+
+**Headers:**
+```
+Authorization: Bearer <token>
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `roadmap_id` | string (UUID) | No | Filter to a specific roadmap |
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "task_id": "uuid",
+      "title": "Practice chord transitions",
+      "date": "2026-04-20T00:00:00Z",
+      "completed": false,
+      "status": "overdue",
+      "roadmap_id": "uuid",
+      "milestone_id": "uuid",
+      "steps": [...]
+    },
+    {
+      "task_id": "uuid",
+      "title": "Learn G chord",
+      "date": "2026-04-22T00:00:00Z",
+      "completed": false,
+      "status": "overdue",
+      "roadmap_id": "uuid",
+      "milestone_id": "uuid",
+      "steps": [...]
+    }
+  ]
+}
+```
+
+**What it returns:**
+- Tasks where `date < today` AND `completed = false`
+- Filtered by the authenticated user
+- Ordered by date ascending (oldest first)
+- All returned tasks have `status: "overdue"`
+- Includes full step data for each task
+
+**Use cases:**
+- Display a "Missed Tasks" section in the UI
+- Show a badge count of overdue tasks
+- Provide a "Catch Up" flow that calls `/realign` after reviewing overdue tasks
+
+**Examples:**
+```
+GET /api/v1/tasks/overdue                           # All overdue tasks across all roadmaps
+GET /api/v1/tasks/overdue?roadmap_id=abc-123        # Overdue tasks for specific roadmap
+```
 
 ---
 
@@ -575,6 +771,8 @@ All endpoints return errors in this format:
 |----------|-------|---------|
 | restart | "roadmap has not been started" | Roadmap's `start_date` is null |
 | shift | "roadmap has not been started" | Roadmap's `start_date` is null |
+| realign | "roadmap has not been started" | Roadmap's `start_date` is null |
+| realign | "no incomplete tasks found" | All tasks are completed or no tasks exist |
 | pause | "roadmap has not been started" | Roadmap's `start_date` is null |
 | pause | "roadmap is already paused" | Roadmap's `paused_at` is not null |
 | resume | "roadmap is not paused" | Roadmap's `paused_at` is null |
@@ -584,13 +782,39 @@ All endpoints return errors in this format:
 
 ## Example Flows
 
-### Flow 1: User falls behind and wants to catch up
+### Flow 1: User falls behind and wants to realign to today
+
+```
+1. GET /api/v1/tasks/overdue
+   Result: See list of missed tasks (e.g., 3 tasks overdue)
+
+2. POST /api/v1/roadmaps/{id}/realign
+   Body: {} (or omit body entirely)
+
+   Result: First overdue task is now due today, others shifted proportionally
+   Response: { "days_shifted": 4 }
+
+   Note: Completed tasks keep their original dates (history preserved)
+```
+
+### Flow 1b: User wants a couple days buffer before catching up
+
+```
+1. POST /api/v1/roadmaps/{id}/realign
+   Body: { "offset_days": 2 }
+
+   Result: First overdue task is now due in 2 days
+   Response: { "days_shifted": 6 }
+```
+
+### Flow 1c: User wants to shift entire roadmap (including history)
 
 ```
 1. POST /api/v1/roadmaps/{id}/shift
    Body: { "days": 7 }
 
-   Result: All dates shift forward 7 days, giving user more time
+   Result: ALL dates shift forward 7 days (start_date, all milestones, all tasks)
+   Note: Use this when you want to move the entire timeline, not just catch up
 ```
 
 ### Flow 2: User takes a vacation

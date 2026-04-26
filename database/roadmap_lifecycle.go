@@ -515,6 +515,105 @@ func copyMilestone(original types.Milestone, roadmapID, userID string, phaseID *
 	return newMilestone
 }
 
+// RealignRoadmapDates realigns incomplete task dates so the first incomplete task
+// is scheduled for today + offsetDays. Only affects incomplete tasks and their
+// associated milestones. Completed tasks retain their original dates.
+//
+// offsetDays: 0 = first task due today, 2 = first task due in 2 days, etc.
+func RealignRoadmapDates(c *gin.Context, roadmapID string, offsetDays int) (types.Roadmap, int, error) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return types.Roadmap{}, 0, errors.New("missing or invalid user_id")
+	}
+
+	var roadmap types.Roadmap
+	result := db.Where("user_id = ? AND roadmap_id = ?", userID, roadmapID).First(&roadmap)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return types.Roadmap{}, 0, errors.New("roadmap not found")
+		}
+		return types.Roadmap{}, 0, result.Error
+	}
+
+	if roadmap.StartDate == nil {
+		return types.Roadmap{}, 0, errors.New("roadmap has not been started")
+	}
+
+	// Find first incomplete task ordered by date
+	var firstTask types.Task
+	result = db.Where("roadmap_id = ? AND completed = ?", roadmapID, false).
+		Where("date IS NOT NULL").
+		Order("date ASC").
+		First(&firstTask)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return types.Roadmap{}, 0, errors.New("no incomplete tasks found")
+		}
+		return types.Roadmap{}, 0, result.Error
+	}
+
+	// Calculate target date and days to shift
+	now := time.Now()
+	targetDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, offsetDays)
+	firstTaskDate := time.Date(firstTask.Date.Year(), firstTask.Date.Month(), firstTask.Date.Day(), 0, 0, 0, 0, time.UTC)
+	daysToShift := int(targetDate.Sub(firstTaskDate).Hours() / 24)
+
+	if daysToShift == 0 {
+		// Already aligned, just return the roadmap
+		rm, err := GetRoadmapFullByID(roadmapID)
+		return rm, 0, err
+	}
+
+	// Begin transaction
+	tx := db.Begin()
+	if tx.Error != nil {
+		return types.Roadmap{}, 0, tx.Error
+	}
+
+	// Shift only incomplete task dates
+	if err := tx.Exec(
+		"UPDATE tasks SET date = date + INTERVAL '1 day' * ? WHERE roadmap_id = ? AND completed = false AND date IS NOT NULL",
+		daysToShift, roadmapID,
+	).Error; err != nil {
+		tx.Rollback()
+		return types.Roadmap{}, 0, err
+	}
+
+	// Shift milestone dates for milestones that have incomplete tasks
+	// First, get milestone IDs that have at least one incomplete task
+	var milestoneIDs []string
+	if err := tx.Model(&types.Task{}).
+		Where("roadmap_id = ? AND completed = false", roadmapID).
+		Distinct().
+		Pluck("milestone_id", &milestoneIDs).Error; err != nil {
+		tx.Rollback()
+		return types.Roadmap{}, 0, err
+	}
+
+	if len(milestoneIDs) > 0 {
+		if err := tx.Exec(
+			"UPDATE milestones SET date = date + INTERVAL '1 day' * ? WHERE milestone_id IN ? AND date IS NOT NULL",
+			daysToShift, milestoneIDs,
+		).Error; err != nil {
+			tx.Rollback()
+			return types.Roadmap{}, 0, err
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return types.Roadmap{}, 0, err
+	}
+
+	// Recompute statuses
+	if err := RecomputeAndSaveStatuses(roadmapID); err != nil {
+		log.Printf("RealignRoadmapDates: failed to recompute statuses: %v", err)
+	}
+
+	rm, err := GetRoadmapFullByID(roadmapID)
+	return rm, daysToShift, err
+}
+
 // RevokeShareToken removes the share token from a roadmap.
 func RevokeShareToken(c *gin.Context, roadmapID string) error {
 	userID, exists := c.Get("user_id")

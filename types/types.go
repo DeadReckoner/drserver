@@ -1020,6 +1020,15 @@ type ShiftDatesRequest struct {
 	Days int `json:"days" binding:"required"`
 }
 
+type RealignDatesRequest struct {
+	OffsetDays int `json:"offset_days"` // Default 0 = realign to today
+}
+
+type RealignDatesResponse struct {
+	Roadmap     Roadmap `json:"roadmap"`
+	DaysShifted int     `json:"days_shifted"`
+}
+
 type RestoreRoadmapRequest struct {
 	StartFromToday bool `json:"start_from_today"`
 }

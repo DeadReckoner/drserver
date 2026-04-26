@@ -95,6 +95,7 @@ func setupRoadmapRoutes(rg *gin.RouterGroup, h *handlers.RoadmapHandler, nudge *
 		// Lifecycle controls
 		roadmaps.PUT("/:roadmapid/restart", utils.ValidateUUID("roadmapid"), h.RestartRoadmap)
 		roadmaps.POST("/:roadmapid/shift", utils.ValidateUUID("roadmapid"), h.ShiftDates)
+		roadmaps.POST("/:roadmapid/realign", utils.ValidateUUID("roadmapid"), h.RealignDates)
 		roadmaps.POST("/:roadmapid/pause", utils.ValidateUUID("roadmapid"), h.PauseRoadmap)
 		roadmaps.POST("/:roadmapid/resume", utils.ValidateUUID("roadmapid"), h.ResumeRoadmap)
 		roadmaps.POST("/:roadmapid/archive", utils.ValidateUUID("roadmapid"), h.ArchiveRoadmap)
@@ -130,6 +131,7 @@ func setupTaskRoutes(rg *gin.RouterGroup, h *handlers.TaskHandler) {
 	{
 		tasks.POST("", h.CreateTask)
 		tasks.GET("/user", h.GetTasks)
+		tasks.GET("/overdue", h.GetOverdueTasks)
 		tasks.GET("/:taskid", utils.ValidateUUID("taskid"), h.GetTask)
 		tasks.PATCH("/:taskid", utils.ValidateUUID("taskid"), h.UpdateTask)
 		tasks.DELETE("/:taskid", utils.ValidateUUID("taskid"), h.DeleteTask)

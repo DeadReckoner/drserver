@@ -11,6 +11,47 @@ import (
 	"gorm.io/gorm"
 )
 
+// GetOverdueTasks returns all incomplete tasks with dates before today.
+// Optionally filters by roadmap_id if provided.
+func GetOverdueTasks(c *gin.Context, roadmapID string) []types.Task {
+	var tasks []types.Task
+
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		log.Println("missing or invalid user_id")
+		return tasks
+	}
+
+	// Today at midnight (start of day)
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	query := db.Debug().Where("user_id = ?", userID).
+		Where("date < ?", today).
+		Where("completed = ?", false)
+
+	if roadmapID != "" {
+		query = query.Where("roadmap_id = ?", roadmapID)
+	}
+
+	result := query.Order("date ASC").Preload("Steps", func(db *gorm.DB) *gorm.DB {
+		return db.Order("number ASC")
+	}).Find(&tasks)
+
+	if result.Error != nil {
+		log.Println("Error fetching overdue tasks:", result.Error)
+	} else {
+		log.Printf("Found %d overdue tasks\n", len(tasks))
+	}
+
+	// Set status to "overdue" for all returned tasks
+	for i := range tasks {
+		tasks[i].Status = string(types.StatusOverdue)
+	}
+
+	return tasks
+}
+
 // GetTasks by id with optional date and roadmap filtering
 func GetTasks(c *gin.Context, startDate, endDate, roadmapID string) []types.Task {
 	var tasks []types.Task

@@ -584,7 +584,8 @@ func (h *RoadmapHandler) RestartRoadmap(c *gin.Context) {
 	log.Info(ctx, "Roadmap restarted successfully")
 }
 
-// ShiftDates shifts all dates in a roadmap by the specified number of days
+// ShiftDates shifts all dates in a roadmap by the specified number of days.
+// This shifts the entire roadmap including start_date, all milestones, and all tasks.
 func (h *RoadmapHandler) ShiftDates(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
@@ -611,6 +612,43 @@ func (h *RoadmapHandler) ShiftDates(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusOK, roadmap)
 	log.Info(ctx, "Roadmap dates shifted successfully", fmt.Sprintf("days=%d", req.Days))
+}
+
+// RealignDates realigns incomplete task dates so the first incomplete task
+// is scheduled for today + offset_days. Only affects incomplete tasks and their
+// associated milestones. Completed tasks retain their original dates.
+//
+// Request body:
+//   - offset_days (optional, default 0): 0 = first task due today, 2 = first task due in 2 days
+func (h *RoadmapHandler) RealignDates(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	var req types.RealignDatesRequest
+	// Body is optional (offset_days defaults to 0)
+	_ = c.ShouldBindJSON(&req)
+
+	roadmap, daysShifted, err := database.RealignRoadmapDates(c, roadmapID, req.OffsetDays)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		if errMsg == "roadmap has not been started" || errMsg == "no incomplete tasks found" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	response := types.RealignDatesResponse{
+		Roadmap:     roadmap,
+		DaysShifted: daysShifted,
+	}
+	utils.DataResponse(c, http.StatusOK, response)
+	log.Info(ctx, "Roadmap dates realigned successfully", fmt.Sprintf("days_shifted=%d, offset=%d", daysShifted, req.OffsetDays))
 }
 
 // PauseRoadmap pauses a roadmap by setting the paused_at timestamp

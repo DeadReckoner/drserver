@@ -61,6 +61,15 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, tasks)
 }
 
+// GetOverdueTasks returns all incomplete tasks with dates before today.
+// Query params:
+//   - roadmap_id (optional): filter to specific roadmap
+func (h *TaskHandler) GetOverdueTasks(c *gin.Context) {
+	roadmapID := c.Query("roadmap_id")
+	tasks := database.GetOverdueTasks(c, roadmapID)
+	utils.DataResponse(c, http.StatusOK, tasks)
+}
+
 func (h *TaskHandler) GetTasksByMilestone(c *gin.Context) {
 	milestoneID := c.Param("milestoneid")
 	tasks := database.GetTasksByMilestone(c, milestoneID)
