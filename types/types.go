@@ -126,6 +126,7 @@ type FriendResponse struct {
 type FriendProfileResponse struct {
 	User            User      `json:"user"`
 	AllowedRoadmaps []Roadmap `json:"allowed_roadmaps"`
+	AllowedHabits   []Habit   `json:"allowed_habits"`
 	ThreadID        string    `json:"thread_id"`
 }
 
