@@ -186,8 +186,18 @@ func GetRoadmapsByUser(c *gin.Context) []types.Roadmap {
 		return roadmaps
 	}
 
+	// Check if archived roadmaps should be included
+	includeArchived := c.Query("include_archived") == "true"
+
 	// Query the roadmap table for all roadmaps with this user_id
-	result := db.Where("user_id = ?", user_id).
+	query := db.Where("user_id = ?", user_id)
+
+	// Filter out archived roadmaps by default
+	if !includeArchived {
+		query = query.Where("archived = ?", false)
+	}
+
+	result := query.
 		Preload("Phases", func(db *gorm.DB) *gorm.DB {
 			return db.Order("order_index ASC")
 		}).

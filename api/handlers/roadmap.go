@@ -274,7 +274,7 @@ func (h *RoadmapHandler) StartRoadmap(c *gin.Context) {
 	}
 
 	// Save the roadmap with start date first (so RecomputeAndSaveStatuses sees it)
-	updatedRoadmap := database.UpdateRoadmap(c, roadmapID, roadmap)
+	_ = database.UpdateRoadmap(c, roadmapID, roadmap)
 
 	// Recompute and save all statuses for the roadmap now that it's started
 	// This computes task, milestone, and phase statuses in one unified operation
@@ -283,7 +283,7 @@ func (h *RoadmapHandler) StartRoadmap(c *gin.Context) {
 	}
 
 	// Refresh the roadmap to get the computed statuses
-	updatedRoadmap = database.GetRoadmapFull(c, roadmapID)
+	updatedRoadmap := database.GetRoadmapFull(c, roadmapID)
 
 	utils.DataResponse(c, http.StatusOK, updatedRoadmap)
 	log.Info(ctx, "Roadmap started successfully")
@@ -556,4 +556,241 @@ func cleanupOrphanedAnchorNotification(ctx context.Context, userID string, reque
 			log.Info(ctx, "Failed to cleanup orphaned notification:", err)
 		}
 	}
+}
+
+// Lifecycle handlers
+
+// RestartRoadmap resets a roadmap to start fresh from today
+func (h *RoadmapHandler) RestartRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	roadmap, err := database.RestartRoadmap(c, roadmapID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		if errMsg == "roadmap has not been started" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, roadmap)
+	log.Info(ctx, "Roadmap restarted successfully")
+}
+
+// ShiftDates shifts all dates in a roadmap by the specified number of days
+func (h *RoadmapHandler) ShiftDates(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	var req types.ShiftDatesRequest
+	if !utils.BindJSONOrAbort(c, &req) {
+		return
+	}
+
+	roadmap, err := database.ShiftRoadmapDates(c, roadmapID, req.Days)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		if errMsg == "roadmap has not been started" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, roadmap)
+	log.Info(ctx, "Roadmap dates shifted successfully", fmt.Sprintf("days=%d", req.Days))
+}
+
+// PauseRoadmap pauses a roadmap by setting the paused_at timestamp
+func (h *RoadmapHandler) PauseRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	err := database.PauseRoadmap(c, roadmapID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		if errMsg == "roadmap has not been started" || errMsg == "roadmap is already paused" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.MessageResponse(c, http.StatusOK, "Roadmap paused successfully")
+	log.Info(ctx, "Roadmap paused successfully")
+}
+
+// ResumeRoadmap resumes a paused roadmap and shifts dates forward
+func (h *RoadmapHandler) ResumeRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	roadmap, err := database.ResumeRoadmap(c, roadmapID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		if errMsg == "roadmap is not paused" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, roadmap)
+	log.Info(ctx, "Roadmap resumed successfully")
+}
+
+// ArchiveRoadmap archives a roadmap
+func (h *RoadmapHandler) ArchiveRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	err := database.ArchiveRoadmap(c, roadmapID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.MessageResponse(c, http.StatusOK, "Roadmap archived successfully")
+	log.Info(ctx, "Roadmap archived successfully")
+}
+
+// RestoreRoadmap restores an archived roadmap
+func (h *RoadmapHandler) RestoreRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	var req types.RestoreRoadmapRequest
+	// Body is optional, so we don't use BindJSONOrAbort
+	_ = c.ShouldBindJSON(&req)
+
+	roadmap, err := database.RestoreRoadmap(c, roadmapID, req.StartFromToday)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		if errMsg == "roadmap is not archived" {
+			utils.BadRequestResponse(c, errMsg)
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, roadmap)
+	log.Info(ctx, "Roadmap restored successfully")
+}
+
+// ShareRoadmap generates a share token for a roadmap
+func (h *RoadmapHandler) ShareRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	token, err := database.GenerateShareToken(c, roadmapID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, gin.H{
+		"share_token": token,
+	})
+	log.Info(ctx, "Roadmap share token generated successfully")
+}
+
+// RevokeShare removes the share token from a roadmap
+func (h *RoadmapHandler) RevokeShare(c *gin.Context) {
+	ctx := c.Request.Context()
+	roadmapID := c.Param("roadmapid")
+
+	err := database.RevokeShareToken(c, roadmapID)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "roadmap not found" {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.MessageResponse(c, http.StatusOK, "Share link revoked successfully")
+	log.Info(ctx, "Roadmap share token revoked successfully")
+}
+
+// GetSharedRoadmap returns a shared roadmap by its share token (public endpoint)
+func (h *RoadmapHandler) GetSharedRoadmap(c *gin.Context) {
+	token := c.Param("token")
+
+	roadmap, err := database.GetRoadmapByShareToken(token)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "shared roadmap not found" {
+			utils.NotFoundResponse(c, "Shared roadmap")
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	// Return roadmap without sensitive user data
+	// Clear user-specific fields for privacy
+	roadmap.UserID = ""
+	roadmap.AnchorID = nil
+	roadmap.ShareToken = nil
+
+	utils.DataResponse(c, http.StatusOK, roadmap)
+}
+
+// CopySharedRoadmap creates a copy of a shared roadmap for the authenticated user
+func (h *RoadmapHandler) CopySharedRoadmap(c *gin.Context) {
+	ctx := c.Request.Context()
+	token := c.Param("token")
+
+	roadmap, err := database.CopyRoadmapForUser(c, token)
+	if err != nil {
+		errMsg := err.Error()
+		if errMsg == "shared roadmap not found" {
+			utils.NotFoundResponse(c, "Shared roadmap")
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusCreated, roadmap)
+	log.Info(ctx, "Shared roadmap copied successfully")
 }

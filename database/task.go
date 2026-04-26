@@ -298,9 +298,25 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 	if updatedStep.Number != 0 {
 		updateMap["number"] = updatedStep.Number
 	}
-	// Handle boolean field explicitly since Updates ignores zero values
-	if updatedStep.Completed != step.Completed {
+
+	// Handle status field - sync completed boolean with status
+	if updatedStep.Status != "" && updatedStep.Status != step.Status {
+		updateMap["status"] = updatedStep.Status
+		// Sync completed boolean with status
+		if updatedStep.Status == string(types.StepStatusCompleted) {
+			updateMap["completed"] = true
+		} else {
+			// "incomplete" or "skipped" -> completed = false
+			updateMap["completed"] = false
+		}
+	} else if updatedStep.Completed != step.Completed {
+		// Handle legacy completed field - sync status
 		updateMap["completed"] = updatedStep.Completed
+		if updatedStep.Completed {
+			updateMap["status"] = string(types.StepStatusCompleted)
+		} else {
+			updateMap["status"] = string(types.StepStatusIncomplete)
+		}
 	}
 
 	if len(updateMap) > 0 {
@@ -318,12 +334,17 @@ func UpdateStep(c *gin.Context, taskID string, stepID string, updatedStep types.
 				step.Number = value.(int)
 			case "completed":
 				step.Completed = value.(bool)
+			case "status":
+				step.Status = value.(string)
 			}
 		}
 	}
 
+	// Determine effective completed state (completed or skipped count as "done")
+	stepIsDone := step.Status == string(types.StepStatusCompleted) || step.Status == string(types.StepStatusSkipped)
+
 	// Handle cascade completion/un-completion based on step state
-	if updatedStep.Completed {
+	if stepIsDone {
 		// Check if all steps are completed to auto-complete task
 		if shouldCompleteTask(taskID) {
 			task.Completed = true

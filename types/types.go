@@ -43,6 +43,14 @@ const (
 	GenerationStatusFailed     GenerationStatus = "failed"
 )
 
+type StepStatus string
+
+const (
+	StepStatusIncomplete StepStatus = "incomplete"
+	StepStatusCompleted  StepStatus = "completed"
+	StepStatusSkipped    StepStatus = "skipped"
+)
+
 /******************************************************************************
  * USER
  ******************************************************************************/
@@ -179,6 +187,11 @@ type Roadmap struct {
 	// Async generation tracking
 	JobID            *string `gorm:"type:uuid;column:job_id" json:"job_id,omitempty"`
 	GenerationStatus string  `gorm:"type:generation_status;column:generation_status;default:'pending'" json:"generation_status"`
+
+	// Lifecycle controls
+	Archived   bool       `gorm:"default:false" json:"archived"`
+	PausedAt   *time.Time `gorm:"column:paused_at" json:"paused_at,omitempty"`
+	ShareToken *string    `gorm:"column:share_token;unique" json:"share_token,omitempty"`
 
 	// Relationships
 	Phases     []Phase     `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"phases,omitempty"`
@@ -455,6 +468,7 @@ type Step struct {
 	TaskID      string `gorm:"type:uuid" json:"task_id"`
 	Description string `json:"description"`
 	Completed   bool   `json:"completed"`
+	Status      string `gorm:"default:incomplete" json:"status"` // "incomplete", "completed", "skipped"
 	Number      int    `json:"number"`
 }
 
@@ -997,3 +1011,15 @@ var (
 	ErrNudgeRateLimitExceeded = errors.New("rate limit exceeded: max 2 nudges per day per target")
 	ErrNotAnchor              = errors.New("you are not the anchor for this target")
 )
+
+/******************************************************************************
+ * ROADMAP LIFECYCLE
+ ******************************************************************************/
+
+type ShiftDatesRequest struct {
+	Days int `json:"days" binding:"required"`
+}
+
+type RestoreRoadmapRequest struct {
+	StartFromToday bool `json:"start_from_today"`
+}

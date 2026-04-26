@@ -65,8 +65,9 @@ func Connect(ctx context.Context) *gorm.DB {
 
 // Helper functions for checking completion status
 
-// shouldCompleteTask checks if all steps in a task are completed
-// Returns false if task has no steps (empty task should not be auto-completed)
+// shouldCompleteTask checks if all steps in a task are done (completed or skipped).
+// Returns false if task has no steps (empty task should not be auto-completed).
+// "Skipped" steps count as done and don't block task completion.
 func shouldCompleteTask(taskID string) bool {
 	var totalSteps int64
 	db.Model(&types.Step{}).Where("task_id = ?", taskID).Count(&totalSteps)
@@ -74,8 +75,11 @@ func shouldCompleteTask(taskID string) bool {
 		return false // Don't auto-complete tasks with no steps
 	}
 
+	// Count steps that are still incomplete (not completed and not skipped)
 	var incompleteSteps int64
-	db.Model(&types.Step{}).Where("task_id = ? AND completed = ?", taskID, false).Count(&incompleteSteps)
+	db.Model(&types.Step{}).
+		Where("task_id = ? AND status = ?", taskID, string(types.StepStatusIncomplete)).
+		Count(&incompleteSteps)
 	return incompleteSteps == 0
 }
 

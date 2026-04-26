@@ -20,9 +20,16 @@ func SetupRoutes(h *handlers.Handlers) *gin.Engine {
 }
 
 func setupV1Routes(router *gin.Engine, h *handlers.Handlers) {
+	// Public endpoints (no auth required)
+	router.GET("/api/v1/roadmaps/shared/:token", h.Roadmap.GetSharedRoadmap)
+
+	// Authenticated endpoints
 	v1 := router.Group("/api/v1")
 	v1.Use(middleware.AuthMiddleware())
 	v1.Use(middleware.AdminMiddleware())
+
+	// Copy shared roadmap requires auth
+	v1.POST("/roadmaps/shared/:token/copy", h.Roadmap.CopySharedRoadmap)
 
 	setupUserRoutes(v1, h.User)
 	setupFriendRoutes(v1, h.Friend)
@@ -84,6 +91,16 @@ func setupRoadmapRoutes(rg *gin.RouterGroup, h *handlers.RoadmapHandler, nudge *
 
 		// Nudge route (anchor nudges roadmap owner)
 		roadmaps.POST("/:roadmapid/nudge", utils.ValidateUUID("roadmapid"), nudge.NudgeRoadmap)
+
+		// Lifecycle controls
+		roadmaps.PUT("/:roadmapid/restart", utils.ValidateUUID("roadmapid"), h.RestartRoadmap)
+		roadmaps.POST("/:roadmapid/shift", utils.ValidateUUID("roadmapid"), h.ShiftDates)
+		roadmaps.POST("/:roadmapid/pause", utils.ValidateUUID("roadmapid"), h.PauseRoadmap)
+		roadmaps.POST("/:roadmapid/resume", utils.ValidateUUID("roadmapid"), h.ResumeRoadmap)
+		roadmaps.POST("/:roadmapid/archive", utils.ValidateUUID("roadmapid"), h.ArchiveRoadmap)
+		roadmaps.POST("/:roadmapid/restore", utils.ValidateUUID("roadmapid"), h.RestoreRoadmap)
+		roadmaps.POST("/:roadmapid/share", utils.ValidateUUID("roadmapid"), h.ShareRoadmap)
+		roadmaps.DELETE("/:roadmapid/share", utils.ValidateUUID("roadmapid"), h.RevokeShare)
 	}
 
 	// Anchor request routes
