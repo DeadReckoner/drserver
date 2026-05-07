@@ -211,6 +211,7 @@ type Roadmap struct {
 func (r *Roadmap) ComputeAllStatuses() {
 	roadmapStarted := r.StartDate != nil
 	foundCurrentTask := false
+	foundCurrentMilestone := false
 
 	// Helper to compute task statuses for a milestone
 	computeMilestoneTaskStatuses := func(m *Milestone) {
@@ -235,11 +236,17 @@ func (r *Roadmap) ComputeAllStatuses() {
 	}
 
 	// Helper to compute milestone status from its tasks
-	computeMilestoneStatus := func(m *Milestone) string {
+	// isCurrentMilestone indicates this is the first non-completed milestone in sequence
+	computeMilestoneStatus := func(m *Milestone, isCurrentMilestone bool) string {
 		if m.Reached {
 			return string(StatusCompleted)
 		}
 		if len(m.Tasks) == 0 {
+			// If this is the current milestone and roadmap has started,
+			// mark as in_progress so the UI can show the generate tasks button
+			if isCurrentMilestone && roadmapStarted {
+				return string(StatusInProgress)
+			}
 			return string(StatusNotStarted)
 		}
 
@@ -322,16 +329,29 @@ func (r *Roadmap) ComputeAllStatuses() {
 	}
 
 	// Step 3: Compute milestone statuses (after all tasks are computed)
+	// Track the first non-completed milestone as the "current" one
 	for i := range r.Phases {
 		for j := range r.Phases[i].Milestones {
-			r.Phases[i].Milestones[j].Status = computeMilestoneStatus(&r.Phases[i].Milestones[j])
+			m := &r.Phases[i].Milestones[j]
+			isCurrentMilestone := !foundCurrentMilestone && !m.Reached
+			m.Status = computeMilestoneStatus(m, isCurrentMilestone)
+			// Mark as found if this milestone is not completed
+			if m.Status != string(StatusCompleted) && !foundCurrentMilestone {
+				foundCurrentMilestone = true
+			}
 		}
 	}
 	for i := range r.Milestones {
 		if r.Milestones[i].PhaseID != nil && *r.Milestones[i].PhaseID != "" {
 			continue // Already processed with phases
 		}
-		r.Milestones[i].Status = computeMilestoneStatus(&r.Milestones[i])
+		m := &r.Milestones[i]
+		isCurrentMilestone := !foundCurrentMilestone && !m.Reached
+		m.Status = computeMilestoneStatus(m, isCurrentMilestone)
+		// Mark as found if this milestone is not completed
+		if m.Status != string(StatusCompleted) && !foundCurrentMilestone {
+			foundCurrentMilestone = true
+		}
 	}
 
 	// Step 4: Compute phase statuses (after all milestones are computed)
