@@ -13,6 +13,7 @@ import (
 
 // GetOverdueTasks returns all incomplete tasks with dates before today.
 // Optionally filters by roadmap_id if provided.
+// Excludes tasks from archived roadmaps.
 func GetOverdueTasks(c *gin.Context, roadmapID string) []types.Task {
 	var tasks []types.Task
 
@@ -26,15 +27,18 @@ func GetOverdueTasks(c *gin.Context, roadmapID string) []types.Task {
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
-	query := db.Debug().Where("user_id = ?", userID).
-		Where("date < ?", today).
-		Where("completed = ?", false)
+	query := db.Debug().
+		Joins("INNER JOIN roadmaps ON tasks.roadmap_id = roadmaps.roadmap_id").
+		Where("tasks.user_id = ?", userID).
+		Where("tasks.date < ?", today).
+		Where("tasks.completed = ?", false).
+		Where("roadmaps.archived = ?", false)
 
 	if roadmapID != "" {
-		query = query.Where("roadmap_id = ?", roadmapID)
+		query = query.Where("tasks.roadmap_id = ?", roadmapID)
 	}
 
-	result := query.Order("date ASC").Preload("Steps", func(db *gorm.DB) *gorm.DB {
+	result := query.Order("tasks.date ASC").Preload("Steps", func(db *gorm.DB) *gorm.DB {
 		return db.Order("number ASC")
 	}).Find(&tasks)
 
@@ -52,7 +56,8 @@ func GetOverdueTasks(c *gin.Context, roadmapID string) []types.Task {
 	return tasks
 }
 
-// GetTasks by id with optional date and roadmap filtering
+// GetTasks by id with optional date and roadmap filtering.
+// Excludes tasks from archived roadmaps.
 func GetTasks(c *gin.Context, startDate, endDate, roadmapID string) []types.Task {
 	var tasks []types.Task
 
@@ -61,11 +66,14 @@ func GetTasks(c *gin.Context, startDate, endDate, roadmapID string) []types.Task
 		log.Println("missing or invalid user_id")
 	}
 
-	query := db.Debug().Where("user_id = ?", user_id)
+	query := db.Debug().
+		Joins("INNER JOIN roadmaps ON tasks.roadmap_id = roadmaps.roadmap_id").
+		Where("tasks.user_id = ?", user_id).
+		Where("roadmaps.archived = ?", false)
 
 	// Apply roadmap filtering if roadmap_id is provided
 	if roadmapID != "" {
-		query = query.Where("roadmap_id = ?", roadmapID)
+		query = query.Where("tasks.roadmap_id = ?", roadmapID)
 	}
 
 	// Apply date filtering if start_date is provided
@@ -82,17 +90,17 @@ func GetTasks(c *gin.Context, startDate, endDate, roadmapID string) []types.Task
 				} else {
 					// Add one day to end_date to include the entire end date
 					parsedEndDate = parsedEndDate.Add(24 * time.Hour)
-					query = query.Where("date >= ? AND date < ?", parsedStartDate, parsedEndDate)
+					query = query.Where("tasks.date >= ? AND tasks.date < ?", parsedStartDate, parsedEndDate)
 				}
 			} else {
 				// Single date filtering: date is on the specific day
 				nextDay := parsedStartDate.Add(24 * time.Hour)
-				query = query.Where("date >= ? AND date < ?", parsedStartDate, nextDay)
+				query = query.Where("tasks.date >= ? AND tasks.date < ?", parsedStartDate, nextDay)
 			}
 		}
 	}
 
-	result := query.Order("day ASC").Preload("Steps", func(db *gorm.DB) *gorm.DB {
+	result := query.Order("tasks.day ASC").Preload("Steps", func(db *gorm.DB) *gorm.DB {
 		return db.Order("number ASC")
 	}).Find(&tasks)
 
