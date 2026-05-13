@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"dr/server/agent"
+	"dr/server/agent/anthropic"
 	"dr/server/database"
 	"dr/server/log"
 	"dr/server/types"
 	"dr/server/websocket"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"dr/server/api/utils"
@@ -19,11 +21,21 @@ import (
 )
 
 type AgentHandler struct {
-	db *gorm.DB
+	db               *gorm.DB
+	anthropicService *anthropic.Service
 }
 
 func NewAgentHandler(db *gorm.DB) *AgentHandler {
-	return &AgentHandler{db: db}
+	// Initialize Anthropic service if API key is available
+	var anthropicSvc *anthropic.Service
+	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+		anthropicSvc = anthropic.NewService(apiKey)
+	}
+
+	return &AgentHandler{
+		db:               db,
+		anthropicService: anthropicSvc,
+	}
 }
 
 func (h *AgentHandler) AgentGenerate(c *gin.Context) {
@@ -635,4 +647,110 @@ func (h *AgentHandler) GetAISession(c *gin.Context) {
 		return
 	}
 	utils.DataResponse(c, http.StatusOK, session)
+}
+
+// ─── Anthropic Chat Handlers ─────────────────────────────────────────────────
+
+// AgentChatRequest is the request body for the Anthropic chat endpoint
+type AgentChatRequest struct {
+	// SessionID is optional on first message; a new one is created and returned if absent
+	SessionID string              `json:"session_id"`
+	Message   string              `json:"message" binding:"required"`
+	Mode      anthropic.AgentMode `json:"mode" binding:"required"`
+	// Context is flexible — the caller populates it with whatever the agent needs:
+	// For roadmap generation: { "goal_draft": "...", "user_level": "..." }
+	// For performance coach: { "habits": [...], "milestone": {...}, "completion_rates": {...} }
+	// For roadmap editor: { "current_roadmap": {...} }
+	Context map[string]any `json:"context,omitempty"`
+}
+
+// AgentChatResponse is the response body for the Anthropic chat endpoint
+type AgentChatResponse struct {
+	SessionID string `json:"session_id"`
+	Message   string `json:"message"`
+	// StructuredData is populated only when the agent completes its task and calls a tool.
+	// The shape depends on the mode:
+	//   roadmap_generation  → anthropic.RoadmapOutput
+	//   performance_coach   → anthropic.PerformanceReportOutput
+	//   roadmap_editor      → anthropic.RoadmapEditOutput
+	StructuredData any    `json:"structured_data,omitempty"`
+	ToolUsed       string `json:"tool_used,omitempty"`
+	IsComplete     bool   `json:"is_complete"`
+}
+
+// Chat handles a single turn of conversation with the Dead Reckoner agent using Anthropic.
+//
+// POST /api/v1/agent/chat
+//
+// The client sends a message and receives:
+//   - A human-readable reply (always present)
+//   - Structured data (only when the agent completes its task)
+//   - is_complete flag so the client knows when to save the result to the DB
+func (h *AgentHandler) Chat(c *gin.Context) {
+	if h.anthropicService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Anthropic service not configured. Set ANTHROPIC_API_KEY environment variable."})
+		return
+	}
+
+	var req AgentChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate mode
+	switch req.Mode {
+	case anthropic.ModeRoadmapGeneration, anthropic.ModePerformanceCoach, anthropic.ModeRoadmapEditor:
+		// valid
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode, must be one of: roadmap_generation, performance_coach, roadmap_editor"})
+		return
+	}
+
+	// Generate session ID if not provided (first message in conversation)
+	if req.SessionID == "" {
+		req.SessionID = uuid.New().String()
+	}
+
+	agentReq := anthropic.AgentRequest{
+		SessionID:   req.SessionID,
+		UserMessage: req.Message,
+		Mode:        req.Mode,
+		Context:     req.Context,
+	}
+
+	resp, err := h.anthropicService.Run(c.Request.Context(), agentReq)
+	if err != nil {
+		log.Info(c.Request.Context(), "Anthropic agent error", err.Error())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "agent error: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, AgentChatResponse{
+		SessionID:      resp.SessionID,
+		Message:        resp.Message,
+		StructuredData: resp.StructuredData,
+		ToolUsed:       resp.ToolUsed,
+		IsComplete:     resp.IsComplete,
+	})
+}
+
+// EndChatSession explicitly clears a session from memory once the client has saved
+// the structured output to the database.
+//
+// DELETE /api/v1/agent/chat/session/:session_id
+func (h *AgentHandler) EndChatSession(c *gin.Context) {
+	if h.anthropicService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Anthropic service not configured"})
+		return
+	}
+
+	sessionID := c.Param("session_id")
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id required"})
+		return
+	}
+
+	h.anthropicService.DeleteSession(sessionID)
+	c.JSON(http.StatusOK, gin.H{"deleted": sessionID})
 }

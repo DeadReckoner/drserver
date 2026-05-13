@@ -177,11 +177,18 @@ func setupHabitRoutes(rg *gin.RouterGroup, h *handlers.HabitHandler, nudge *hand
 func setupAgentRoutes(rg *gin.RouterGroup, h *handlers.AgentHandler) {
 	agent := rg.Group("/agent")
 	{
+		// OpenAI-based generation endpoints (existing)
 		agent.POST("/generate", h.AgentGenerate)
 		agent.POST("/generateMilestone/:milestoneid", h.AgentGenerateMilestone)
-
 		agent.POST("/generate-async", h.AgentGenerateAsync)
 		agent.POST("/generate-next-milestone-async/:milestoneid", utils.ValidateUUID("milestoneid"), h.AgentGenerateNextMilestoneAsync)
+
+		// Anthropic-based conversational chat endpoint (new)
+		// Multi-turn conversation with tool use for roadmap generation, editing, and coaching
+		agent.POST("/chat", h.Chat)
+		agent.DELETE("/chat/session/:session_id", h.EndChatSession)
+
+		// OpenAI-based session endpoints (existing - placeholder implementation)
 		sessions := agent.Group("/sessions")
 		{
 			sessions.POST("", h.StartAISession)
