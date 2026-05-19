@@ -9,24 +9,45 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Options allows callers (notably tests) to override the middleware stack
+// applied to authenticated /api/v1 routes. Nil fields fall back to the
+// production middleware so the production call site can pass an empty Options.
+type Options struct {
+	AuthMiddleware  gin.HandlerFunc
+	AdminMiddleware gin.HandlerFunc
+}
+
 func SetupRoutes(h *handlers.Handlers) *gin.Engine {
+	return SetupRoutesWithOptions(h, Options{})
+}
+
+func SetupRoutesWithOptions(h *handlers.Handlers, opts Options) *gin.Engine {
 	router := gin.Default()
 
 	setupHealthRoutes(router)
 
-	setupV1Routes(router, h)
+	setupV1Routes(router, h, opts)
 
 	return router
 }
 
-func setupV1Routes(router *gin.Engine, h *handlers.Handlers) {
+func setupV1Routes(router *gin.Engine, h *handlers.Handlers, opts Options) {
 	// Public endpoints (no auth required)
 	router.GET("/api/v1/roadmaps/shared/:token", h.Roadmap.GetSharedRoadmap)
 
+	auth := opts.AuthMiddleware
+	if auth == nil {
+		auth = middleware.AuthMiddleware()
+	}
+	admin := opts.AdminMiddleware
+	if admin == nil {
+		admin = middleware.AdminMiddleware()
+	}
+
 	// Authenticated endpoints
 	v1 := router.Group("/api/v1")
-	v1.Use(middleware.AuthMiddleware())
-	v1.Use(middleware.AdminMiddleware())
+	v1.Use(auth)
+	v1.Use(admin)
 
 	// Copy shared roadmap requires auth
 	v1.POST("/roadmaps/shared/:token/copy", h.Roadmap.CopySharedRoadmap)

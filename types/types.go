@@ -477,7 +477,7 @@ func isDateBeforeToday(date *time.Time) bool {
 	if date == nil {
 		return false
 	}
-	now := time.Now()
+	now := Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	return dateOnly.Before(today)
