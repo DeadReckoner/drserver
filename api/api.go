@@ -11,7 +11,13 @@ import (
 )
 
 func NewRouter(db *gorm.DB) *gin.Engine {
+	return NewRouterWithOptions(db, routes.Options{})
+}
+
+// NewRouterWithOptions builds the router with overridable wiring (notably the
+// auth middleware). Tests use this to inject a fake auth middleware.
+func NewRouterWithOptions(db *gorm.DB, opts routes.Options) *gin.Engine {
 	storageClient := storage.NewStorageClient(os.Getenv("API_URL"), os.Getenv("anon_key"))
 	h := handlers.NewHandlers(db, storageClient)
-	return routes.SetupRoutes(h)
+	return routes.SetupRoutesWithOptions(h, opts)
 }
