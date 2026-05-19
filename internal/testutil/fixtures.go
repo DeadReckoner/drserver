@@ -17,6 +17,9 @@ type MilestoneOpt func(*types.Milestone)
 // TaskOpt mutates a Task fixture.
 type TaskOpt func(*types.Task)
 
+// PhaseOpt mutates a Phase fixture.
+type PhaseOpt func(*types.Phase)
+
 // NewRoadmap returns a Roadmap with sensible defaults: a generated UUID, the
 // given owner, no start date (not yet started), and no children. Pass options
 // to override fields or attach milestones/phases.
@@ -55,6 +58,35 @@ func WithPausedAt(t time.Time) RoadmapOpt {
 // not nested in a phase).
 func WithMilestones(ms ...types.Milestone) RoadmapOpt {
 	return func(r *types.Roadmap) { r.Milestones = append(r.Milestones, ms...) }
+}
+
+// WithPhases attaches the given phases to the roadmap.
+func WithPhases(ps ...types.Phase) RoadmapOpt {
+	return func(r *types.Roadmap) { r.Phases = append(r.Phases, ps...) }
+}
+
+// NewPhase returns a Phase with sensible defaults.
+func NewPhase(opts ...PhaseOpt) types.Phase {
+	p := types.Phase{
+		PhaseID: uuid.NewString(),
+		Name:    "phase",
+	}
+	for _, o := range opts {
+		o(&p)
+	}
+	return p
+}
+
+// WithPhaseMilestones attaches milestones to the phase and stamps their
+// PhaseID so ComputeAllStatuses links them correctly.
+func WithPhaseMilestones(ms ...types.Milestone) PhaseOpt {
+	return func(p *types.Phase) {
+		for i := range ms {
+			pid := p.PhaseID
+			ms[i].PhaseID = &pid
+		}
+		p.Milestones = append(p.Milestones, ms...)
+	}
 }
 
 // NewMilestone returns a Milestone with sensible defaults: a generated UUID
