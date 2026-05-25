@@ -63,6 +63,14 @@ func setupV1Routes(router *gin.Engine, h *handlers.Handlers, opts Options) {
 	setupNudgeRoutes(v1, h.Nudge)
 	setupWebSocketRoutes(v1, h.Agent, h.Message)
 	setupTaskRoutes(v1, h.Task)
+	setupBillingRoutes(v1, h.Billing)
+}
+
+func setupBillingRoutes(rg *gin.RouterGroup, h *handlers.BillingHandler) {
+	billing := rg.Group("/billing")
+	{
+		billing.GET("/status", h.GetBillingStatus)
+	}
 }
 
 func setupUserRoutes(rg *gin.RouterGroup, h *handlers.UserHandler) {
