@@ -43,6 +43,13 @@ func (h *RoadmapHandler) CreateRoadmap(c *gin.Context) {
 		return
 	}
 
+	userID := c.GetString("user_id")
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckCreateRoadmap(userID)
+	}) {
+		return
+	}
+
 	// Set type to "custom_made" for manually created roadmaps
 	// (AI-generated roadmaps will have type set to "ai_generated" in the agent handler)
 	if newRoadmap.Type == "" {
@@ -316,6 +323,13 @@ func (h *RoadmapHandler) CreateAnchorRequest(c *gin.Context) {
 	}
 
 	if !utils.BindJSONOrAbort(c, &requestBody) {
+		return
+	}
+
+	userID := c.GetString("user_id")
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckCreateRoadmapAnchor(userID)
+	}) {
 		return
 	}
 
@@ -703,6 +717,14 @@ func (h *RoadmapHandler) ResumeRoadmap(c *gin.Context) {
 func (h *RoadmapHandler) ArchiveRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
+
+	userID := c.GetString("user_id")
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckPaidFeature(userID, types.FeatureArchive,
+			"Archiving roadmaps is available with Pro.")
+	}) {
+		return
+	}
 
 	err := database.ArchiveRoadmap(c, roadmapID)
 	if err != nil {

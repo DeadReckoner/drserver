@@ -35,6 +35,11 @@ func setupV1Routes(router *gin.Engine, h *handlers.Handlers, opts Options) {
 	// Public endpoints (no auth required)
 	router.GET("/api/v1/roadmaps/shared/:token", h.Roadmap.GetSharedRoadmap)
 
+	// Admin endpoints: shared-secret auth via X-Admin-Key header, no Supabase
+	// JWT required. Registered before the /api/v1 group below so the
+	// AuthMiddleware doesn't apply.
+	setupAdminRoutes(router, h.Admin)
+
 	auth := opts.AuthMiddleware
 	if auth == nil {
 		auth = middleware.AuthMiddleware()
@@ -70,6 +75,14 @@ func setupBillingRoutes(rg *gin.RouterGroup, h *handlers.BillingHandler) {
 	billing := rg.Group("/billing")
 	{
 		billing.GET("/status", h.GetBillingStatus)
+	}
+}
+
+func setupAdminRoutes(router *gin.Engine, h *handlers.AdminHandler) {
+	admin := router.Group("/admin")
+	admin.Use(handlers.AdminAuthMiddleware())
+	{
+		admin.POST("/users/:userid/plan", utils.ValidateUUID("userid"), h.SetUserPlan)
 	}
 }
 

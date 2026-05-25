@@ -19,6 +19,7 @@ type Handlers struct {
 	Feedback     *FeedbackHandler
 	Nudge        *NudgeHandler
 	Billing      *BillingHandler
+	Admin        *AdminHandler
 }
 
 // NewHandlers creates all handlers with the given database connection
@@ -35,5 +36,6 @@ func NewHandlers(db *gorm.DB, storageClient *storage.StorageClient) *Handlers {
 		Feedback:     NewFeedbackHandler(db),
 		Nudge:        NewNudgeHandler(db),
 		Billing:      NewBillingHandler(db),
+		Admin:        NewAdminHandler(db),
 	}
 }
