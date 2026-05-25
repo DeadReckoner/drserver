@@ -46,6 +46,13 @@ func (h *AgentHandler) AgentGenerate(c *gin.Context) {
 		return
 	}
 
+	userID := c.GetString("user_id")
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckAIGeneration(userID)
+	}) {
+		return
+	}
+
 	fmt.Printf("Goal request received: %+v\n", goalReq)
 
 	start := time.Now()
@@ -56,6 +63,13 @@ func (h *AgentHandler) AgentGenerate(c *gin.Context) {
 	if err != nil {
 		utils.InternalErrorResponse(c, err)
 		return
+	}
+
+	// Bump the AI usage counter only on success - failed generations don't
+	// burn a credit. Log-only on error so a counter blip doesn't fail the
+	// user-visible request.
+	if err := database.IncrementAIGenerations(userID); err != nil {
+		log.Error(ctx, "AgentGenerate: failed to increment AI counter", err)
 	}
 
 	fmt.Printf("Generated roadmap with phases: %+v\n", generated)
@@ -74,6 +88,12 @@ func (h *AgentHandler) AgentGenerateAsync(c *gin.Context) {
 	var req types.GoalRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckAIGeneration(userID)
+	}) {
 		return
 	}
 
@@ -261,6 +281,12 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 	_ = database.UpdateBackgroundJob(ctx, &job)
 	_ = database.UpdateRoadmapGenerationStatus(ctx, roadmapID, string(types.GenerationStatusCompleted))
 
+	// Bump AI usage counter only on successful completion. Failed generations
+	// (handled via handleGenerationError above) do not consume a credit.
+	if err := database.IncrementAIGenerations(userID); err != nil {
+		log.Error(ctx, "processRoadmapGeneration: failed to increment AI counter", err)
+	}
+
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:     "complete",
 		JobID:    jobID,
@@ -379,6 +405,13 @@ func (h *AgentHandler) AgentGenerateMilestone(c *gin.Context) {
 		return
 	}
 
+	userID := c.GetString("user_id")
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckAIGeneration(userID)
+	}) {
+		return
+	}
+
 	fmt.Printf("Goal request received: %+v\n", goalReq)
 
 	start := time.Now()
@@ -389,6 +422,11 @@ func (h *AgentHandler) AgentGenerateMilestone(c *gin.Context) {
 	if err != nil {
 		utils.InternalErrorResponse(c, err)
 		return
+	}
+
+	// Bump AI usage counter only on success.
+	if err := database.IncrementAIGenerations(userID); err != nil {
+		log.Error(ctx, "AgentGenerateMilestone: failed to increment AI counter", err)
 	}
 
 	fmt.Printf("Generated tasks for milestone: %d tasks\n", len(tasks))
@@ -422,6 +460,12 @@ func (h *AgentHandler) AgentGenerateNextMilestoneAsync(c *gin.Context) {
 	milestone := database.GetMilestone(c, milestoneID)
 	if milestone.MilestoneID == "" {
 		utils.NotFoundResponse(c, "Milestone")
+		return
+	}
+
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckAIGeneration(userID)
+	}) {
 		return
 	}
 
@@ -516,6 +560,11 @@ func processNextMilestoneGeneration(ctx context.Context, jobID, milestoneID, use
 		},
 	}
 	_ = database.UpdateBackgroundJob(ctx, &job)
+
+	// Bump AI usage counter only on successful completion.
+	if err := database.IncrementAIGenerations(userID); err != nil {
+		log.Error(ctx, "processNextMilestoneGeneration: failed to increment AI counter", err)
+	}
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:     "complete",

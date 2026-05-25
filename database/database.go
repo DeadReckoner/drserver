@@ -63,6 +63,19 @@ func Connect(ctx context.Context) *gorm.DB {
 	return connDB
 }
 
+// SetDBForTest swaps the package-global *gorm.DB used by all database
+// functions and returns a cleanup hook that restores the original. ONLY for
+// tests; production wires the global via Connect().
+//
+// Most database functions accept a *gin.Context and read from the global,
+// which makes them tricky to unit-test in isolation. This seam lets a test
+// install a sqlmock-backed *gorm.DB for the duration of a test case.
+func SetDBForTest(d *gorm.DB) func() {
+	orig := db
+	db = d
+	return func() { db = orig }
+}
+
 // Helper functions for checking completion status
 
 // shouldCompleteTask checks if all steps in a task are done (completed or skipped).
