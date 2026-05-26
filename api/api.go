@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
 	"dr/server/api/handlers"
 	"dr/server/api/routes"
+	"dr/server/auth/apple"
+	"dr/server/log"
 	"dr/server/storage"
 	"os"
 
@@ -18,6 +21,10 @@ func NewRouter(db *gorm.DB) *gin.Engine {
 // auth middleware). Tests use this to inject a fake auth middleware.
 func NewRouterWithOptions(db *gorm.DB, opts routes.Options) *gin.Engine {
 	storageClient := storage.NewStorageClient(os.Getenv("API_URL"), os.Getenv("anon_key"))
-	h := handlers.NewHandlers(db, storageClient)
+	appleClient, err := apple.NewClientFromEnv()
+	if err != nil {
+		log.Warn(context.Background(), "Apple Sign-In revocation disabled", err)
+	}
+	h := handlers.NewHandlers(db, storageClient, appleClient)
 	return routes.SetupRoutesWithOptions(h, opts)
 }

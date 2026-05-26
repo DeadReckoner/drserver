@@ -68,13 +68,15 @@ func UpdateUser(user_id string, user types.User) *gorm.DB {
 	}
 }
 
-func DeleteUser(c *gin.Context) error {
-	user_id, exists := c.Get("user_id")
-	if !exists || user_id == "" {
+// DeleteUser removes the row identified by userID. The caller is responsible
+// for ensuring userID matches the authenticated principal — this function
+// trusts its argument.
+func DeleteUser(userID string) error {
+	if userID == "" {
 		return errors.New("missing or invalid user_id")
 	}
 
-	result := db.Where("user_id = ?", user_id).Delete(&types.User{})
+	result := db.Where("user_id = ?", userID).Delete(&types.User{})
 	if result.Error != nil {
 		return result.Error
 	}

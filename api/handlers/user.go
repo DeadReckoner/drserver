@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"dr/server/api/utils"
+	"dr/server/auth/apple"
 	"dr/server/database"
 	"dr/server/log"
 	"dr/server/storage"
@@ -22,10 +23,11 @@ const (
 type UserHandler struct {
 	db      *gorm.DB
 	storage *storage.StorageClient
+	apple   *apple.Client
 }
 
-func NewUserHandler(db *gorm.DB, storageClient *storage.StorageClient) *UserHandler {
-	return &UserHandler{db: db, storage: storageClient}
+func NewUserHandler(db *gorm.DB, storageClient *storage.StorageClient, appleClient *apple.Client) *UserHandler {
+	return &UserHandler{db: db, storage: storageClient, apple: appleClient}
 }
 
 func (h *UserHandler) CreateUser(c *gin.Context) {
@@ -214,7 +216,26 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		return
 	}
 
+	// The path :id must match the authenticated principal — a user can only
+	// delete their own account.
+	if authID := c.GetString("user_id"); authID == "" || authID != userID {
+		utils.ErrorResponse(c, http.StatusForbidden, "cannot delete another user's account")
+		return
+	}
+
 	fmt.Printf("Deleting User: %s\n", userID)
+
+	// Apple requires deleted accounts to have their refresh token revoked. The
+	// mobile client passes the original authorization code when the user
+	// signed in with Apple. We log and continue on failure: a partial Apple
+	// revocation should not block the user from deleting their account.
+	if appleAuthCode := c.Query("apple_auth_code"); appleAuthCode != "" {
+		if h.apple == nil {
+			log.Warn(ctx, "apple_auth_code provided but Apple client is not configured", nil)
+		} else if err := h.apple.RevokeByAuthCode(ctx, appleAuthCode); err != nil {
+			log.Error(ctx, "Failed to revoke Apple Sign-In token", err)
+		}
+	}
 
 	// Delete profile image from storage (ignore errors - image may not exist)
 	path := fmt.Sprintf("%s/profile", userID)
@@ -222,8 +243,7 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		log.Warn(ctx, "Failed to delete profile image (may not exist)", err)
 	}
 
-	err := database.DeleteUser(c)
-	if err != nil {
+	if err := database.DeleteUser(userID); err != nil {
 		utils.InternalErrorResponse(c, err)
 		return
 	}
