@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"dr/server/auth/apple"
 	"dr/server/storage"
 
 	"gorm.io/gorm"
@@ -23,9 +24,9 @@ type Handlers struct {
 }
 
 // NewHandlers creates all handlers with the given database connection
-func NewHandlers(db *gorm.DB, storageClient *storage.StorageClient) *Handlers {
+func NewHandlers(db *gorm.DB, storageClient *storage.StorageClient, appleClient *apple.Client) *Handlers {
 	return &Handlers{
-		User:         NewUserHandler(db, storageClient),
+		User:         NewUserHandler(db, storageClient, appleClient),
 		Friend:       NewFriendHandler(db),
 		Roadmap:      NewRoadmapHandler(db),
 		Habit:        NewHabitHandler(db),

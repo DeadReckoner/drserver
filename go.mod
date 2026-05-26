@@ -8,6 +8,7 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/anthropics/anthropic-sdk-go v1.41.0
 	github.com/gin-gonic/gin v1.10.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	gorm.io/driver/postgres v1.5.11
