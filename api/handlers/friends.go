@@ -5,6 +5,7 @@ import (
 	"dr/server/api/utils"
 	"dr/server/database"
 	"dr/server/log"
+	"dr/server/notifications"
 	"dr/server/types"
 	"net/http"
 
@@ -237,7 +238,9 @@ func (h *FriendHandler) UpdateFriendRequestStatus(c *gin.Context) {
 	go sendFriendStatusNotification(friendship, req.Status)
 }
 
-// sendFriendRequestNotification sends a notification when a friend request is created
+// sendFriendRequestNotification sends a notification when a friend request is created.
+// Routes through notifications.Dispatch so the recipient's F&A settings and any
+// per-friend override take effect, and so duplicate triggers don't double-send.
 func sendFriendRequestNotification(friendship types.Friendship) {
 	ctx := context.Background()
 	// Get requester's name
@@ -249,16 +252,19 @@ func sendFriendRequestNotification(friendship types.Friendship) {
 
 	requesterName := requester.FirstName + " " + requester.LastName
 
-	utils.SendPushNotification(
-		friendship.AddresseeID,
-		"friend_request",
-		"New Friend Request",
-		requesterName+" wants to connect with you",
-		map[string]any{
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           friendship.AddresseeID,
+		Category:         notifications.CategoryFAndA,
+		NotificationType: "friend_request",
+		DedupKey:         friendship.ID,
+		FriendID:         friendship.RequesterID,
+		Title:            "New Friend Request",
+		Body:             requesterName + " wants to connect with you",
+		Data: map[string]any{
 			"friendship_id": friendship.ID,
 			"requester_id":  friendship.RequesterID,
 		},
-	)
+	})
 }
 
 // sendFriendStatusNotification sends a notification when a friend request is accepted or rejected
