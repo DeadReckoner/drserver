@@ -183,6 +183,46 @@ func RecordDelivery(userID, notificationType, dedupKey, channel string) (inserte
 	return res.RowsAffected == 1, nil
 }
 
+// RecordDeliveryAndSend wraps RecordDelivery + a send callback in a single
+// transaction. If the send returns an error, the delivery log row is rolled
+// back, so the next scan retries naturally. If the row already exists (the
+// ON CONFLICT path), the send is skipped silently.
+//
+// Returns (sent, err) where sent=true means a fresh row was inserted AND
+// the send callback returned without error.
+//
+// Use this from cron jobs in Steps 7–11 where the send is synchronous and
+// failure should leave the dedup slot reclaimable. For the fire-and-forget
+// Expo push path in notifications.Dispatch, the simpler RecordDelivery
+// pattern is correct because the Expo client returns no error to the caller.
+func RecordDeliveryAndSend(userID, notificationType, dedupKey, channel string, send func() error) (sent bool, err error) {
+	err = db.Transaction(func(tx *gorm.DB) error {
+		entry := types.NotificationDeliveryLog{
+			UserID:           userID,
+			NotificationType: notificationType,
+			DedupKey:         dedupKey,
+			Channel:          channel,
+		}
+		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entry)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			// Already delivered (or claimed by a concurrent worker).
+			// Not an error — the caller should treat this as a no-op.
+			return nil
+		}
+		if sendErr := send(); sendErr != nil {
+			// Rolling back the transaction drops the log row, so the next
+			// scan will re-detect this candidate and try again.
+			return sendErr
+		}
+		sent = true
+		return nil
+	})
+	return
+}
+
 // RecentDeliveries returns the user's delivery log entries for a given type
 // since the lookback point. Used by frequency-cap logic.
 func RecentDeliveries(userID, notificationType string, since time.Time) ([]types.NotificationDeliveryLog, error) {
