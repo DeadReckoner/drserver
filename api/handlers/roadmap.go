@@ -4,6 +4,7 @@ import (
 	"context"
 	"dr/server/database"
 	"dr/server/log"
+	"dr/server/notifications"
 	"dr/server/types"
 	"fmt"
 	"net/http"
@@ -463,7 +464,9 @@ func (h *RoadmapHandler) RemoveAnchor(c *gin.Context) {
 	log.Info(ctx, "Anchor removed successfully")
 }
 
-// sendAnchorRequestNotification sends a notification when an anchor request is created
+// sendAnchorRequestNotification sends a notification when an anchor request is created.
+// Routes through notifications.Dispatch so the recipient's F&A settings take
+// effect and so duplicate triggers don't double-send.
 func sendAnchorRequestNotification(anchorRequest types.AnchorRequest) {
 	ctx := context.Background()
 	// Get requester's name
@@ -475,22 +478,40 @@ func sendAnchorRequestNotification(anchorRequest types.AnchorRequest) {
 
 	requesterName := requester.FirstName + " " + requester.LastName
 
-	utils.SendPushNotification(
-		anchorRequest.AnchorID,
-		"anchor_request",
-		"New Anchor Request",
-		requesterName+" wants you to be their anchor",
-		map[string]any{
+	// AnchoredRoadmapID lets the resolver consider any per-roadmap override
+	// the user might have created in the past for this roadmap (rare but
+	// possible if they previously anchored and removed themselves).
+	roadmapID := ""
+	if anchorRequest.RoadmapID != nil {
+		roadmapID = *anchorRequest.RoadmapID
+	}
+
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:            anchorRequest.AnchorID,
+		Category:          notifications.CategoryFAndA,
+		NotificationType:  "anchor_request",
+		DedupKey:          anchorRequest.RequestID,
+		AnchoredRoadmapID: roadmapID,
+		Title:             "New Anchor Request",
+		Body:              requesterName + " wants you to be their anchor",
+		Data: map[string]any{
 			"request_id": anchorRequest.RequestID,
 			"roadmap_id": anchorRequest.RoadmapID,
 		},
-	)
+	})
 }
 
-// sendAnchorStatusNotification sends a notification when an anchor request is accepted or rejected
+// sendAnchorStatusNotification sends a notification when an anchor request is
+// accepted or rejected.
+//
+// Acceptance routes through notifications.Dispatch as the spec'd
+// "anchor_accepted_removed" type. Rejection is not in the F&A pref taxonomy
+// (the spec doesn't list a notification type for it), so it stays on the
+// direct path until product decides how to gate it. TODO(notifications):
+// either add an "anchor_request_declined" type to FAndAPrefs or fold this
+// into anchor_accepted_removed with a status field.
 func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status string) {
 	ctx := context.Background()
-	// Get anchor's name (the person who accepted/rejected)
 	anchor, err := database.GetUserByID(anchorRequest.AnchorID)
 	if err != nil {
 		log.Info(ctx, "Failed to get anchor info for notification:", err)
@@ -499,21 +520,6 @@ func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status stri
 
 	anchorName := anchor.FirstName + " " + anchor.LastName
 
-	var notificationType, title, body string
-	switch status {
-	case "accepted":
-		notificationType = "anchor_accepted"
-		title = "Anchor Request Accepted"
-		body = anchorName + " accepted your anchor request"
-	case "rejected":
-		notificationType = "anchor_rejected"
-		title = "Anchor Request Declined"
-		body = anchorName + " declined your anchor request"
-	default:
-		return // Unknown status
-	}
-
-	// Build data map with request_id and appropriate target ID
 	data := map[string]any{
 		"request_id":  anchorRequest.RequestID,
 		"target_type": anchorRequest.TargetType,
@@ -525,13 +531,37 @@ func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status stri
 		data["habit_id"] = *anchorRequest.HabitID
 	}
 
-	utils.SendPushNotification(
-		anchorRequest.RequesterID,
-		notificationType,
-		title,
-		body,
-		data,
-	)
+	switch status {
+	case "accepted":
+		roadmapID := ""
+		if anchorRequest.RoadmapID != nil {
+			roadmapID = *anchorRequest.RoadmapID
+		}
+		notifications.Dispatch(notifications.DispatchOptions{
+			UserID:            anchorRequest.RequesterID,
+			Category:          notifications.CategoryFAndA,
+			NotificationType:  "anchor_accepted_removed",
+			DedupKey:          anchorRequest.RequestID + ":accepted",
+			AnchoredRoadmapID: roadmapID,
+			Title:             "Anchor Request Accepted",
+			Body:              anchorName + " accepted your anchor request",
+			Data:              data,
+		})
+
+	case "rejected":
+		// Not yet modeled in FAndAPrefs — keep the direct path so we don't
+		// silently drop rejections. See the function comment.
+		utils.SendPushNotification(
+			anchorRequest.RequesterID,
+			"anchor_rejected",
+			"Anchor Request Declined",
+			anchorName+" declined your anchor request",
+			data,
+		)
+
+	default:
+		return // Unknown status
+	}
 }
 
 // cleanupAnchorRequestNotification removes the original anchor_request notification

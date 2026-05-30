@@ -1,0 +1,147 @@
+package notifications
+
+import (
+	"context"
+	"time"
+
+	apiutils "dr/server/api/utils"
+	"dr/server/database"
+	"dr/server/log"
+	"dr/server/types"
+)
+
+// DispatchOptions describes a single notification the caller wants to deliver.
+// Title/Body/Data are pass-through to the push payload; Category/NotificationType/
+// FriendID/AnchoredRoadmapID feed the cascade resolver; DedupKey backs the
+// idempotency log.
+type DispatchOptions struct {
+	UserID            string         // recipient
+	Category          Category       // CategoryMyGoals | CategoryFAndA
+	NotificationType  string         // e.g. "friend_request"; must be known to the resolver
+	DedupKey          string         // unique per-event key; used as notification_delivery_log.dedup_key
+	FriendID          string         // F&A only: the friend the notification is about
+	AnchoredRoadmapID string         // F&A only: the anchored roadmap the notification is about
+	Title             string         // push title
+	Body              string         // push body
+	Data              map[string]any // push payload
+}
+
+// PushSender is the seam between the resolver/idempotency layer and the actual
+// push delivery. Production uses DefaultPushSender (which wraps
+// utils.SendPushNotification); tests inject a fake to assert what got sent.
+type PushSender func(userID, notificationType, title, body string, data map[string]any)
+
+// DefaultPushSender is the production push path.
+var DefaultPushSender PushSender = apiutils.SendPushNotification
+
+// Dispatcher bundles the side-effecting dependencies so they can be substituted
+// in tests. Production callers use Dispatch() which uses the package-default
+// instance wired to the real database + push provider.
+type Dispatcher struct {
+	LoadSettings         func(userID string) (types.NotificationSettings, error)
+	LoadUserTimezone     func(userID string) string
+	LoadFriendOverride   func(userID, friendID string) (*types.NotificationOverride, error)
+	LoadAnchoredOverride func(userID, roadmapID string) (*types.NotificationOverride, error)
+	RecordDelivery       func(userID, notificationType, dedupKey, channel string) (bool, error)
+	Send                 PushSender
+	Now                  func() time.Time
+}
+
+// production is the singleton Dispatcher wired to the real database + push.
+var production = Dispatcher{
+	LoadSettings: database.EnsureNotificationSettings,
+	LoadUserTimezone: func(userID string) string {
+		u, err := database.GetUserByID(userID)
+		if err != nil {
+			return "" // resolver falls back to UTC
+		}
+		return u.Timezone
+	},
+	LoadFriendOverride:   database.GetFriendOverride,
+	LoadAnchoredOverride: database.GetAnchoredGoalOverride,
+	RecordDelivery:       database.RecordDelivery,
+	Send:                 DefaultPushSender,
+	Now:                  time.Now,
+}
+
+// Dispatch is the production entry point. Loads settings + (optionally)
+// override, runs the cascade resolver, idempotently records delivery, and
+// sends if the resolver said to. Fire-and-forget; failures are logged.
+// Returns the Decision so callers (and tests) can audit what happened.
+func Dispatch(opts DispatchOptions) Decision {
+	return production.Dispatch(opts)
+}
+
+// Dispatch on the Dispatcher receiver is the testable form.
+func (d Dispatcher) Dispatch(opts DispatchOptions) Decision {
+	ctx := log.WithLogger(context.Background(), log.NewLogger(opts.UserID))
+
+	settings, err := d.LoadSettings(opts.UserID)
+	if err != nil {
+		log.Info(ctx, "notifications.Dispatch: failed to load settings", err)
+		return Decision{Reason: "settings_load_error"}
+	}
+
+	tz := d.LoadUserTimezone(opts.UserID)
+
+	// Per-target override is only consulted when ApplyToAllFriends is off.
+	// The resolver enforces this gating internally too, but skipping the DB
+	// hit when we know it won't be used keeps Dispatch fast in the common case.
+	var override *types.NotificationOverride
+	if opts.Category == CategoryFAndA && !settings.ApplyToAllFriends {
+		switch {
+		case opts.AnchoredRoadmapID != "":
+			override, err = d.LoadAnchoredOverride(opts.UserID, opts.AnchoredRoadmapID)
+		case opts.FriendID != "":
+			override, err = d.LoadFriendOverride(opts.UserID, opts.FriendID)
+		}
+		if err != nil {
+			// Override load failures shouldn't block the notification —
+			// the resolver will fall back to FAndAPrefs default.
+			log.Info(ctx, "notifications.Dispatch: failed to load override (continuing with default)", err)
+			override = nil
+		}
+	}
+
+	decision := Resolve(Context{
+		UserID:            opts.UserID,
+		NotificationType:  opts.NotificationType,
+		Category:          opts.Category,
+		FriendID:          opts.FriendID,
+		AnchoredRoadmapID: opts.AnchoredRoadmapID,
+		UserTimezone:      tz,
+		Now:               d.Now(),
+	}, settings, override)
+
+	if !decision.Send {
+		// Includes both permanent skips (disabled, muted, unknown type) AND
+		// quiet-hours snoozes. Step 9 will turn snoozes into deferred
+		// deliveries via the scheduler; until then a snooze == drop.
+		log.Info(ctx, "notifications.Dispatch: not sending",
+			"type", opts.NotificationType,
+			"reason", decision.Reason,
+			"snooze_until", decision.SnoozeUntil,
+		)
+		return decision
+	}
+
+	// Idempotency: claim the delivery log row first. If a duplicate trigger
+	// already claimed it, skip silently.
+	inserted, err := d.RecordDelivery(opts.UserID, opts.NotificationType, opts.DedupKey, types.NotificationChannelPush)
+	if err != nil {
+		// Don't fail the whole event — log and skip. The next firing of the
+		// same trigger will retry naturally.
+		log.Info(ctx, "notifications.Dispatch: delivery log write failed", err)
+		return decision
+	}
+	if !inserted {
+		log.Info(ctx, "notifications.Dispatch: already delivered, skipping",
+			"type", opts.NotificationType,
+			"dedup_key", opts.DedupKey,
+		)
+		return decision
+	}
+
+	d.Send(opts.UserID, opts.NotificationType, opts.Title, opts.Body, opts.Data)
+	return decision
+}
