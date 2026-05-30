@@ -63,6 +63,7 @@ func setupV1Routes(router *gin.Engine, h *handlers.Handlers, opts Options) {
 	setupHabitRoutes(v1, h.Habit, h.Nudge)
 	setupAgentRoutes(v1, h.Agent)
 	setupNotificationRoutes(v1, h.Notification)
+	setupNotificationSettingsRoutes(v1, h.NotificationSettings)
 	setupMessageThreadRoutes(v1, h.Message)
 	setupFeedbackRoutes(v1, h.Feedback)
 	setupNudgeRoutes(v1, h.Nudge)
@@ -264,6 +265,27 @@ func setupNotificationRoutes(rg *gin.RouterGroup, h *handlers.NotificationHandle
 	{
 		badge.GET("", h.GetBadgeCount)
 		badge.POST("/refresh", h.RefreshBadge)
+	}
+}
+
+func setupNotificationSettingsRoutes(rg *gin.RouterGroup, h *handlers.NotificationSettingsHandler) {
+	settings := rg.Group("/notification-settings")
+	{
+		// Global settings (channels, quiet hours, digest, MyGoals + F&A defaults)
+		settings.GET("", h.GetSettings)
+		settings.PUT("", h.UpdateSettings)
+
+		// Per-friend overrides
+		settings.GET("/friends", h.ListFriendOverrides)
+		settings.GET("/friends/:friendid", utils.ValidateUUID("friendid"), h.GetFriendOverride)
+		settings.PUT("/friends/:friendid", utils.ValidateUUID("friendid"), h.UpsertFriendOverride)
+		settings.DELETE("/friends/:friendid", utils.ValidateUUID("friendid"), h.DeleteFriendOverride)
+
+		// Per-anchored-goal overrides
+		settings.GET("/anchored-goals", h.ListAnchoredGoalOverrides)
+		settings.GET("/anchored-goals/:roadmapid", utils.ValidateUUID("roadmapid"), h.GetAnchoredGoalOverride)
+		settings.PUT("/anchored-goals/:roadmapid", utils.ValidateUUID("roadmapid"), h.UpsertAnchoredGoalOverride)
+		settings.DELETE("/anchored-goals/:roadmapid", utils.ValidateUUID("roadmapid"), h.DeleteAnchoredGoalOverride)
 	}
 }
 
