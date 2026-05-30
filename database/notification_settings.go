@@ -200,3 +200,18 @@ func CleanupDeliveryLog(cutoff time.Time) (int64, error) {
 	res := db.Where("delivered_at < ?", cutoff).Delete(&types.NotificationDeliveryLog{})
 	return res.RowsAffected, res.Error
 }
+
+// =============================================================================
+// Authorization helpers (used by per-target override endpoints)
+// =============================================================================
+
+// IsAnchorOfRoadmap reports whether the given user is the accepted anchor of
+// the given roadmap. Anchored-goal notification overrides may only be created
+// for roadmaps where this returns true.
+func IsAnchorOfRoadmap(anchorUserID, roadmapID string) (bool, error) {
+	var count int64
+	err := db.Model(&types.Roadmap{}).
+		Where("roadmap_id = ? AND anchor_id = ?", roadmapID, anchorUserID).
+		Count(&count).Error
+	return count > 0, err
+}
