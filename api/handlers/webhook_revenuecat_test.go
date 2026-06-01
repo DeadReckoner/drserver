@@ -134,11 +134,16 @@ func TestRCWebhook_HappyPath_InitialPurchase(t *testing.T) {
 	mock.ExpectExec(`UPDATE "entitlements" SET`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	// 5. INSERT into entitlement_events.
+	// 5. userExists check before FK-linking the audit row.
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "users" WHERE user_id = \$1`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+
+	// 6. INSERT into entitlement_events.
 	mock.ExpectExec(`INSERT INTO "entitlement_events"`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	// 6. Commit.
+	// 7. Commit.
 	mock.ExpectCommit()
 
 	body := map[string]any{
@@ -160,4 +165,60 @@ func TestRCWebhook_HappyPath_InitialPurchase(t *testing.T) {
 
 	// Suppress unused-var warning for the database import.
 	_ = database.EntitlementEventExists
+}
+
+// Regression test for the FK-violation that took down the first prod sandbox
+// test event: RC's "Send Test Event" button posts a canned event whose
+// app_user_id is a well-formed UUID that does NOT exist in our users table.
+// The handler must still 200 (event recorded for audit) and leave user_id
+// NULL in the audit row to avoid the FK constraint.
+func TestRCWebhook_UnmappedButValidUUID_RecordsWithNullUser(t *testing.T) {
+	t.Setenv("REVENUECAT_WEBHOOK_SECRET", "real-secret")
+	db, mock := newRCDB(t)
+
+	const phantomUUID = "bb3a1105-6e89-4669-9e72-fb73f99c5a2d"
+	const eventID = "evt-phantom-1"
+
+	// 1. Idempotency: not seen.
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "entitlement_events" WHERE event_id = \$1`).
+		WithArgs(eventID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	// 2. Tx begins.
+	mock.ExpectBegin()
+
+	// 3. Apply's preflight read - no entitlement row for the phantom user,
+	// so Apply will short-circuit with ApplyStatusNoopUnmapped and NOT
+	// emit the UPDATE.
+	mock.ExpectQuery(`SELECT \* FROM "entitlements" WHERE user_id = \$1`).
+		WithArgs(phantomUUID, 1).
+		WillReturnError(gorm.ErrRecordNotFound)
+
+	// 4. userExists check returns 0 - phantom user doesn't exist in
+	// public.users either, so we record the audit row with user_id NULL.
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "users" WHERE user_id = \$1`).
+		WithArgs(phantomUUID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	// 5. INSERT proceeds with user_id NULL (no FK violation).
+	mock.ExpectExec(`INSERT INTO "entitlement_events"`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// 6. Commit.
+	mock.ExpectCommit()
+
+	body := map[string]any{
+		"event": map[string]any{
+			"id":                 eventID,
+			"type":               "TEST",
+			"app_user_id":        phantomUUID,
+			"store":              "APP_STORE",
+			"event_timestamp_ms": time.Now().UnixMilli(),
+		},
+	}
+	w := postRC(t, rcRouter(db), "real-secret", body)
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "noop_unmapped", resp["status"])
 }
