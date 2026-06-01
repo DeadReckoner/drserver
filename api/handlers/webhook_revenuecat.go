@@ -115,8 +115,23 @@ func (h *WebhookHandler) RevenueCatWebhook(c *gin.Context) {
 			applyStatus = revenuecat.ApplyStatusError
 		}
 
+		// Only FK-link the audit row to user_id when the user actually
+		// exists. Three real cases land us here with a well-formed UUID
+		// that's NOT in our users table:
+		//   1. RC dashboard "Send Test Event" (uses a canned demo user_id)
+		//   2. A real event for a user we've deleted between purchase and
+		//      delivery
+		//   3. RC anonymous fallbacks that happen to parse as UUID
+		// In all three we still want to record the event for audit, but
+		// without violating the entitlement_events.user_id FK constraint.
 		if uid := revenuecat.ResolveUserID(env.Event); uid != "" {
-			userIDPtr = &uid
+			exists, err := userExists(tx, uid)
+			if err != nil {
+				return err
+			}
+			if exists {
+				userIDPtr = &uid
+			}
 		}
 
 		evtRow := types.EntitlementEvent{
@@ -142,4 +157,18 @@ func (h *WebhookHandler) RevenueCatWebhook(c *gin.Context) {
 	log.Info(ctx, "RC webhook: handled",
 		"event_id="+env.Event.ID, "type="+env.Event.Type, "apply="+applyStatus)
 	c.JSON(http.StatusOK, gin.H{"status": applyStatus})
+}
+
+// userExists returns true if a row with the given user_id is present in
+// public.users. Used by the webhook handler to gate the FK reference on
+// entitlement_events.user_id, since RC can legitimately deliver events for
+// IDs that don't correspond to real DR users (test events, deleted users).
+func userExists(tx *gorm.DB, userID string) (bool, error) {
+	var count int64
+	if err := tx.Model(&types.User{}).
+		Where("user_id = ?", userID).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
