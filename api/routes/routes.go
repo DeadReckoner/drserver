@@ -40,6 +40,10 @@ func setupV1Routes(router *gin.Engine, h *handlers.Handlers, opts Options) {
 	// AuthMiddleware doesn't apply.
 	setupAdminRoutes(router, h.Admin)
 
+	// External webhooks: auth is verified inside each handler (HMAC or
+	// shared secret depending on provider). No Supabase JWT.
+	setupWebhookRoutes(router, h.Webhook)
+
 	auth := opts.AuthMiddleware
 	if auth == nil {
 		auth = middleware.AuthMiddleware()
@@ -85,6 +89,10 @@ func setupAdminRoutes(router *gin.Engine, h *handlers.AdminHandler) {
 	{
 		admin.POST("/users/:userid/plan", utils.ValidateUUID("userid"), h.SetUserPlan)
 	}
+}
+
+func setupWebhookRoutes(router *gin.Engine, h *handlers.WebhookHandler) {
+	router.POST("/webhooks/revenuecat", h.RevenueCatWebhook)
 }
 
 func setupUserRoutes(rg *gin.RouterGroup, h *handlers.UserHandler) {
