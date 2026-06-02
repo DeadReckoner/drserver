@@ -32,19 +32,9 @@ func scanCtx(jobName string) context.Context {
 	return log.WithLogger(context.Background(), log.NewLogger("cron:"+jobName))
 }
 
-// ScanMissedTasks and ScanAtRiskMilestones are defined in missed_tasks.go and
-// at_risk_milestones.go respectively as of Step 7.
-
-// ScanFallingBehind applies the B ∪ D formula (≥3 missed in 7d OR pace
-// deficit ≥5 tasks / ≥20%) to identify roadmaps that should fire a
-// falling_behind notification. Cooldown is once-per-ISO-week per roadmap.
-// STUB until Step 8.
-func ScanFallingBehind(_ *gorm.DB) func() {
-	return func() {
-		ctx := scanCtx("scan_falling_behind")
-		log.Info(ctx, "stub: 0 candidates")
-	}
-}
+// ScanMissedTasks, ScanAtRiskMilestones, and ScanFallingBehind are defined
+// in missed_tasks.go, at_risk_milestones.go, and falling_behind.go
+// respectively (Steps 7 and 8).
 
 // DeliverDueDigests picks users whose digest hour-of-day matches the current
 // minute in their local timezone and composes their pending digest. SQL
