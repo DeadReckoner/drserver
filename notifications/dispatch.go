@@ -43,8 +43,17 @@ type Dispatcher struct {
 	LoadFriendOverride   func(userID, friendID string) (*types.NotificationOverride, error)
 	LoadAnchoredOverride func(userID, roadmapID string) (*types.NotificationOverride, error)
 	RecordDelivery       func(userID, notificationType, dedupKey, channel string) (bool, error)
-	Send                 PushSender
-	Now                  func() time.Time
+
+	// QueuePending stores a notification for later delivery (UPSERT on the
+	// pending_notifications table). When non-nil and the resolver says
+	// SnoozeUntil, Dispatch calls this instead of dropping the notification.
+	// In production this is wired to database.UpsertPendingNotification.
+	// Leave nil in tests that don't care about deferral; Dispatch will fall
+	// back to the v1 drop behavior.
+	QueuePending func(p types.PendingNotification) error
+
+	Send PushSender
+	Now  func() time.Time
 }
 
 // production is the singleton Dispatcher wired to the real database + push.
@@ -60,6 +69,7 @@ var production = Dispatcher{
 	LoadFriendOverride:   database.GetFriendOverride,
 	LoadAnchoredOverride: database.GetAnchoredGoalOverride,
 	RecordDelivery:       database.RecordDelivery,
+	QueuePending:         database.UpsertPendingNotification,
 	Send:                 DefaultPushSender,
 	Now:                  time.Now,
 }
@@ -114,9 +124,27 @@ func (d Dispatcher) Dispatch(opts DispatchOptions) Decision {
 	}, settings, override)
 
 	if !decision.Send {
-		// Includes both permanent skips (disabled, muted, unknown type) AND
-		// quiet-hours snoozes. Step 9 will turn snoozes into deferred
-		// deliveries via the scheduler; until then a snooze == drop.
+		// Step 9: SnoozeUntil now means "defer until this time" — UPSERT a
+		// pending_notifications row that the DeliverPendingNotifications
+		// cron will pick up. Permanent skips (disabled, muted, unknown
+		// type) still drop immediately.
+		if decision.SnoozeUntil != nil && d.QueuePending != nil {
+			if err := d.QueuePending(types.PendingNotification{
+				UserID:            opts.UserID,
+				NotificationType:  opts.NotificationType,
+				DedupKey:          opts.DedupKey,
+				Channel:           types.NotificationChannelPush,
+				Category:          string(opts.Category),
+				FriendID:          stringPtrOrNil(opts.FriendID),
+				AnchoredRoadmapID: stringPtrOrNil(opts.AnchoredRoadmapID),
+				Title:             opts.Title,
+				Body:              opts.Body,
+				Data:              opts.Data,
+				ScheduledFor:      *decision.SnoozeUntil,
+			}); err != nil {
+				log.Info(ctx, "notifications.Dispatch: queue pending failed", err)
+			}
+		}
 		log.Info(ctx, "notifications.Dispatch: not sending",
 			"type", opts.NotificationType,
 			"reason", decision.Reason,
@@ -144,4 +172,13 @@ func (d Dispatcher) Dispatch(opts DispatchOptions) Decision {
 
 	d.Send(opts.UserID, opts.NotificationType, opts.Title, opts.Body, opts.Data)
 	return decision
+}
+
+// stringPtrOrNil returns &s if s != "" else nil. Used to keep nullable UUID
+// columns in pending_notifications NULL rather than empty strings.
+func stringPtrOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

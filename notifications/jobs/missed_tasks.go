@@ -10,13 +10,14 @@ import (
 )
 
 // missedTaskCandidate is the per-task shape returned by the candidate query.
-// Includes the recipient's timezone so the dispatcher doesn't need a follow-up
-// user lookup.
+// Includes MilestoneID so the frontend can route the user to the milestone
+// view from a notification tap without an extra lookup.
 type missedTaskCandidate struct {
-	TaskID    string `gorm:"column:task_id"`
-	RoadmapID string `gorm:"column:roadmap_id"`
-	UserID    string `gorm:"column:user_id"`
-	Title     string `gorm:"column:title"`
+	TaskID      string `gorm:"column:task_id"`
+	RoadmapID   string `gorm:"column:roadmap_id"`
+	MilestoneID string `gorm:"column:milestone_id"`
+	UserID      string `gorm:"column:user_id"`
+	Title       string `gorm:"column:title"`
 }
 
 // findMissedTaskCandidates returns every task that:
@@ -28,7 +29,7 @@ type missedTaskCandidate struct {
 // Timezone math runs in Postgres so the cron stays stateless.
 func findMissedTaskCandidates(db *gorm.DB) ([]missedTaskCandidate, error) {
 	const q = `
-		SELECT t.task_id, t.roadmap_id, t.user_id, t.title
+		SELECT t.task_id, t.roadmap_id, t.milestone_id, t.user_id, t.title
 		FROM tasks t
 		JOIN users    u ON u.user_id    = t.user_id
 		JOIN roadmaps r ON r.roadmap_id = t.roadmap_id
@@ -79,8 +80,9 @@ func scanMissedTasksWith(db *gorm.DB, dispatch func(notifications.DispatchOption
 				Title:            "Missed task",
 				Body:             c.Title,
 				Data: map[string]any{
-					"task_id":    c.TaskID,
-					"roadmap_id": c.RoadmapID,
+					"task_id":      c.TaskID,
+					"milestone_id": c.MilestoneID,
+					"roadmap_id":   c.RoadmapID,
 				},
 			})
 		}

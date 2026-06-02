@@ -38,12 +38,15 @@ type fake struct {
 	recordErr      error
 	now            time.Time
 	pushes         []sentPush
+	queued         []types.PendingNotification
+	queueErr       error
 
 	friendCalls   int
 	anchorCalls   int
 	recordCalls   int
 	settingsCalls int
 	tzCalls       int
+	queueCalls    int
 }
 
 func (f *fake) dispatcher() Dispatcher {
@@ -67,6 +70,11 @@ func (f *fake) dispatcher() Dispatcher {
 		RecordDelivery: func(_, _, _, _ string) (bool, error) {
 			f.recordCalls++
 			return f.recordInserted, f.recordErr
+		},
+		QueuePending: func(p types.PendingNotification) error {
+			f.queueCalls++
+			f.queued = append(f.queued, p)
+			return f.queueErr
 		},
 		Send: func(userID, notificationType, title, body string, data map[string]any) {
 			f.pushes = append(f.pushes, sentPush{userID, notificationType, title, body, data})
@@ -183,8 +191,8 @@ func TestDispatch_SkipsOnDecisionReject(t *testing.T) {
 	}
 }
 
-func TestDispatch_QuietHoursSnoozeDropsPushInV1(t *testing.T) {
-	// Step 9 will defer; in Step 5 we just don't send.
+func TestDispatch_QuietHoursSnoozeQueuesPending(t *testing.T) {
+	// Step 9: in quiet hours, defer via QueuePending instead of dropping.
 	s := baseSettingsForDispatch()
 	s.QuietHoursEnabled = true
 	f := &fake{
@@ -200,19 +208,63 @@ func TestDispatch_QuietHoursSnoozeDropsPushInV1(t *testing.T) {
 		Category:         CategoryFAndA,
 		NotificationType: "friend_request", // default delivery: immediate
 		DedupKey:         "friendship-42",
+		FriendID:         "friend-2",
+		Title:            "New Friend Request",
+		Body:             "Pat wants to connect",
+		Data:             map[string]any{"friendship_id": "friendship-42"},
 	})
 
 	if decision.Reason != ReasonQuietHours {
 		t.Errorf("reason = %q, want %q", decision.Reason, ReasonQuietHours)
 	}
 	if decision.SnoozeUntil == nil {
-		t.Error("SnoozeUntil should be set during quiet hours")
+		t.Fatal("SnoozeUntil should be set during quiet hours")
 	}
 	if len(f.pushes) != 0 {
 		t.Errorf("push fired during quiet hours: %+v", f.pushes)
 	}
 	if f.recordCalls != 0 {
 		t.Error("delivery log claim should not happen on snooze")
+	}
+	if f.queueCalls != 1 {
+		t.Fatalf("queue calls = %d, want 1 (snooze should defer to pending table)", f.queueCalls)
+	}
+	queued := f.queued[0]
+	if queued.NotificationType != "friend_request" || queued.DedupKey != "friendship-42" {
+		t.Errorf("queued row mismatch: %+v", queued)
+	}
+	if queued.Title != "New Friend Request" || queued.Body != "Pat wants to connect" {
+		t.Errorf("queued row missing payload: %+v", queued)
+	}
+	if queued.Category != string(CategoryFAndA) {
+		t.Errorf("queued category = %q, want %q", queued.Category, CategoryFAndA)
+	}
+	if queued.FriendID == nil || *queued.FriendID != "friend-2" {
+		t.Errorf("queued FriendID = %v, want friend-2", queued.FriendID)
+	}
+	if !queued.ScheduledFor.Equal(*decision.SnoozeUntil) {
+		t.Errorf("queued ScheduledFor = %v, want %v", queued.ScheduledFor, *decision.SnoozeUntil)
+	}
+}
+
+func TestDispatch_PermanentSkipDoesNotQueue(t *testing.T) {
+	// Step 9: only SnoozeUntil-bearing decisions defer. Permanent skips
+	// (type disabled, muted, unknown) should NOT add anything to the
+	// pending table — they're truly dropped.
+	s := baseSettingsForDispatch()
+	s.FAndAEnabled = false
+	f := &fake{settings: s, now: dispatchTestNow}
+	d := f.dispatcher()
+
+	d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryFAndA,
+		NotificationType: "friend_request",
+		DedupKey:         "friendship-42",
+	})
+
+	if f.queueCalls != 0 {
+		t.Errorf("queueCalls = %d, want 0 (permanent skip should not defer)", f.queueCalls)
 	}
 }
 

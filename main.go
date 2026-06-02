@@ -49,6 +49,7 @@ func setupScheduler(db *gorm.DB) *cron.Cron {
 	mustRegister(c, "*/5 * * * *", jobs.ScanAtRiskMilestones(db))
 	mustRegister(c, "* * * * *", jobs.DeliverDueDigests(db))
 	mustRegister(c, "* * * * *", jobs.DeliverAnchorBatches(db))
+	mustRegister(c, "* * * * *", jobs.DeliverPendingNotifications(db))
 	mustRegister(c, "0 * * * *", jobs.CleanupDeliveryLog(db))
 
 	return c

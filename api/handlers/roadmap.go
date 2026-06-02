@@ -486,6 +486,15 @@ func sendAnchorRequestNotification(anchorRequest types.AnchorRequest) {
 		roadmapID = *anchorRequest.RoadmapID
 	}
 
+	// Build data with the dereferenced roadmap_id so the frontend never
+	// sees a JSON `null` here — the key is simply absent if there's no
+	// roadmap (the anchor-on-habit case, where the data carries habit_id
+	// instead via sendAnchorStatusNotification's handling).
+	data := map[string]any{"request_id": anchorRequest.RequestID}
+	if anchorRequest.RoadmapID != nil {
+		data["roadmap_id"] = *anchorRequest.RoadmapID
+	}
+
 	notifications.Dispatch(notifications.DispatchOptions{
 		UserID:            anchorRequest.AnchorID,
 		Category:          notifications.CategoryFAndA,
@@ -494,10 +503,7 @@ func sendAnchorRequestNotification(anchorRequest types.AnchorRequest) {
 		AnchoredRoadmapID: roadmapID,
 		Title:             "New Anchor Request",
 		Body:              requesterName + " wants you to be their anchor",
-		Data: map[string]any{
-			"request_id": anchorRequest.RequestID,
-			"roadmap_id": anchorRequest.RoadmapID,
-		},
+		Data:              data,
 	})
 }
 

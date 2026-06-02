@@ -18,7 +18,7 @@ func TestSetupScheduler_RegistersAllJobs(t *testing.T) {
 		<-c.Stop().Done()
 	})
 
-	const want = 6
+	const want = 7
 	if got := len(c.Entries()); got != want {
 		t.Errorf("setupScheduler registered %d jobs, want %d", got, want)
 	}
