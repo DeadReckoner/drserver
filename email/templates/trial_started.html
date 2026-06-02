@@ -1,31 +1,38 @@
-{{define "subject"}}Your Pro trial has started{{end}}
+{{define "subject"}}Your Dead Reckoner Pro trial has started{{end}}
 
 {{define "body"}}
-<h1>Your 7-day Pro trial has started{{if .FirstName}}, {{.FirstName}}{{end}}</h1>
+<h1>Your Pro trial has started{{if .FirstName}}, {{.FirstName}}{{end}}</h1>
 
-<!-- MARKETING: rewrite the body copy below. Variables available: .FirstName .TrialEndsAt .ProductName -->
 <p>
   You now have full access to Dead Reckoner Pro until <strong>{{.TrialEndsAt}}</strong>.
 </p>
 
 <p>
-  Pro unlocks:
+  Use the trial to pressure-test the full system:
 </p>
 
 <ul>
-  <li>Unlimited roadmaps and habits</li>
-  <li>Advanced stats and historical performance</li>
-  <li>AI-powered weekly review</li>
-  <li>Custom reminders and anchor settings</li>
-  <li>Reactions, replies, and check-ins in messaging</li>
+  <li>Build more roadmaps without limits</li>
+  <li>Track habits and progress over time</li>
+  <li>Review advanced stats and historical performance</li>
+  <li>Customize reminders and Anchor settings</li>
+  <li>Use reactions, replies, and check-ins in messaging</li>
 </ul>
 
 <p>
-  After your trial ends, your subscription will continue automatically. You can cancel anytime in iOS Settings before <strong>{{.TrialEndsAt}}</strong> and you won't be charged.
+  The point is not more planning. The point is more follow-through.
 </p>
 
 <p>
-  <a class="btn" href="https://deadreckoner.io/app">Open the app</a>
+  After your trial ends, your subscription will continue automatically unless you cancel before <strong>{{.TrialEndsAt}}</strong> in your subscription settings.
+</p>
+
+<p>
+  <a class="btn" href="https://deadreckoner.io/app">Open Dead Reckoner</a>
+</p>
+
+<p>
+  Need help getting set up? Just reply.
 </p>
 {{end}}
 
