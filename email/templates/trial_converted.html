@@ -3,21 +3,28 @@
 {{define "body"}}
 <h1>You're officially Pro{{if .FirstName}}, {{.FirstName}}{{end}}</h1>
 
-<!-- MARKETING: rewrite the body copy below. Variables available: .FirstName .ProductName .NextRenewalDate .Price -->
 <p>
-  Your trial is over and you've been charged for your first {{.ProductName}}. Welcome to Pro.
+  Your trial has ended and your {{if .ProductName}}{{.ProductName}}{{else}}Dead Reckoner Pro{{end}} subscription is now active.
 </p>
 
 <p>
-  Your subscription renews on <strong>{{.NextRenewalDate}}</strong>{{if .Price}} for <strong>{{.Price}}</strong>{{end}}. You can manage or cancel anytime in iOS Settings.
+  Your subscription renews on <strong>{{.NextRenewalDate}}</strong>{{if .Price}} for <strong>{{.Price}}</strong>{{end}}. You can manage or cancel anytime in your subscription settings.
 </p>
 
 <p>
-  <a class="btn" href="https://deadreckoner.io/app">Open the app</a>
+  Pro keeps the system open: more roadmaps, deeper performance history, custom reminders, Anchor settings, and the tools to keep your work visible.
 </p>
 
 <p>
-  Thanks for being here.
+  Keep building. Keep tracking. Keep the commitment where it cannot quietly disappear.
+</p>
+
+<p>
+  <a class="btn" href="https://deadreckoner.io/app">Open Dead Reckoner</a>
+</p>
+
+<p>
+  Onward.
 </p>
 {{end}}
 
