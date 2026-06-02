@@ -1,0 +1,30 @@
+{{define "subject"}}Welcome to Dead Reckoner{{end}}
+
+{{define "body"}}
+<h1>Welcome{{if .FirstName}}, {{.FirstName}}{{end}}!</h1>
+
+<!-- MARKETING: rewrite the body copy below. Variables available: .FirstName .Email -->
+<p>
+  Thanks for joining Dead Reckoner. You're set up and ready to start mapping out your goals.
+</p>
+
+<p>
+  Here's how to get going:
+</p>
+
+<ul>
+  <li>Create your first roadmap from a goal you've been thinking about</li>
+  <li>Build daily habits that compound over time</li>
+  <li>Invite a friend to anchor your roadmap and keep you accountable</li>
+</ul>
+
+<p>
+  <a class="btn" href="https://deadreckoner.io/app">Open the app</a>
+</p>
+
+<p>
+  If you have any questions, just reply to this email.
+</p>
+{{end}}
+
+{{template "layout" .}}

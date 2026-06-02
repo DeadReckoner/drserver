@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"dr/server/auth/apple"
+	"dr/server/email"
 	"dr/server/storage"
 
 	"gorm.io/gorm"
@@ -27,8 +28,12 @@ type Handlers struct {
 
 // NewHandlers creates all handlers with the given database connection
 func NewHandlers(db *gorm.DB, storageClient *storage.StorageClient, appleClient *apple.Client) *Handlers {
+	// One shared email dispatcher: cheap to construct, holds an HTTP client
+	// and the parsed templates. Passed into any handler that fires
+	// transactional emails.
+	mailer := email.NewDispatcher(db)
 	return &Handlers{
-		User:                 NewUserHandler(db, storageClient, appleClient),
+		User:                 NewUserHandler(db, storageClient, appleClient, mailer),
 		Friend:               NewFriendHandler(db),
 		Roadmap:              NewRoadmapHandler(db),
 		Habit:                NewHabitHandler(db),
@@ -41,6 +46,6 @@ func NewHandlers(db *gorm.DB, storageClient *storage.StorageClient, appleClient 
 		Nudge:                NewNudgeHandler(db),
 		Billing:              NewBillingHandler(db),
 		Admin:                NewAdminHandler(db),
-		Webhook:              NewWebhookHandler(db),
+		Webhook:              NewWebhookHandler(db, mailer),
 	}
 }

@@ -1,0 +1,28 @@
+{{define "subject"}}Your subscription has been cancelled{{end}}
+
+{{define "body"}}
+<h1>Your subscription has been cancelled</h1>
+
+<!-- MARKETING: rewrite the body copy below. Variables available: .FirstName .ProductName .AccessUntil .ResubscribeURL -->
+<p>
+  Hi{{if .FirstName}} {{.FirstName}}{{end}},
+</p>
+
+<p>
+  We've received your cancellation request. You'll keep full Pro access until <strong>{{.AccessUntil}}</strong>, then your account will revert to the free plan.
+</p>
+
+<p>
+  If you change your mind, you can resubscribe in iOS Settings any time before that date and your subscription will continue without interruption.
+</p>
+
+<p>
+  <a class="btn" href="{{.ResubscribeURL}}">Resubscribe</a>
+</p>
+
+<p>
+  We'd love to know what didn't work. Just hit reply.
+</p>
+{{end}}
+
+{{template "layout" .}}
