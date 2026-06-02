@@ -43,7 +43,10 @@ func newRCDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 func rcRouter(db *gorm.DB) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewWebhookHandler(db)
+	// nil mailer skips email dispatch - acceptable for these tests since
+	// we're verifying the persist/HTTP path, not the email side. Step 6.5's
+	// own tests exercise the mailer in isolation.
+	h := NewWebhookHandler(db, nil)
 	r.POST("/webhooks/revenuecat", h.RevenueCatWebhook)
 	return r
 }

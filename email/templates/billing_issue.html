@@ -1,0 +1,24 @@
+{{define "subject"}}There is a problem with your subscription billing{{end}}
+
+{{define "body"}}
+<h1>Action needed: update your payment method</h1>
+
+<!-- MARKETING: rewrite the body copy below. Variables available: .FirstName .ManageSubscriptionURL -->
+<p>
+  Hi{{if .FirstName}} {{.FirstName}}{{end}},
+</p>
+
+<p>
+  We tried to renew your Dead Reckoner Pro subscription, but the payment didn't go through. Apple will keep retrying for the next two weeks, but you can fix this faster by updating your payment method.
+</p>
+
+<p>
+  <a class="btn" href="{{.ManageSubscriptionURL}}">Update payment method</a>
+</p>
+
+<p>
+  Your Pro access stays active during the grace period. If you need help, just reply.
+</p>
+{{end}}
+
+{{template "layout" .}}

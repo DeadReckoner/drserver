@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"dr/server/database"
+	"dr/server/email"
 	"dr/server/log"
 	"dr/server/types"
 	"dr/server/webhooks/revenuecat"
@@ -18,11 +21,12 @@ import (
 // WebhookHandler bundles all external-webhook endpoints. Today only RC; room
 // to grow (Stripe, Apple ASSN direct, etc.) without expanding handler count.
 type WebhookHandler struct {
-	db *gorm.DB
+	db     *gorm.DB
+	mailer *email.Dispatcher
 }
 
-func NewWebhookHandler(db *gorm.DB) *WebhookHandler {
-	return &WebhookHandler{db: db}
+func NewWebhookHandler(db *gorm.DB, mailer *email.Dispatcher) *WebhookHandler {
+	return &WebhookHandler{db: db, mailer: mailer}
 }
 
 // RevenueCatWebhook handles POST /webhooks/revenuecat.
@@ -156,7 +160,112 @@ func (h *WebhookHandler) RevenueCatWebhook(c *gin.Context) {
 
 	log.Info(ctx, "RC webhook: handled",
 		"event_id="+env.Event.ID, "type="+env.Event.Type, "apply="+applyStatus)
+
+	// 6. Dispatch lifecycle email if applicable. Fire-and-forget goroutine -
+	// email failures must not affect the webhook response (RC would retry
+	// the whole event and we'd re-apply).
+	if applyStatus == revenuecat.ApplyStatusApplied && userIDPtr != nil {
+		h.dispatchEventEmail(*userIDPtr, env.Event)
+	}
 	c.JSON(http.StatusOK, gin.H{"status": applyStatus})
+}
+
+// dispatchEventEmail picks the right email kind for the event and sends it
+// in a background goroutine. Silent for event types that should not produce
+// a user-facing email (regular renewals, product changes, etc.).
+func (h *WebhookHandler) dispatchEventEmail(userID string, evt revenuecat.Event) {
+	if h.mailer == nil {
+		return
+	}
+	kind, vars := emailForEvent(evt)
+	if kind == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := h.mailer.Send(ctx, userID, kind, vars, "rc:"+evt.ID); err != nil {
+			log.Warn(ctx, "RC lifecycle email failed",
+				"event_id="+evt.ID, "kind="+string(kind), err.Error())
+		}
+	}()
+}
+
+// emailForEvent maps an RC event to the email kind to send (or "" for
+// silent). Variable values are derived from the event payload.
+//
+// Silent on: regular RENEWAL, PRODUCT_CHANGE, UNCANCELLATION, REFUND. Those
+// have no useful user-facing message we'd want to send unsolicited.
+func emailForEvent(evt revenuecat.Event) (email.EmailKind, email.Vars) {
+	productName := productNameFor(evt.ProductID)
+	resubscribeURL := "https://deadreckoner.io/app"
+	manageURL := "https://apps.apple.com/account/subscriptions"
+
+	switch evt.Type {
+	case revenuecat.EventTypeInitialPurchase:
+		if evt.PeriodType == revenuecat.PeriodTypeTrial {
+			return email.KindTrialStarted, email.Vars{
+				TrialEndsAt: formatMs(evt.ExpirationAtMs),
+				ProductName: productName,
+			}
+		}
+		// Non-trial direct subscription: treat like trial conversion - "you
+		// are now Pro" copy fits either path.
+		return email.KindTrialConverted, email.Vars{
+			NextRenewalDate: formatMs(evt.ExpirationAtMs),
+			ProductName:     productName,
+		}
+
+	case revenuecat.EventTypeRenewal:
+		if evt.IsTrialConversion {
+			return email.KindTrialConverted, email.Vars{
+				NextRenewalDate: formatMs(evt.ExpirationAtMs),
+				ProductName:     productName,
+			}
+		}
+		// Silent on regular renewals.
+		return "", email.Vars{}
+
+	case revenuecat.EventTypeCancellation:
+		return email.KindCancelled, email.Vars{
+			AccessUntil:    formatMs(evt.ExpirationAtMs),
+			ProductName:    productName,
+			ResubscribeURL: resubscribeURL,
+		}
+
+	case revenuecat.EventTypeExpiration:
+		return email.KindExpired, email.Vars{
+			ResubscribeURL: resubscribeURL,
+		}
+
+	case revenuecat.EventTypeBillingIssue:
+		return email.KindBillingIssue, email.Vars{
+			ManageSubscriptionURL: manageURL,
+		}
+	}
+	return "", email.Vars{}
+}
+
+// productNameFor maps a store product ID to a human-readable name for use
+// in email copy. Adjust when product IDs change in App Store Connect.
+func productNameFor(productID string) string {
+	switch productID {
+	case "dr_pro_monthly":
+		return "monthly subscription"
+	case "dr_pro_annual":
+		return "annual subscription"
+	}
+	return "subscription"
+}
+
+// formatMs renders an ms-since-epoch timestamp as YYYY-MM-DD UTC, suitable
+// for the user-facing email body. Empty for zero values so templates skip
+// the field gracefully.
+func formatMs(ms int64) string {
+	if ms == 0 {
+		return ""
+	}
+	return time.UnixMilli(ms).UTC().Format("January 2, 2006")
 }
 
 // userExists returns true if a row with the given user_id is present in

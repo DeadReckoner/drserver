@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"dr/server/api/utils"
 	"dr/server/auth/apple"
 	"dr/server/database"
+	"dr/server/email"
 	"dr/server/log"
 	"dr/server/storage"
 	"dr/server/types"
@@ -11,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -24,10 +27,29 @@ type UserHandler struct {
 	db      *gorm.DB
 	storage *storage.StorageClient
 	apple   *apple.Client
+	mailer  *email.Dispatcher
 }
 
-func NewUserHandler(db *gorm.DB, storageClient *storage.StorageClient, appleClient *apple.Client) *UserHandler {
-	return &UserHandler{db: db, storage: storageClient, apple: appleClient}
+func NewUserHandler(db *gorm.DB, storageClient *storage.StorageClient, appleClient *apple.Client, mailer *email.Dispatcher) *UserHandler {
+	return &UserHandler{db: db, storage: storageClient, apple: appleClient, mailer: mailer}
+}
+
+// sendWelcomeAsync fires the welcome email as a goroutine so the create
+// response is not blocked on Resend. Dedupe key is the user_id so we never
+// send a second welcome no matter how many times CreateUser is called for
+// the same user (which happens routinely - the client calls it on every
+// app launch in some flows).
+func (h *UserHandler) sendWelcomeAsync(userID string) {
+	if h.mailer == nil || userID == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := h.mailer.Send(ctx, userID, email.KindWelcome, email.Vars{}, "welcome:"+userID); err != nil {
+			log.Warn(ctx, "welcome email failed", err.Error())
+		}
+	}()
 }
 
 func (h *UserHandler) CreateUser(c *gin.Context) {
@@ -50,6 +72,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	}
 
 	user := database.GetUser(c)
+	h.sendWelcomeAsync(user.UserID)
 	utils.DataResponse(c, http.StatusOK, user)
 	log.Info(ctx, "User upserted successfully")
 }
@@ -106,6 +129,7 @@ func (h *UserHandler) CreateUserWithImage(c *gin.Context) {
 	}
 
 	user := database.GetUser(c)
+	h.sendWelcomeAsync(user.UserID)
 	utils.DataResponse(c, http.StatusOK, user)
 	log.Info(ctx, "User created with image successfully")
 }
