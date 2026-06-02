@@ -32,14 +32,8 @@ func scanCtx(jobName string) context.Context {
 	return log.WithLogger(context.Background(), log.NewLogger("cron:"+jobName))
 }
 
-// ScanMissedTasks looks for tasks whose due time has passed in the owner's
-// timezone and that haven't been notified yet. STUB until Step 7.
-func ScanMissedTasks(_ *gorm.DB) func() {
-	return func() {
-		ctx := scanCtx("scan_missed_tasks")
-		log.Info(ctx, "stub: 0 candidates")
-	}
-}
+// ScanMissedTasks and ScanAtRiskMilestones are defined in missed_tasks.go and
+// at_risk_milestones.go respectively as of Step 7.
 
 // ScanFallingBehind applies the B ∪ D formula (≥3 missed in 7d OR pace
 // deficit ≥5 tasks / ≥20%) to identify roadmaps that should fire a
@@ -48,15 +42,6 @@ func ScanMissedTasks(_ *gorm.DB) func() {
 func ScanFallingBehind(_ *gorm.DB) func() {
 	return func() {
 		ctx := scanCtx("scan_falling_behind")
-		log.Info(ctx, "stub: 0 candidates")
-	}
-}
-
-// ScanAtRiskMilestones identifies milestones unlikely to complete on time
-// based on remaining work and time left. STUB until Step 7.
-func ScanAtRiskMilestones(_ *gorm.DB) func() {
-	return func() {
-		ctx := scanCtx("scan_at_risk_milestones")
 		log.Info(ctx, "stub: 0 candidates")
 	}
 }
