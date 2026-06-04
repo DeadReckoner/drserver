@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -123,8 +124,20 @@ func (r UpdateNotificationSettingsRequest) toMap() map[string]any {
 	} else if r.GlobalMuteUntil != nil {
 		m["global_mute_until"] = *r.GlobalMuteUntil
 	}
+	// JSONB columns: serialize to a JSON string here rather than handing
+	// GORM the raw struct. GORM's map-based Updates() path doesn't go
+	// through our types.MyGoalsPrefs / types.FriendsAndAccountabilityPrefs
+	// Value() implementations the way struct-based Updates does — it ends
+	// up rendering the struct via Go's default %v formatting, which is
+	// NOT valid JSON, and Postgres rejects with SQLSTATE 22P02.
+	// Pre-marshaling here keeps the value the driver writes safely
+	// parseable as JSON. The struct fields are always marshal-able, but
+	// we defensively omit the column on the (unreachable) error path
+	// rather than corrupt the row.
 	if r.MyGoalsPrefs != nil {
-		m["my_goals_prefs"] = *r.MyGoalsPrefs
+		if b, err := json.Marshal(*r.MyGoalsPrefs); err == nil {
+			m["my_goals_prefs"] = string(b)
+		}
 	}
 	if r.FAndAEnabled != nil {
 		m["f_and_a_enabled"] = *r.FAndAEnabled
@@ -133,7 +146,9 @@ func (r UpdateNotificationSettingsRequest) toMap() map[string]any {
 		m["apply_to_all_friends"] = *r.ApplyToAllFriends
 	}
 	if r.FAndAPrefs != nil {
-		m["f_and_a_prefs"] = *r.FAndAPrefs
+		if b, err := json.Marshal(*r.FAndAPrefs); err == nil {
+			m["f_and_a_prefs"] = string(b)
+		}
 	}
 	return m
 }
