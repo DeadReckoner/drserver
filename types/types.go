@@ -1331,3 +1331,37 @@ type NotificationDeliveryLog struct {
 }
 
 func (NotificationDeliveryLog) TableName() string { return "notification_delivery_log" }
+
+// PendingNotification is a notification the resolver said to DEFER (typically
+// because the recipient is in quiet hours when an immediate-delivery push
+// would fire). The DeliverPendingNotifications cron picks up rows where
+// ScheduledFor <= now() and re-runs Dispatch on them, deleting on success.
+//
+// The unique constraint on (user_id, notification_type, dedup_key, channel)
+// mirrors notification_delivery_log so duplicate triggers during a deferral
+// don't pile up — they UPSERT the existing row's ScheduledFor.
+type PendingNotification struct {
+	ID               string `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:id" json:"id"`
+	UserID           string `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
+	NotificationType string `gorm:"column:notification_type;not null" json:"notification_type"`
+	DedupKey         string `gorm:"column:dedup_key;not null" json:"dedup_key"`
+	Channel          string `gorm:"column:channel;not null" json:"channel"`
+
+	// Routing context for re-evaluation by the resolver at delivery time.
+	Category          string  `gorm:"column:category;not null" json:"category"`
+	FriendID          *string `gorm:"type:uuid;column:friend_id" json:"friend_id,omitempty"`
+	AnchoredRoadmapID *string `gorm:"type:uuid;column:anchored_roadmap_id" json:"anchored_roadmap_id,omitempty"`
+
+	// Payload to send. Title/body are captured at queue time; Data is JSONB
+	// so it can hold whatever shape the caller put in DispatchOptions.Data.
+	Title string         `gorm:"column:title;not null" json:"title"`
+	Body  string         `gorm:"column:body;not null" json:"body"`
+	Data  map[string]any `gorm:"type:jsonb;column:data;not null" json:"data"`
+
+	ScheduledFor time.Time `gorm:"column:scheduled_for;not null" json:"scheduled_for"`
+	Attempts     int       `gorm:"column:attempts;not null;default:0" json:"attempts"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null;default:now()" json:"created_at"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;not null;default:now()" json:"updated_at"`
+}
+
+func (PendingNotification) TableName() string { return "pending_notifications" }

@@ -16,9 +16,9 @@ func TestScanMissedTasksWith_DispatchesPerCandidate(t *testing.T) {
 	// Stub out the candidate query with two rows. Regex matcher is loose
 	// on whitespace; the important thing is we return the right columns.
 	mock.ExpectQuery(`SELECT t\.task_id`).
-		WillReturnRows(mock.NewRows([]string{"task_id", "roadmap_id", "user_id", "title"}).
-			AddRow("task-1", "roadmap-A", "user-1", "Do thing one").
-			AddRow("task-2", "roadmap-A", "user-1", "Do thing two"))
+		WillReturnRows(mock.NewRows([]string{"task_id", "roadmap_id", "milestone_id", "user_id", "title"}).
+			AddRow("task-1", "roadmap-A", "milestone-X", "user-1", "Do thing one").
+			AddRow("task-2", "roadmap-A", "milestone-X", "user-1", "Do thing two"))
 
 	var dispatched []notifications.DispatchOptions
 	fakeDispatch := func(opts notifications.DispatchOptions) notifications.Decision {
@@ -55,7 +55,7 @@ func TestScanMissedTasksWith_DispatchesPerCandidate(t *testing.T) {
 func TestScanMissedTasksWith_NoCandidatesDispatchesNothing(t *testing.T) {
 	db, mock := testutil.NewSqlmockDBRegex(t)
 	mock.ExpectQuery(`SELECT t\.task_id`).
-		WillReturnRows(mock.NewRows([]string{"task_id", "roadmap_id", "user_id", "title"}))
+		WillReturnRows(mock.NewRows([]string{"task_id", "roadmap_id", "milestone_id", "user_id", "title"}))
 
 	dispatched := 0
 	fakeDispatch := func(_ notifications.DispatchOptions) notifications.Decision {
