@@ -1114,15 +1114,24 @@ func (p *MyGoalsPrefs) Scan(value any) error {
 		*p = MyGoalsPrefs{}
 		return nil
 	}
-	b, ok := value.([]byte)
-	if !ok {
+	switch v := value.(type) {
+	case []byte:
+		return json.Unmarshal(v, p)
+	case string:
+		return json.Unmarshal([]byte(v), p)
+	default:
 		return fmt.Errorf("MyGoalsPrefs.Scan: unsupported type %T", value)
 	}
-	return json.Unmarshal(b, p)
 }
 
 // Value implements driver.Valuer so GORM can write the typed struct to JSONB.
-func (p MyGoalsPrefs) Value() (driver.Value, error) { return json.Marshal(p) }
+func (p MyGoalsPrefs) Value() (driver.Value, error) {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
+}
 
 // Lookup returns the pref for a notification type name (the JSON tag of one
 // of the struct fields, e.g. "missed_task"). Returns false if the name does
@@ -1168,15 +1177,22 @@ func (p *FriendsAndAccountabilityPrefs) Scan(value any) error {
 		*p = FriendsAndAccountabilityPrefs{}
 		return nil
 	}
-	b, ok := value.([]byte)
-	if !ok {
+	switch v := value.(type) {
+	case []byte:
+		return json.Unmarshal(v, p)
+	case string:
+		return json.Unmarshal([]byte(v), p)
+	default:
 		return fmt.Errorf("FriendsAndAccountabilityPrefs.Scan: unsupported type %T", value)
 	}
-	return json.Unmarshal(b, p)
 }
 
 func (p FriendsAndAccountabilityPrefs) Value() (driver.Value, error) {
-	return json.Marshal(p)
+	b, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
 }
 
 // Lookup returns the pref for a notification type name (the JSON tag of one
@@ -1287,18 +1303,25 @@ func (p *PrefOverrides) Scan(value any) error {
 		*p = PrefOverrides{}
 		return nil
 	}
-	b, ok := value.([]byte)
-	if !ok {
+	switch v := value.(type) {
+	case []byte:
+		return json.Unmarshal(v, p)
+	case string:
+		return json.Unmarshal([]byte(v), p)
+	default:
 		return fmt.Errorf("PrefOverrides.Scan: unsupported type %T", value)
 	}
-	return json.Unmarshal(b, p)
 }
 
 func (p PrefOverrides) Value() (driver.Value, error) {
 	if p == nil {
-		return []byte("{}"), nil
+		return "{}", nil
 	}
-	return json.Marshal(p)
+	b, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
 }
 
 // NotificationOverride is a per-person OR per-anchored-goal override on the

@@ -15,13 +15,13 @@ func TestMyGoalsPrefs_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Value(): %v", err)
 	}
-	b, ok := v.([]byte)
+	s, ok := v.(string)
 	if !ok {
-		t.Fatalf("Value() returned %T, want []byte", v)
+		t.Fatalf("Value() returned %T, want string", v)
 	}
 
 	var restored MyGoalsPrefs
-	if err := restored.Scan(b); err != nil {
+	if err := restored.Scan([]byte(s)); err != nil {
 		t.Fatalf("Scan(): %v", err)
 	}
 	if !reflect.DeepEqual(original, restored) {
@@ -36,13 +36,13 @@ func TestFriendsAndAccountabilityPrefs_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Value(): %v", err)
 	}
-	b, ok := v.([]byte)
+	s, ok := v.(string)
 	if !ok {
-		t.Fatalf("Value() returned %T, want []byte", v)
+		t.Fatalf("Value() returned %T, want string", v)
 	}
 
 	var restored FriendsAndAccountabilityPrefs
-	if err := restored.Scan(b); err != nil {
+	if err := restored.Scan([]byte(s)); err != nil {
 		t.Fatalf("Scan(): %v", err)
 	}
 	if !reflect.DeepEqual(original, restored) {
@@ -60,13 +60,13 @@ func TestPrefOverrides_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Value(): %v", err)
 	}
-	b, ok := v.([]byte)
+	s, ok := v.(string)
 	if !ok {
-		t.Fatalf("Value() returned %T, want []byte", v)
+		t.Fatalf("Value() returned %T, want string", v)
 	}
 
 	var restored PrefOverrides
-	if err := restored.Scan(b); err != nil {
+	if err := restored.Scan([]byte(s)); err != nil {
 		t.Fatalf("Scan(): %v", err)
 	}
 	if !reflect.DeepEqual(original, restored) {
@@ -82,8 +82,8 @@ func TestPrefOverrides_NilHandling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Value() on nil: %v", err)
 	}
-	if string(v.([]byte)) != "{}" {
-		t.Errorf("Value() on nil = %q, want %q", string(v.([]byte)), "{}")
+	if v.(string) != "{}" {
+		t.Errorf("Value() on nil = %q, want %q", v.(string), "{}")
 	}
 
 	// Scan(nil) should produce an empty (non-nil) map.

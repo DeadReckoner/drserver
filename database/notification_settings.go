@@ -121,25 +121,43 @@ func GetAnchoredGoalOverride(userID, anchoredRoadmapID string) (*types.Notificat
 }
 
 // UpsertFriendOverride creates or updates the override for a friend.
+// Uses SELECT-then-INSERT/UPDATE rather than ON CONFLICT because the unique
+// index is partial (WHERE friend_id IS NOT NULL) and GORM's clause.OnConflict
+// has no way to supply the partial predicate (SQLSTATE 42P10).
 func UpsertFriendOverride(o types.NotificationOverride) error {
 	if o.FriendID == nil || o.AnchoredRoadmapID != nil {
 		return errors.New("UpsertFriendOverride: FriendID must be set and AnchoredRoadmapID must be nil")
 	}
-	return db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "friend_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"prefs", "mute_until", "updated_at"}),
-	}).Create(&o).Error
+	existing, err := GetFriendOverride(o.UserID, *o.FriendID)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return db.Create(&o).Error
+	}
+	existing.Prefs = o.Prefs
+	existing.MuteUntil = o.MuteUntil
+	existing.UpdatedAt = time.Now()
+	return db.Save(existing).Error
 }
 
 // UpsertAnchoredGoalOverride creates or updates the override for an anchored goal.
+// Uses SELECT-then-INSERT/UPDATE for the same reason as UpsertFriendOverride.
 func UpsertAnchoredGoalOverride(o types.NotificationOverride) error {
 	if o.AnchoredRoadmapID == nil || o.FriendID != nil {
 		return errors.New("UpsertAnchoredGoalOverride: AnchoredRoadmapID must be set and FriendID must be nil")
 	}
-	return db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "anchored_roadmap_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"prefs", "mute_until", "updated_at"}),
-	}).Create(&o).Error
+	existing, err := GetAnchoredGoalOverride(o.UserID, *o.AnchoredRoadmapID)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return db.Create(&o).Error
+	}
+	existing.Prefs = o.Prefs
+	existing.MuteUntil = o.MuteUntil
+	existing.UpdatedAt = time.Now()
+	return db.Save(existing).Error
 }
 
 // DeleteFriendOverride removes the override for (userID, friendID) if present.
