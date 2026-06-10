@@ -15,11 +15,19 @@ import (
 )
 
 type HabitHandler struct {
-	db *gorm.DB
+	service HabitService
 }
 
+// NewHabitHandler builds a handler backed by the live database adapter.
+// Tests use NewHabitHandlerWithService to inject a fake.
 func NewHabitHandler(db *gorm.DB) *HabitHandler {
-	return &HabitHandler{db: db}
+	return &HabitHandler{service: DBHabitService{}}
+}
+
+// NewHabitHandlerWithService is the test-friendly constructor; production
+// code should use NewHabitHandler.
+func NewHabitHandlerWithService(service HabitService) *HabitHandler {
+	return &HabitHandler{service: service}
 }
 
 // =============================================================================
@@ -72,7 +80,7 @@ func (h *HabitHandler) CreateHabit(c *gin.Context) {
 	log.Info(ctx, "CreateHabit: creating habit", req.Title)
 
 	// Create habit in database
-	createdHabit, err := database.CreateHabit(c, habit)
+	createdHabit, err := h.service.Create(c, habit)
 	if err != nil {
 		log.Error(ctx, "CreateHabit: failed to create habit", err)
 		utils.InternalErrorResponse(c, err)
@@ -91,7 +99,7 @@ func (h *HabitHandler) GetHabit(c *gin.Context) {
 
 	log.Info(ctx, "GetHabit: retrieving habit", habitID)
 
-	habit := database.GetHabit(c, habitID)
+	habit := h.service.Get(c, habitID)
 
 	// Check if habit was found (empty HabitID indicates not found)
 	if habit.HabitID == "" {
@@ -114,7 +122,7 @@ func (h *HabitHandler) GetHabits(c *gin.Context) {
 
 	log.Info(ctx, "GetHabits: retrieving all habits", "include_archived:", includeArchived)
 
-	habits, err := database.GetAllHabits(c, includeArchived)
+	habits, err := h.service.List(c, includeArchived)
 	if err != nil {
 		log.Error(ctx, "GetHabits: failed to retrieve habits", err)
 		utils.InternalErrorResponse(c, err)
@@ -136,7 +144,7 @@ func (h *HabitHandler) GetTodaysHabits(c *gin.Context) {
 	now := time.Now().UTC()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
-	habits, err := database.GetHabitsForDate(c, todayStart)
+	habits, err := h.service.ForDate(c, todayStart)
 	if err != nil {
 		log.Error(ctx, "GetTodaysHabits: failed to retrieve habits", err)
 		utils.InternalErrorResponse(c, err)
@@ -163,7 +171,7 @@ func (h *HabitHandler) GetHabitsForDate(c *gin.Context) {
 
 	log.Info(ctx, "GetHabitsForDate: retrieving habits for date", dateStr)
 
-	habits, err := database.GetHabitsForDate(c, date)
+	habits, err := h.service.ForDate(c, date)
 	if err != nil {
 		log.Error(ctx, "GetHabitsForDate: failed to retrieve habits", err)
 		utils.InternalErrorResponse(c, err)
@@ -214,7 +222,7 @@ func (h *HabitHandler) GetHabitsForRange(c *gin.Context) {
 
 	log.Info(ctx, "GetHabitsForRange: retrieving habits for range", startStr, "to", endStr)
 
-	habits, err := database.GetHabitsForDateRange(c, startDate, endDate)
+	habits, err := h.service.ForDateRange(c, startDate, endDate)
 	if err != nil {
 		log.Error(ctx, "GetHabitsForRange: failed to retrieve habits", err)
 		utils.InternalErrorResponse(c, err)
@@ -240,7 +248,7 @@ func (h *HabitHandler) UpdateHabit(c *gin.Context) {
 	log.Info(ctx, "UpdateHabit: updating habit", habitID)
 
 	// First, get the existing habit to preserve fields not being updated
-	existingHabit := database.GetHabit(c, habitID)
+	existingHabit := h.service.Get(c, habitID)
 	if existingHabit.HabitID == "" {
 		log.Warn(ctx, "UpdateHabit: habit not found", habitID)
 		utils.NotFoundResponse(c, "Habit")
@@ -277,7 +285,7 @@ func (h *HabitHandler) UpdateHabit(c *gin.Context) {
 	}
 
 	// Update habit in database
-	updatedHabit, err := database.UpdateHabit(c, habitID, existingHabit)
+	updatedHabit, err := h.service.Update(c, habitID, existingHabit)
 	if err != nil {
 		log.Error(ctx, "UpdateHabit: failed to update habit", err)
 		utils.InternalErrorResponse(c, err)
@@ -296,7 +304,7 @@ func (h *HabitHandler) DeleteHabit(c *gin.Context) {
 
 	log.Info(ctx, "DeleteHabit: deleting habit", habitID)
 
-	err := database.DeleteHabit(c, habitID)
+	err := h.service.Delete(c, habitID)
 	if err != nil {
 		if err == types.ErrHabitNotFound {
 			log.Warn(ctx, "DeleteHabit: habit not found", habitID)
@@ -328,7 +336,7 @@ func (h *HabitHandler) ArchiveHabit(c *gin.Context) {
 
 	log.Info(ctx, "ArchiveHabit: archiving habit", habitID)
 
-	err := database.ArchiveHabit(c, habitID)
+	err := h.service.Archive(c, habitID)
 	if err != nil {
 		if err == types.ErrHabitNotFound {
 			log.Warn(ctx, "ArchiveHabit: habit not found", habitID)
@@ -368,7 +376,7 @@ func (h *HabitHandler) CompleteHabit(c *gin.Context) {
 
 	log.Info(ctx, "CompleteHabit: marking habit complete", habitID, "for date", date.Format("2006-01-02"))
 
-	completion, err := database.CompleteHabit(c, habitID, date, req.Notes)
+	completion, err := h.service.Complete(c, habitID, date, req.Notes)
 	if err != nil {
 		if err == types.ErrAlreadyCompleted {
 			log.Warn(ctx, "CompleteHabit: habit already completed", habitID)
@@ -404,7 +412,7 @@ func (h *HabitHandler) UncompleteHabit(c *gin.Context) {
 
 	log.Info(ctx, "UncompleteHabit: removing completion", habitID, "for date", date.Format("2006-01-02"))
 
-	err := database.UncompleteHabit(c, habitID, date)
+	err := h.service.Uncomplete(c, habitID, date)
 	if err != nil {
 		log.Error(ctx, "UncompleteHabit: failed to uncomplete habit", err)
 		utils.InternalErrorResponse(c, err)
@@ -432,7 +440,7 @@ func (h *HabitHandler) GetCompletions(c *gin.Context) {
 
 	log.Info(ctx, "GetCompletions: retrieving completions", habitID, "limit:", limit)
 
-	completions, err := database.GetCompletions(c, habitID, limit)
+	completions, err := h.service.Completions(c, habitID, limit)
 	if err != nil {
 		log.Error(ctx, "GetCompletions: failed to retrieve completions", err)
 		utils.InternalErrorResponse(c, err)
@@ -456,7 +464,7 @@ func (h *HabitHandler) GetHabitStats(c *gin.Context) {
 	log.Info(ctx, "GetHabitStats: calculating statistics", habitID)
 
 	// Calculate streak
-	streak, err := database.GetStreak(c, habitID)
+	streak, err := h.service.Streak(c, habitID)
 	if err != nil {
 		if err == types.ErrHabitNotFound {
 			log.Warn(ctx, "GetHabitStats: habit not found", habitID)
@@ -469,21 +477,21 @@ func (h *HabitHandler) GetHabitStats(c *gin.Context) {
 	}
 
 	// Calculate 7-day completion rate
-	rate7, err := database.GetCompletionRate(c, habitID, 7)
+	rate7, err := h.service.CompletionRate(c, habitID, 7)
 	if err != nil {
 		log.Warn(ctx, "GetHabitStats: failed to calculate 7-day rate", err)
 		rate7 = 0
 	}
 
 	// Calculate 30-day completion rate
-	rate30, err := database.GetCompletionRate(c, habitID, 30)
+	rate30, err := h.service.CompletionRate(c, habitID, 30)
 	if err != nil {
 		log.Warn(ctx, "GetHabitStats: failed to calculate 30-day rate", err)
 		rate30 = 0
 	}
 
 	// Get total completions
-	totalCompletions, err := database.GetTotalCompletions(c, habitID)
+	totalCompletions, err := h.service.TotalCompletions(c, habitID)
 	if err != nil {
 		log.Warn(ctx, "GetHabitStats: failed to get total completions", err)
 		totalCompletions = 0

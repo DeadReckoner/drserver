@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"time"
+
 	"dr/server/database"
 	"dr/server/types"
 
@@ -114,4 +116,73 @@ func (DBTaskService) UpdateStep(c *gin.Context, taskID, stepID string, s types.S
 }
 func (DBTaskService) CompleteAllSteps(c *gin.Context, taskID string) (int64, error) {
 	return database.CompleteAllSteps(c, taskID)
+}
+
+// HabitService is the seam between HabitHandler and the persistence layer.
+// Anchor endpoints keep direct database calls until they gain coverage
+// (queued with the rest of the anchor surface).
+type HabitService interface {
+	Create(c *gin.Context, h types.Habit) (types.Habit, error)
+	Get(c *gin.Context, habitID string) types.Habit
+	List(c *gin.Context, includeArchived bool) ([]types.Habit, error)
+	Update(c *gin.Context, habitID string, h types.Habit) (types.Habit, error)
+	Delete(c *gin.Context, habitID string) error
+	Archive(c *gin.Context, habitID string) error
+
+	ForDate(c *gin.Context, date time.Time) ([]types.HabitWithStatus, error)
+	ForDateRange(c *gin.Context, start, end time.Time) (map[string][]types.HabitWithStatus, error)
+
+	Complete(c *gin.Context, habitID string, date time.Time, notes string) (*types.HabitCompletion, error)
+	Uncomplete(c *gin.Context, habitID string, date time.Time) error
+	Completions(c *gin.Context, habitID string, limit int) ([]types.HabitCompletion, error)
+
+	Streak(c *gin.Context, habitID string) (int, error)
+	CompletionRate(c *gin.Context, habitID string, days int) (float64, error)
+	TotalCompletions(c *gin.Context, habitID string) (int64, error)
+}
+
+// DBHabitService is the production implementation: a stateless adapter.
+type DBHabitService struct{}
+
+func (DBHabitService) Create(c *gin.Context, h types.Habit) (types.Habit, error) {
+	return database.CreateHabit(c, h)
+}
+func (DBHabitService) Get(c *gin.Context, id string) types.Habit {
+	return database.GetHabit(c, id)
+}
+func (DBHabitService) List(c *gin.Context, includeArchived bool) ([]types.Habit, error) {
+	return database.GetAllHabits(c, includeArchived)
+}
+func (DBHabitService) Update(c *gin.Context, id string, h types.Habit) (types.Habit, error) {
+	return database.UpdateHabit(c, id, h)
+}
+func (DBHabitService) Delete(c *gin.Context, id string) error {
+	return database.DeleteHabit(c, id)
+}
+func (DBHabitService) Archive(c *gin.Context, id string) error {
+	return database.ArchiveHabit(c, id)
+}
+func (DBHabitService) ForDate(c *gin.Context, date time.Time) ([]types.HabitWithStatus, error) {
+	return database.GetHabitsForDate(c, date)
+}
+func (DBHabitService) ForDateRange(c *gin.Context, start, end time.Time) (map[string][]types.HabitWithStatus, error) {
+	return database.GetHabitsForDateRange(c, start, end)
+}
+func (DBHabitService) Complete(c *gin.Context, id string, date time.Time, notes string) (*types.HabitCompletion, error) {
+	return database.CompleteHabit(c, id, date, notes)
+}
+func (DBHabitService) Uncomplete(c *gin.Context, id string, date time.Time) error {
+	return database.UncompleteHabit(c, id, date)
+}
+func (DBHabitService) Completions(c *gin.Context, id string, limit int) ([]types.HabitCompletion, error) {
+	return database.GetCompletions(c, id, limit)
+}
+func (DBHabitService) Streak(c *gin.Context, id string) (int, error) {
+	return database.GetStreak(c, id)
+}
+func (DBHabitService) CompletionRate(c *gin.Context, id string, days int) (float64, error) {
+	return database.GetCompletionRate(c, id, days)
+}
+func (DBHabitService) TotalCompletions(c *gin.Context, id string) (int64, error) {
+	return database.GetTotalCompletions(c, id)
 }

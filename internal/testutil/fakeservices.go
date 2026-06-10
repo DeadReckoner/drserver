@@ -1,6 +1,8 @@
 package testutil
 
 import (
+	"time"
+
 	"dr/server/api/handlers"
 	"dr/server/types"
 
@@ -163,4 +165,109 @@ func (f *FakeTaskService) CompleteAllSteps(c *gin.Context, taskID string) (int64
 		panic("FakeTaskService.CompleteAllStepsFunc not set")
 	}
 	return f.CompleteAllStepsFunc(c, taskID)
+}
+
+// FakeHabitService implements handlers.HabitService for tests.
+type FakeHabitService struct {
+	CreateFunc           func(c *gin.Context, h types.Habit) (types.Habit, error)
+	GetFunc              func(c *gin.Context, habitID string) types.Habit
+	ListFunc             func(c *gin.Context, includeArchived bool) ([]types.Habit, error)
+	UpdateFunc           func(c *gin.Context, habitID string, h types.Habit) (types.Habit, error)
+	DeleteFunc           func(c *gin.Context, habitID string) error
+	ArchiveFunc          func(c *gin.Context, habitID string) error
+	ForDateFunc          func(c *gin.Context, date time.Time) ([]types.HabitWithStatus, error)
+	ForDateRangeFunc     func(c *gin.Context, start, end time.Time) (map[string][]types.HabitWithStatus, error)
+	CompleteFunc         func(c *gin.Context, habitID string, date time.Time, notes string) (*types.HabitCompletion, error)
+	UncompleteFunc       func(c *gin.Context, habitID string, date time.Time) error
+	CompletionsFunc      func(c *gin.Context, habitID string, limit int) ([]types.HabitCompletion, error)
+	StreakFunc           func(c *gin.Context, habitID string) (int, error)
+	CompletionRateFunc   func(c *gin.Context, habitID string, days int) (float64, error)
+	TotalCompletionsFunc func(c *gin.Context, habitID string) (int64, error)
+}
+
+var _ handlers.HabitService = (*FakeHabitService)(nil)
+
+func (f *FakeHabitService) Create(c *gin.Context, h types.Habit) (types.Habit, error) {
+	if f.CreateFunc == nil {
+		panic("FakeHabitService.CreateFunc not set")
+	}
+	return f.CreateFunc(c, h)
+}
+func (f *FakeHabitService) Get(c *gin.Context, id string) types.Habit {
+	if f.GetFunc == nil {
+		panic("FakeHabitService.GetFunc not set")
+	}
+	return f.GetFunc(c, id)
+}
+func (f *FakeHabitService) List(c *gin.Context, includeArchived bool) ([]types.Habit, error) {
+	if f.ListFunc == nil {
+		panic("FakeHabitService.ListFunc not set")
+	}
+	return f.ListFunc(c, includeArchived)
+}
+func (f *FakeHabitService) Update(c *gin.Context, id string, h types.Habit) (types.Habit, error) {
+	if f.UpdateFunc == nil {
+		panic("FakeHabitService.UpdateFunc not set")
+	}
+	return f.UpdateFunc(c, id, h)
+}
+func (f *FakeHabitService) Delete(c *gin.Context, id string) error {
+	if f.DeleteFunc == nil {
+		panic("FakeHabitService.DeleteFunc not set")
+	}
+	return f.DeleteFunc(c, id)
+}
+func (f *FakeHabitService) Archive(c *gin.Context, id string) error {
+	if f.ArchiveFunc == nil {
+		panic("FakeHabitService.ArchiveFunc not set")
+	}
+	return f.ArchiveFunc(c, id)
+}
+func (f *FakeHabitService) ForDate(c *gin.Context, date time.Time) ([]types.HabitWithStatus, error) {
+	if f.ForDateFunc == nil {
+		panic("FakeHabitService.ForDateFunc not set")
+	}
+	return f.ForDateFunc(c, date)
+}
+func (f *FakeHabitService) ForDateRange(c *gin.Context, start, end time.Time) (map[string][]types.HabitWithStatus, error) {
+	if f.ForDateRangeFunc == nil {
+		panic("FakeHabitService.ForDateRangeFunc not set")
+	}
+	return f.ForDateRangeFunc(c, start, end)
+}
+func (f *FakeHabitService) Complete(c *gin.Context, id string, date time.Time, notes string) (*types.HabitCompletion, error) {
+	if f.CompleteFunc == nil {
+		panic("FakeHabitService.CompleteFunc not set")
+	}
+	return f.CompleteFunc(c, id, date, notes)
+}
+func (f *FakeHabitService) Uncomplete(c *gin.Context, id string, date time.Time) error {
+	if f.UncompleteFunc == nil {
+		panic("FakeHabitService.UncompleteFunc not set")
+	}
+	return f.UncompleteFunc(c, id, date)
+}
+func (f *FakeHabitService) Completions(c *gin.Context, id string, limit int) ([]types.HabitCompletion, error) {
+	if f.CompletionsFunc == nil {
+		panic("FakeHabitService.CompletionsFunc not set")
+	}
+	return f.CompletionsFunc(c, id, limit)
+}
+func (f *FakeHabitService) Streak(c *gin.Context, id string) (int, error) {
+	if f.StreakFunc == nil {
+		panic("FakeHabitService.StreakFunc not set")
+	}
+	return f.StreakFunc(c, id)
+}
+func (f *FakeHabitService) CompletionRate(c *gin.Context, id string, days int) (float64, error) {
+	if f.CompletionRateFunc == nil {
+		panic("FakeHabitService.CompletionRateFunc not set")
+	}
+	return f.CompletionRateFunc(c, id, days)
+}
+func (f *FakeHabitService) TotalCompletions(c *gin.Context, id string) (int64, error) {
+	if f.TotalCompletionsFunc == nil {
+		panic("FakeHabitService.TotalCompletionsFunc not set")
+	}
+	return f.TotalCompletionsFunc(c, id)
 }
