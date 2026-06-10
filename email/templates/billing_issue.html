@@ -1,0 +1,31 @@
+{{define "subject"}}Action needed: update your Dead Reckoner billing{{end}}
+
+{{define "body"}}
+<h1>Action needed: update your payment method</h1>
+
+<p>
+  Hi{{if .FirstName}} {{.FirstName}}{{end}},
+</p>
+
+<p>
+  We tried to renew your Dead Reckoner Pro subscription, but the payment did not go through.
+</p>
+
+<p>
+  Update your payment method to keep Pro access active and avoid an interruption.
+</p>
+
+<p>
+  {{if .ManageSubscriptionURL}}<a class="btn" href="{{.ManageSubscriptionURL}}">Update payment method</a>{{else}}<a class="btn" href="https://deadreckoner.io/app">Open Dead Reckoner</a>{{end}}
+</p>
+
+<p>
+  If you already updated it, you can ignore this email.
+</p>
+
+<p>
+  Need help? Just reply.
+</p>
+{{end}}
+
+{{template "layout" .}}

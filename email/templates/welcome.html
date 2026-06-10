@@ -1,0 +1,45 @@
+{{define "subject"}}Welcome to Dead Reckoner{{end}}
+
+{{define "body"}}
+<h1>Forge Ambition Into Action</h1>
+
+<p>
+  Welcome{{if .FirstName}}, {{.FirstName}}{{end}}.
+</p>
+
+<p>
+  Goals are easy. Follow-through is hard.
+</p>
+
+<p>
+  Dead Reckoner turns your goal into a clear roadmap, built with AI-assisted planning, executed by you, and visible to someone who expects you to follow through.
+</p>
+
+<p>
+  Start with one goal that actually matters. Build the roadmap, then invite an Anchor, a real person you trust to see the work, notice when you drift, and keep you on track.
+</p>
+
+<p>
+  Your first move:
+</p>
+
+<ul>
+  <li>Choose one goal you are ready to be held to</li>
+  <li>Build the roadmap</li>
+  <li>Invite one trusted person to be your Anchor</li>
+</ul>
+
+<p>
+  A private plan is easy to abandon. A witnessed plan carries weight.
+</p>
+
+<p>
+  <a class="btn" href="https://deadreckoner.io/app">Start your first roadmap</a>
+</p>
+
+<p>
+  Questions, problems, or feedback? Just reply to this email.
+</p>
+{{end}}
+
+{{template "layout" .}}

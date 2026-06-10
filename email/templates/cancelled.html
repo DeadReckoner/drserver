@@ -1,0 +1,31 @@
+{{define "subject"}}Your Dead Reckoner Pro subscription has been cancelled{{end}}
+
+{{define "body"}}
+<h1>Your subscription has been cancelled</h1>
+
+<p>
+  Hi{{if .FirstName}} {{.FirstName}}{{end}},
+</p>
+
+<p>
+  We received your cancellation request. You will keep full Pro access until <strong>{{.AccessUntil}}</strong>. After that, your account will move back to the free plan.
+</p>
+
+<p>
+  Your roadmaps, habits, and progress will still be here.
+</p>
+
+<p>
+  If you change your mind before then, you can resubscribe and keep Pro access without interruption.
+</p>
+
+<p>
+  <a class="btn" href="{{.ResubscribeURL}}">Resubscribe</a>
+</p>
+
+<p>
+  If something did not work the way you expected, just reply and tell us. We read every response.
+</p>
+{{end}}
+
+{{template "layout" .}}

@@ -1,0 +1,30 @@
+{{define "subject"}}Daily anchor update from Dead Reckoner{{end}}
+
+{{define "body"}}
+<h1>Your anchor update</h1>
+
+<p>
+  {{if .FirstName}}Hi {{.FirstName}}. Here's{{else}}Here's{{end}} a quick read on the people you're anchoring.
+</p>
+
+{{range .AnchoredUsers}}
+<p>
+  <strong>{{.Name}}</strong><br>
+  {{.Summary}}
+</p>
+{{end}}
+
+<p>
+  A witnessed plan carries weight. Even a short note from you, "I see what you're working on", can be the nudge that gets someone moving again.
+</p>
+
+<p>
+  <a class="btn" href="https://deadreckoner.io/app">Open Dead Reckoner</a>
+</p>
+
+<p>
+  You're receiving this because you are an anchor for one or more goals. You can change anchor notification settings from Account &rarr; Friends &amp; Accountability.
+</p>
+{{end}}
+
+{{template "layout" .}}

@@ -35,6 +35,15 @@ func setupV1Routes(router *gin.Engine, h *handlers.Handlers, opts Options) {
 	// Public endpoints (no auth required)
 	router.GET("/api/v1/roadmaps/shared/:token", h.Roadmap.GetSharedRoadmap)
 
+	// Admin endpoints: shared-secret auth via X-Admin-Key header, no Supabase
+	// JWT required. Registered before the /api/v1 group below so the
+	// AuthMiddleware doesn't apply.
+	setupAdminRoutes(router, h.Admin)
+
+	// External webhooks: auth is verified inside each handler (HMAC or
+	// shared secret depending on provider). No Supabase JWT.
+	setupWebhookRoutes(router, h.Webhook)
+
 	auth := opts.AuthMiddleware
 	if auth == nil {
 		auth = middleware.AuthMiddleware()
@@ -58,11 +67,32 @@ func setupV1Routes(router *gin.Engine, h *handlers.Handlers, opts Options) {
 	setupHabitRoutes(v1, h.Habit, h.Nudge)
 	setupAgentRoutes(v1, h.Agent)
 	setupNotificationRoutes(v1, h.Notification)
+	setupNotificationSettingsRoutes(v1, h.NotificationSettings)
 	setupMessageThreadRoutes(v1, h.Message)
 	setupFeedbackRoutes(v1, h.Feedback)
 	setupNudgeRoutes(v1, h.Nudge)
 	setupWebSocketRoutes(v1, h.Agent, h.Message)
 	setupTaskRoutes(v1, h.Task)
+	setupBillingRoutes(v1, h.Billing)
+}
+
+func setupBillingRoutes(rg *gin.RouterGroup, h *handlers.BillingHandler) {
+	billing := rg.Group("/billing")
+	{
+		billing.GET("/status", h.GetBillingStatus)
+	}
+}
+
+func setupAdminRoutes(router *gin.Engine, h *handlers.AdminHandler) {
+	admin := router.Group("/admin")
+	admin.Use(handlers.AdminAuthMiddleware())
+	{
+		admin.POST("/users/:userid/plan", utils.ValidateUUID("userid"), h.SetUserPlan)
+	}
+}
+
+func setupWebhookRoutes(router *gin.Engine, h *handlers.WebhookHandler) {
+	router.POST("/webhooks/revenuecat", h.RevenueCatWebhook)
 }
 
 func setupUserRoutes(rg *gin.RouterGroup, h *handlers.UserHandler) {
@@ -243,6 +273,27 @@ func setupNotificationRoutes(rg *gin.RouterGroup, h *handlers.NotificationHandle
 	{
 		badge.GET("", h.GetBadgeCount)
 		badge.POST("/refresh", h.RefreshBadge)
+	}
+}
+
+func setupNotificationSettingsRoutes(rg *gin.RouterGroup, h *handlers.NotificationSettingsHandler) {
+	settings := rg.Group("/notification-settings")
+	{
+		// Global settings (channels, quiet hours, digest, MyGoals + F&A defaults)
+		settings.GET("", h.GetSettings)
+		settings.PUT("", h.UpdateSettings)
+
+		// Per-friend overrides
+		settings.GET("/friends", h.ListFriendOverrides)
+		settings.GET("/friends/:friendid", utils.ValidateUUID("friendid"), h.GetFriendOverride)
+		settings.PUT("/friends/:friendid", utils.ValidateUUID("friendid"), h.UpsertFriendOverride)
+		settings.DELETE("/friends/:friendid", utils.ValidateUUID("friendid"), h.DeleteFriendOverride)
+
+		// Per-anchored-goal overrides
+		settings.GET("/anchored-goals", h.ListAnchoredGoalOverrides)
+		settings.GET("/anchored-goals/:roadmapid", utils.ValidateUUID("roadmapid"), h.GetAnchoredGoalOverride)
+		settings.PUT("/anchored-goals/:roadmapid", utils.ValidateUUID("roadmapid"), h.UpsertAnchoredGoalOverride)
+		settings.DELETE("/anchored-goals/:roadmapid", utils.ValidateUUID("roadmapid"), h.DeleteAnchoredGoalOverride)
 	}
 }
 

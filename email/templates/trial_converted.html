@@ -1,0 +1,31 @@
+{{define "subject"}}Welcome to Dead Reckoner Pro{{end}}
+
+{{define "body"}}
+<h1>You're officially Pro{{if .FirstName}}, {{.FirstName}}{{end}}</h1>
+
+<p>
+  Your trial has ended and your {{if .ProductName}}{{.ProductName}}{{else}}Dead Reckoner Pro{{end}} subscription is now active.
+</p>
+
+<p>
+  Your subscription renews on <strong>{{.NextRenewalDate}}</strong>{{if .Price}} for <strong>{{.Price}}</strong>{{end}}. You can manage or cancel anytime in your subscription settings.
+</p>
+
+<p>
+  Pro keeps the system open: more roadmaps, deeper performance history, custom reminders, Anchor settings, and the tools to keep your work visible.
+</p>
+
+<p>
+  Keep building. Keep tracking. Keep the commitment where it cannot quietly disappear.
+</p>
+
+<p>
+  <a class="btn" href="https://deadreckoner.io/app">Open Dead Reckoner</a>
+</p>
+
+<p>
+  Onward.
+</p>
+{{end}}
+
+{{template "layout" .}}

@@ -44,6 +44,13 @@ func (h *HabitHandler) CreateHabit(c *gin.Context) {
 		return
 	}
 
+	userID := c.GetString("user_id")
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckCreateHabit(userID)
+	}) {
+		return
+	}
+
 	// Set default start date if not provided
 	startDate := time.Now()
 	if req.StartDate != nil {
@@ -311,6 +318,14 @@ func (h *HabitHandler) ArchiveHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
+	userID := c.GetString("user_id")
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckPaidFeature(userID, types.FeatureArchive,
+			"Archiving habits is available with Pro.")
+	}) {
+		return
+	}
+
 	log.Info(ctx, "ArchiveHabit: archiving habit", habitID)
 
 	err := database.ArchiveHabit(c, habitID)
@@ -500,6 +515,13 @@ func (h *HabitHandler) CreateHabitAnchorRequest(c *gin.Context) {
 	}
 
 	if !utils.BindJSONOrAbort(c, &requestBody) {
+		return
+	}
+
+	userID := c.GetString("user_id")
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckCreateHabitAnchor(userID)
+	}) {
 		return
 	}
 

@@ -1,7 +1,10 @@
 package types
 
 import (
+	"database/sql/driver"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -68,6 +71,12 @@ type User struct {
 	FullName string `gorm:"-" json:"full_name,omitempty"`
 
 	ProfileImageURL string `gorm:"column:profile_image_url" json:"profile_image_url,omitempty"`
+
+	// Timezone is the user's IANA timezone (e.g. "America/Los_Angeles").
+	// Sent by the mobile client on auth via PATCH /users/:id. Used server-side
+	// for quiet hours, 9am-local anchor batches, and digest delivery times.
+	// Defaults to 'UTC' at the database level for safety.
+	Timezone string `gorm:"column:timezone;not null;default:UTC" json:"timezone,omitempty"`
 }
 
 // ParseFullName splits FullName into FirstName and LastName if they are not already set.
@@ -1052,3 +1061,328 @@ type RealignDatesResponse struct {
 type RestoreRoadmapRequest struct {
 	StartFromToday bool `json:"start_from_today"`
 }
+
+/******************************************************************************
+ * NOTIFICATION SETTINGS
+ ******************************************************************************/
+
+// DigestFrequency controls when batched notifications are delivered.
+type DigestFrequency string
+
+const (
+	DigestFrequencyNone   DigestFrequency = "none"
+	DigestFrequencyDaily  DigestFrequency = "daily"
+	DigestFrequencyWeekly DigestFrequency = "weekly"
+)
+
+// DeliveryMode is how a single notification type is delivered.
+type DeliveryMode string
+
+const (
+	DeliveryImmediate DeliveryMode = "immediate"
+	DeliveryDigest    DeliveryMode = "digest"
+)
+
+// NotificationChannel is the transport for a notification.
+const (
+	NotificationChannelPush  = "push"
+	NotificationChannelEmail = "email"
+)
+
+// NotificationTypePref is one notification type's enabled flag + delivery mode.
+type NotificationTypePref struct {
+	Enabled  bool         `json:"enabled"`
+	Delivery DeliveryMode `json:"delivery"`
+}
+
+// MyGoalsPrefs holds per-type prefs for the user's own goals.
+// JSON keys MUST match the SQL DEFAULT for notification_settings.my_goals_prefs.
+type MyGoalsPrefs struct {
+	DailyTaskReminder      NotificationTypePref `json:"daily_task_reminder"`
+	TaskDueReminder        NotificationTypePref `json:"task_due_reminder"`
+	MissedTask             NotificationTypePref `json:"missed_task"`
+	FallingBehind          NotificationTypePref `json:"falling_behind"`
+	MilestoneDue           NotificationTypePref `json:"milestone_due"`
+	MilestoneAtRisk        NotificationTypePref `json:"milestone_at_risk"`
+	FollowOnMilestoneReady NotificationTypePref `json:"follow_on_milestone_ready"`
+	GoalMilestoneCompleted NotificationTypePref `json:"goal_milestone_completed"`
+}
+
+// Scan implements sql.Scanner so GORM can read JSONB into a typed struct.
+func (p *MyGoalsPrefs) Scan(value any) error {
+	if value == nil {
+		*p = MyGoalsPrefs{}
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return fmt.Errorf("MyGoalsPrefs.Scan: unsupported type %T", value)
+	}
+	return json.Unmarshal(b, p)
+}
+
+// Value implements driver.Valuer so GORM can write the typed struct to JSONB.
+func (p MyGoalsPrefs) Value() (driver.Value, error) { return json.Marshal(p) }
+
+// Lookup returns the pref for a notification type name (the JSON tag of one
+// of the struct fields, e.g. "missed_task"). Returns false if the name does
+// not correspond to a known my-goals notification type.
+func (p MyGoalsPrefs) Lookup(notificationType string) (NotificationTypePref, bool) {
+	switch notificationType {
+	case "daily_task_reminder":
+		return p.DailyTaskReminder, true
+	case "task_due_reminder":
+		return p.TaskDueReminder, true
+	case "missed_task":
+		return p.MissedTask, true
+	case "falling_behind":
+		return p.FallingBehind, true
+	case "milestone_due":
+		return p.MilestoneDue, true
+	case "milestone_at_risk":
+		return p.MilestoneAtRisk, true
+	case "follow_on_milestone_ready":
+		return p.FollowOnMilestoneReady, true
+	case "goal_milestone_completed":
+		return p.GoalMilestoneCompleted, true
+	}
+	return NotificationTypePref{}, false
+}
+
+// FriendsAndAccountabilityPrefs holds per-type prefs for the F&A context.
+// JSON keys MUST match the SQL DEFAULT for notification_settings.f_and_a_prefs.
+type FriendsAndAccountabilityPrefs struct {
+	FriendRequest         NotificationTypePref `json:"friend_request"`
+	AnchorRequest         NotificationTypePref `json:"anchor_request"`
+	AnchorAcceptedRemoved NotificationTypePref `json:"anchor_accepted_removed"`
+	MissedProgress        NotificationTypePref `json:"missed_progress"`
+	FallingBehind         NotificationTypePref `json:"falling_behind"`
+	MilestoneAtRisk       NotificationTypePref `json:"milestone_at_risk"`
+	MilestoneCompleted    NotificationTypePref `json:"milestone_completed"`
+	GoalCompleted         NotificationTypePref `json:"goal_completed"`
+	TimelineUpdated       NotificationTypePref `json:"timeline_updated"`
+}
+
+func (p *FriendsAndAccountabilityPrefs) Scan(value any) error {
+	if value == nil {
+		*p = FriendsAndAccountabilityPrefs{}
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return fmt.Errorf("FriendsAndAccountabilityPrefs.Scan: unsupported type %T", value)
+	}
+	return json.Unmarshal(b, p)
+}
+
+func (p FriendsAndAccountabilityPrefs) Value() (driver.Value, error) {
+	return json.Marshal(p)
+}
+
+// Lookup returns the pref for a notification type name (the JSON tag of one
+// of the struct fields, e.g. "missed_progress"). Returns false if the name
+// does not correspond to a known F&A notification type.
+func (p FriendsAndAccountabilityPrefs) Lookup(notificationType string) (NotificationTypePref, bool) {
+	switch notificationType {
+	case "friend_request":
+		return p.FriendRequest, true
+	case "anchor_request":
+		return p.AnchorRequest, true
+	case "anchor_accepted_removed":
+		return p.AnchorAcceptedRemoved, true
+	case "missed_progress":
+		return p.MissedProgress, true
+	case "falling_behind":
+		return p.FallingBehind, true
+	case "milestone_at_risk":
+		return p.MilestoneAtRisk, true
+	case "milestone_completed":
+		return p.MilestoneCompleted, true
+	case "goal_completed":
+		return p.GoalCompleted, true
+	case "timeline_updated":
+		return p.TimelineUpdated, true
+	}
+	return NotificationTypePref{}, false
+}
+
+// DefaultMyGoalsPrefs returns the system default prefs for a user's own goals.
+// MUST match the SQL DEFAULT on notification_settings.my_goals_prefs.
+func DefaultMyGoalsPrefs() MyGoalsPrefs {
+	immediate := NotificationTypePref{Enabled: true, Delivery: DeliveryImmediate}
+	digest := NotificationTypePref{Enabled: true, Delivery: DeliveryDigest}
+	return MyGoalsPrefs{
+		DailyTaskReminder:      immediate,
+		TaskDueReminder:        immediate,
+		MissedTask:             digest, // routine; default delivery is next-morning batch
+		FallingBehind:          digest,
+		MilestoneDue:           immediate,
+		MilestoneAtRisk:        immediate, // major status change
+		FollowOnMilestoneReady: immediate,
+		GoalMilestoneCompleted: immediate,
+	}
+}
+
+// DefaultFAndAPrefs returns the system default prefs for Friends & Accountability.
+// MUST match the SQL DEFAULT on notification_settings.f_and_a_prefs.
+func DefaultFAndAPrefs() FriendsAndAccountabilityPrefs {
+	immediate := NotificationTypePref{Enabled: true, Delivery: DeliveryImmediate}
+	digest := NotificationTypePref{Enabled: true, Delivery: DeliveryDigest}
+	return FriendsAndAccountabilityPrefs{
+		FriendRequest:         immediate, // major status change
+		AnchorRequest:         immediate,
+		AnchorAcceptedRemoved: immediate,
+		MissedProgress:        digest, // routine; batched/delayed by default
+		FallingBehind:         digest,
+		MilestoneAtRisk:       immediate,
+		MilestoneCompleted:    digest,
+		GoalCompleted:         immediate,
+		TimelineUpdated:       digest,
+	}
+}
+
+// NotificationSettings is the user's top-level notification preferences row.
+// Exactly one row per user — created via trigger on user insert.
+type NotificationSettings struct {
+	UserID string `gorm:"type:uuid;primaryKey;column:user_id" json:"user_id"`
+
+	// Channels
+	PushEnabled  bool `gorm:"column:push_enabled;not null;default:true" json:"push_enabled"`
+	EmailEnabled bool `gorm:"column:email_enabled;not null;default:true" json:"email_enabled"`
+
+	// Quiet hours (interpreted in the user's timezone — see users.timezone)
+	QuietHoursEnabled bool   `gorm:"column:quiet_hours_enabled;not null;default:false" json:"quiet_hours_enabled"`
+	QuietHoursStart   string `gorm:"column:quiet_hours_start;not null;default:'22:00'" json:"quiet_hours_start"`
+	QuietHoursEnd     string `gorm:"column:quiet_hours_end;not null;default:'08:00'" json:"quiet_hours_end"`
+
+	// Digest
+	DigestFrequency         DigestFrequency `gorm:"column:digest_frequency;not null;default:'none'" json:"digest_frequency"`
+	DigestDeliveryHour      int             `gorm:"column:digest_delivery_hour;not null;default:8" json:"digest_delivery_hour"`
+	DigestDeliveryDayOfWeek int             `gorm:"column:digest_delivery_day_of_week;not null;default:1" json:"digest_delivery_day_of_week"`
+
+	// Global mute — when set to a future time, every notification skips
+	GlobalMuteUntil *time.Time `gorm:"column:global_mute_until" json:"global_mute_until,omitempty"`
+
+	// Per-type prefs — DB has full default JSON blob; always fully populated.
+	MyGoalsPrefs MyGoalsPrefs `gorm:"type:jsonb;column:my_goals_prefs;not null" json:"my_goals_prefs"`
+
+	// Friends & Accountability
+	FAndAEnabled      bool                          `gorm:"column:f_and_a_enabled;not null;default:true" json:"f_and_a_enabled"`
+	ApplyToAllFriends bool                          `gorm:"column:apply_to_all_friends;not null;default:true" json:"apply_to_all_friends"`
+	FAndAPrefs        FriendsAndAccountabilityPrefs `gorm:"type:jsonb;column:f_and_a_prefs;not null" json:"f_and_a_prefs"`
+
+	CreatedAt time.Time `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at" json:"updated_at"`
+}
+
+func (NotificationSettings) TableName() string { return "notification_settings" }
+
+// PrefOverrides is the partial-JSON shape stored in notification_overrides.prefs.
+// Keyed by notification type name (e.g. "missed_progress"); only fields present
+// in the map override the user's F&A defaults — others fall through.
+type PrefOverrides map[string]NotificationTypePref
+
+func (p *PrefOverrides) Scan(value any) error {
+	if value == nil {
+		*p = PrefOverrides{}
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return fmt.Errorf("PrefOverrides.Scan: unsupported type %T", value)
+	}
+	return json.Unmarshal(b, p)
+}
+
+func (p PrefOverrides) Value() (driver.Value, error) {
+	if p == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(p)
+}
+
+// NotificationOverride is a per-person OR per-anchored-goal override on the
+// user's F&A prefs. Exactly one of FriendID / AnchoredRoadmapID is non-nil
+// (enforced by DB check constraint).
+type NotificationOverride struct {
+	ID                string        `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:id" json:"id"`
+	UserID            string        `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
+	FriendID          *string       `gorm:"type:uuid;column:friend_id" json:"friend_id,omitempty"`
+	AnchoredRoadmapID *string       `gorm:"type:uuid;column:anchored_roadmap_id" json:"anchored_roadmap_id,omitempty"`
+	Prefs             PrefOverrides `gorm:"type:jsonb;column:prefs;not null" json:"prefs"`
+	MuteUntil         *time.Time    `gorm:"column:mute_until" json:"mute_until,omitempty"`
+	CreatedAt         time.Time     `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt         time.Time     `gorm:"column:updated_at" json:"updated_at"`
+}
+
+func (NotificationOverride) TableName() string { return "notification_overrides" }
+
+// NotificationDeliveryLog records every notification delivery. The unique
+// constraint on (user_id, notification_type, dedup_key, channel) is the
+// entire idempotency guarantee: senders do INSERT ... ON CONFLICT DO NOTHING
+// and only proceed if a row was inserted.
+type NotificationDeliveryLog struct {
+	ID               string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:id" json:"id"`
+	UserID           string    `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
+	NotificationType string    `gorm:"column:notification_type;not null" json:"notification_type"`
+	DedupKey         string    `gorm:"column:dedup_key;not null" json:"dedup_key"`
+	Channel          string    `gorm:"column:channel;not null" json:"channel"` // 'push' | 'email'
+	DeliveredAt      time.Time `gorm:"column:delivered_at;not null;default:now()" json:"delivered_at"`
+}
+
+func (NotificationDeliveryLog) TableName() string { return "notification_delivery_log" }
+
+// PendingNotification is a notification the resolver said to DEFER (typically
+// because the recipient is in quiet hours when an immediate-delivery push
+// would fire). The DeliverPendingNotifications cron picks up rows where
+// ScheduledFor <= now() and re-runs Dispatch on them, deleting on success.
+//
+// The unique constraint on (user_id, notification_type, dedup_key, channel)
+// mirrors notification_delivery_log so duplicate triggers during a deferral
+// don't pile up — they UPSERT the existing row's ScheduledFor.
+type PendingNotification struct {
+	ID               string `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:id" json:"id"`
+	UserID           string `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
+	NotificationType string `gorm:"column:notification_type;not null" json:"notification_type"`
+	DedupKey         string `gorm:"column:dedup_key;not null" json:"dedup_key"`
+	Channel          string `gorm:"column:channel;not null" json:"channel"`
+
+	// Routing context for re-evaluation by the resolver at delivery time.
+	Category          string  `gorm:"column:category;not null" json:"category"`
+	FriendID          *string `gorm:"type:uuid;column:friend_id" json:"friend_id,omitempty"`
+	AnchoredRoadmapID *string `gorm:"type:uuid;column:anchored_roadmap_id" json:"anchored_roadmap_id,omitempty"`
+
+	// Payload to send. Title/body are captured at queue time; Data is JSONB
+	// so it can hold whatever shape the caller put in DispatchOptions.Data.
+	Title string         `gorm:"column:title;not null" json:"title"`
+	Body  string         `gorm:"column:body;not null" json:"body"`
+	Data  map[string]any `gorm:"type:jsonb;column:data;not null" json:"data"`
+
+	ScheduledFor time.Time `gorm:"column:scheduled_for;not null" json:"scheduled_for"`
+	Attempts     int       `gorm:"column:attempts;not null;default:0" json:"attempts"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null;default:now()" json:"created_at"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;not null;default:now()" json:"updated_at"`
+}
+
+func (PendingNotification) TableName() string { return "pending_notifications" }
+
+// DigestItem is a notification whose resolver decision was DeliveryDigest.
+// Dispatch writes here instead of pushing immediately; the
+// DeliverDueDigests cron batches the user's queued items into a single
+// daily or weekly email when their digest hour comes around.
+//
+// The unique constraint on (user_id, notification_type, dedup_key) mirrors
+// notification_delivery_log so duplicate scan ticks don't produce duplicate
+// items in the same digest.
+type DigestItem struct {
+	ID               string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:id" json:"id"`
+	UserID           string         `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
+	NotificationType string         `gorm:"column:notification_type;not null" json:"notification_type"`
+	DedupKey         string         `gorm:"column:dedup_key;not null" json:"dedup_key"`
+	Title            string         `gorm:"column:title;not null" json:"title"`
+	Body             string         `gorm:"column:body;not null" json:"body"`
+	Data             map[string]any `gorm:"type:jsonb;column:data;not null" json:"data"`
+	CreatedAt        time.Time      `gorm:"column:created_at;not null;default:now()" json:"created_at"`
+}
+
+func (DigestItem) TableName() string { return "digest_items" }
