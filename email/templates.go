@@ -30,6 +30,27 @@ type Vars struct {
 	AccessUntil           string
 	ResubscribeURL        string
 	ManageSubscriptionURL string
+
+	// Digest variables (KindDailyDigest, KindWeeklyDigest)
+	DigestItems []DigestItemVar
+
+	// Anchor summary variables (KindAnchorDailySummary)
+	AnchoredUsers []AnchoredUserVar
+}
+
+// DigestItemVar is one row in the user's own-goals digest. Title + Body are
+// captured at queue time; the template just walks the slice.
+type DigestItemVar struct {
+	Title string
+	Body  string
+}
+
+// AnchoredUserVar is one person the recipient is anchoring, with a one-line
+// status summary computed at digest time (e.g. "missed 2 tasks this week").
+// Summary may be empty if the person has nothing noteworthy.
+type AnchoredUserVar struct {
+	Name    string
+	Summary string
 }
 
 func mustBuildRenderers() map[EmailKind]*template.Template {

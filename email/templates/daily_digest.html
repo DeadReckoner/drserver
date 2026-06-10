@@ -1,0 +1,26 @@
+{{define "subject"}}Your daily Dead Reckoner digest{{end}}
+
+{{define "body"}}
+<h1>Your daily digest</h1>
+
+<p>
+  {{if .FirstName}}Hi {{.FirstName}}, here's{{else}}Here's{{end}} what happened on your goals in the last day.
+</p>
+
+{{range .DigestItems}}
+<p>
+  <strong>{{.Title}}</strong><br>
+  {{.Body}}
+</p>
+{{end}}
+
+<p>
+  <a class="btn" href="https://deadreckoner.io/app">Open Dead Reckoner</a>
+</p>
+
+<p>
+  You're receiving this because daily digests are enabled in your notification settings. You can change the schedule or turn them off from Account &rarr; Notifications &amp; Settings.
+</p>
+{{end}}
+
+{{template "layout" .}}

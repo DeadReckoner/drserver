@@ -40,6 +40,8 @@ type fake struct {
 	pushes         []sentPush
 	queued         []types.PendingNotification
 	queueErr       error
+	digested       []types.DigestItem
+	digestErr      error
 
 	friendCalls   int
 	anchorCalls   int
@@ -47,6 +49,7 @@ type fake struct {
 	settingsCalls int
 	tzCalls       int
 	queueCalls    int
+	digestCalls   int
 }
 
 func (f *fake) dispatcher() Dispatcher {
@@ -75,6 +78,11 @@ func (f *fake) dispatcher() Dispatcher {
 			f.queueCalls++
 			f.queued = append(f.queued, p)
 			return f.queueErr
+		},
+		QueueDigest: func(item types.DigestItem) error {
+			f.digestCalls++
+			f.digested = append(f.digested, item)
+			return f.digestErr
 		},
 		Send: func(userID, notificationType, title, body string, data map[string]any) {
 			f.pushes = append(f.pushes, sentPush{userID, notificationType, title, body, data})
@@ -394,6 +402,102 @@ func TestDispatch_MyGoalsCategoryNeverLooksUpOverrides(t *testing.T) {
 
 	if f.friendCalls != 0 || f.anchorCalls != 0 {
 		t.Errorf("override loaders called for MyGoals (friend=%d, anchor=%d)", f.friendCalls, f.anchorCalls)
+	}
+}
+
+// =============================================================================
+// Step 10: digest routing
+// =============================================================================
+// When the resolver decides Delivery=Digest, Dispatch must route to
+// QueueDigest instead of pushing immediately. These tests guard that
+// behavior, plus the safety fallback for partial deploys.
+
+func TestDispatch_DigestDeliveryQueuesItemNotPush(t *testing.T) {
+	// missed_task defaults to digest delivery. Dispatch should claim the
+	// delivery slot AND queue a digest item, but NOT push.
+	f := &fake{
+		settings:       baseSettingsForDispatch(),
+		recordInserted: true,
+		now:            dispatchTestNow,
+	}
+	d := f.dispatcher()
+
+	d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryMyGoals,
+		NotificationType: "missed_task", // default delivery: digest
+		DedupKey:         "task-7",
+		Title:            "Missed task",
+		Body:             "Write the README",
+		Data:             map[string]any{"task_id": "task-7"},
+	})
+
+	if len(f.pushes) != 0 {
+		t.Errorf("push fired for digest-delivery notification: %+v", f.pushes)
+	}
+	if f.digestCalls != 1 {
+		t.Fatalf("digestCalls = %d, want 1", f.digestCalls)
+	}
+	if f.recordCalls != 1 {
+		t.Errorf("recordCalls = %d, want 1 (dedup slot must be claimed)", f.recordCalls)
+	}
+	item := f.digested[0]
+	if item.NotificationType != "missed_task" || item.DedupKey != "task-7" {
+		t.Errorf("digest item mismatch: %+v", item)
+	}
+	if item.Title != "Missed task" || item.Body != "Write the README" {
+		t.Errorf("digest item missing payload: %+v", item)
+	}
+}
+
+func TestDispatch_DigestDedupSkipsBothPushAndQueue(t *testing.T) {
+	// recordInserted=false means the dedup slot is already claimed
+	// (duplicate trigger). Neither push NOR digest queue should fire.
+	f := &fake{
+		settings:       baseSettingsForDispatch(),
+		recordInserted: false,
+		now:            dispatchTestNow,
+	}
+	d := f.dispatcher()
+
+	d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryMyGoals,
+		NotificationType: "missed_task",
+		DedupKey:         "task-7",
+	})
+
+	if len(f.pushes) != 0 || f.digestCalls != 0 {
+		t.Errorf("either push or digest fired on dedup hit: pushes=%d digestCalls=%d", len(f.pushes), f.digestCalls)
+	}
+}
+
+func TestDispatch_DigestWithNilQueueFallsBackToImmediatePush(t *testing.T) {
+	// If QueueDigest isn't wired (older test or partial deploy), don't
+	// silently lose the notification — push it instead. The user sees
+	// an out-of-cadence push but doesn't miss the event entirely.
+	f := &fake{
+		settings:       baseSettingsForDispatch(),
+		recordInserted: true,
+		now:            dispatchTestNow,
+	}
+	d := f.dispatcher()
+	d.QueueDigest = nil // safety fallback
+
+	d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryMyGoals,
+		NotificationType: "missed_task",
+		DedupKey:         "task-7",
+		Title:            "Missed task",
+		Body:             "Write the README",
+	})
+
+	if f.digestCalls != 0 {
+		t.Errorf("digestCalls = %d on nil-QueueDigest path, want 0", f.digestCalls)
+	}
+	if len(f.pushes) != 1 {
+		t.Fatalf("expected 1 push as fallback, got %d", len(f.pushes))
 	}
 }
 
