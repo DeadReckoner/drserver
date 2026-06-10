@@ -1365,3 +1365,24 @@ type PendingNotification struct {
 }
 
 func (PendingNotification) TableName() string { return "pending_notifications" }
+
+// DigestItem is a notification whose resolver decision was DeliveryDigest.
+// Dispatch writes here instead of pushing immediately; the
+// DeliverDueDigests cron batches the user's queued items into a single
+// daily or weekly email when their digest hour comes around.
+//
+// The unique constraint on (user_id, notification_type, dedup_key) mirrors
+// notification_delivery_log so duplicate scan ticks don't produce duplicate
+// items in the same digest.
+type DigestItem struct {
+	ID               string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:id" json:"id"`
+	UserID           string         `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
+	NotificationType string         `gorm:"column:notification_type;not null" json:"notification_type"`
+	DedupKey         string         `gorm:"column:dedup_key;not null" json:"dedup_key"`
+	Title            string         `gorm:"column:title;not null" json:"title"`
+	Body             string         `gorm:"column:body;not null" json:"body"`
+	Data             map[string]any `gorm:"type:jsonb;column:data;not null" json:"data"`
+	CreatedAt        time.Time      `gorm:"column:created_at;not null;default:now()" json:"created_at"`
+}
+
+func (DigestItem) TableName() string { return "digest_items" }

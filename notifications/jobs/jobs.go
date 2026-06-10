@@ -32,29 +32,13 @@ func scanCtx(jobName string) context.Context {
 	return log.WithLogger(context.Background(), log.NewLogger("cron:"+jobName))
 }
 
-// ScanMissedTasks, ScanAtRiskMilestones, and ScanFallingBehind are defined
-// in missed_tasks.go, at_risk_milestones.go, and falling_behind.go
-// respectively (Steps 7 and 8).
-
-// DeliverDueDigests picks users whose digest hour-of-day matches the current
-// minute in their local timezone and composes their pending digest. SQL
-// filters by `now() AT TIME ZONE u.timezone` so the work happens in Postgres.
-// STUB until Step 10.
-func DeliverDueDigests(_ *gorm.DB) func() {
-	return func() {
-		ctx := scanCtx("deliver_due_digests")
-		log.Info(ctx, "stub: 0 recipients")
-	}
-}
-
-// DeliverAnchorBatches fans out the 9am-local routine accountability
-// notifications to anchors. STUB until Step 10.
-func DeliverAnchorBatches(_ *gorm.DB) func() {
-	return func() {
-		ctx := scanCtx("deliver_anchor_batches")
-		log.Info(ctx, "stub: 0 anchors")
-	}
-}
+// Per-job functions live in their own files:
+//   ScanMissedTasks       → missed_tasks.go         (Step 7)
+//   ScanAtRiskMilestones  → at_risk_milestones.go   (Step 7)
+//   ScanFallingBehind     → falling_behind.go       (Step 8)
+//   DeliverPendingNotifications → deliver_pending.go (Step 9)
+//   DeliverDueDigests     → deliver_digests.go      (Step 10)
+//   DeliverAnchorBatches  → deliver_anchor_batches.go (Step 10)
 
 // CleanupDeliveryLog drops notification_delivery_log rows older than the
 // retention window. STUB until Step 12; suggested retention is 90 days.

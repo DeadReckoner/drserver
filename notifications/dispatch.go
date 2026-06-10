@@ -52,6 +52,13 @@ type Dispatcher struct {
 	// back to the v1 drop behavior.
 	QueuePending func(p types.PendingNotification) error
 
+	// QueueDigest buffers a digest-mode notification for the user's next
+	// daily/weekly digest email (UPSERT into digest_items). Called when the
+	// resolver says Send=true with Delivery=DeliveryDigest. Leave nil in
+	// tests that don't care about digesting; Dispatch will fall back to the
+	// v1 stopgap of sending digest-mode pushes immediately.
+	QueueDigest func(item types.DigestItem) error
+
 	Send PushSender
 	Now  func() time.Time
 }
@@ -70,6 +77,7 @@ var production = Dispatcher{
 	LoadAnchoredOverride: database.GetAnchoredGoalOverride,
 	RecordDelivery:       database.RecordDelivery,
 	QueuePending:         database.UpsertPendingNotification,
+	QueueDigest:          database.UpsertDigestItem,
 	Send:                 DefaultPushSender,
 	Now:                  time.Now,
 }
@@ -167,6 +175,25 @@ func (d Dispatcher) Dispatch(opts DispatchOptions) Decision {
 			"type", opts.NotificationType,
 			"dedup_key", opts.DedupKey,
 		)
+		return decision
+	}
+
+	// Digest-mode delivery: buffer for the next daily/weekly digest email
+	// instead of pushing immediately. The DeliverDueDigests cron drains
+	// these per-user when their digest hour rolls around. If QueueDigest
+	// isn't wired (older tests, partial deploys), fall back to immediate
+	// push to avoid silently dropping the notification.
+	if decision.Delivery == types.DeliveryDigest && d.QueueDigest != nil {
+		if err := d.QueueDigest(types.DigestItem{
+			UserID:           opts.UserID,
+			NotificationType: opts.NotificationType,
+			DedupKey:         opts.DedupKey,
+			Title:            opts.Title,
+			Body:             opts.Body,
+			Data:             opts.Data,
+		}); err != nil {
+			log.Info(ctx, "notifications.Dispatch: queue digest failed", err)
+		}
 		return decision
 	}
 

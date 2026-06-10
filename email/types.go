@@ -36,6 +36,23 @@ const (
 	// KindBillingIssue - sent when status flips to in_grace (BILLING_ISSUE).
 	// Includes a deep link to manage payment method.
 	KindBillingIssue EmailKind = "billing_issue"
+
+	// KindDailyDigest - sent at the user's chosen digest hour in their local
+	// timezone when they have queued digest_items. Body summarizes "your own
+	// goals" notifications (missed tasks, milestones at risk, falling behind)
+	// from the last 24h.
+	KindDailyDigest EmailKind = "daily_digest"
+
+	// KindWeeklyDigest - same shape as daily but sent once per week on the
+	// user's chosen day_of_week. Larger window in the body.
+	KindWeeklyDigest EmailKind = "weekly_digest"
+
+	// KindAnchorDailySummary - sent at 9am in the anchor's local timezone,
+	// summarizing the people they're anchoring (per-anchored-user status).
+	// Distinct from KindDailyDigest because the content is "what's going on
+	// with the people I'm holding accountable" vs "what's going on with my
+	// own goals."
+	KindAnchorDailySummary EmailKind = "anchor_daily_summary"
 )
 
 // AllKinds is the canonical ordered list, used for iteration in tests.
@@ -46,6 +63,9 @@ var AllKinds = []EmailKind{
 	KindCancelled,
 	KindExpired,
 	KindBillingIssue,
+	KindDailyDigest,
+	KindWeeklyDigest,
+	KindAnchorDailySummary,
 }
 
 // TemplateFile returns the basename of the html/template file for a kind.
@@ -73,6 +93,12 @@ func (k EmailKind) SubjectFallback() string {
 		return "Your Dead Reckoner Pro subscription has ended"
 	case KindBillingIssue:
 		return "There is a problem with your subscription billing"
+	case KindDailyDigest:
+		return "Your daily Dead Reckoner digest"
+	case KindWeeklyDigest:
+		return "Your weekly Dead Reckoner digest"
+	case KindAnchorDailySummary:
+		return "Daily anchor update from Dead Reckoner"
 	}
 	return "A message from Dead Reckoner"
 }
