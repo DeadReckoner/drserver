@@ -42,6 +42,8 @@ type fake struct {
 	queueErr       error
 	digested       []types.DigestItem
 	digestErr      error
+	pushCount      int64
+	pushCountErr   error
 
 	friendCalls   int
 	anchorCalls   int
@@ -50,6 +52,7 @@ type fake struct {
 	tzCalls       int
 	queueCalls    int
 	digestCalls   int
+	countCalls    int
 }
 
 func (f *fake) dispatcher() Dispatcher {
@@ -83,6 +86,10 @@ func (f *fake) dispatcher() Dispatcher {
 			f.digestCalls++
 			f.digested = append(f.digested, item)
 			return f.digestErr
+		},
+		CountRecentPushes: func(string, time.Time) (int64, error) {
+			f.countCalls++
+			return f.pushCount, f.pushCountErr
 		},
 		Send: func(userID, notificationType, title, body string, data map[string]any) {
 			f.pushes = append(f.pushes, sentPush{userID, notificationType, title, body, data})
@@ -498,6 +505,139 @@ func TestDispatch_DigestWithNilQueueFallsBackToImmediatePush(t *testing.T) {
 	}
 	if len(f.pushes) != 1 {
 		t.Fatalf("expected 1 push as fallback, got %d", len(f.pushes))
+	}
+}
+
+// =============================================================================
+// Frequency cap (Step 12) — at most maxPushesPerWindow immediate pushes per
+// user per rolling window. Capped events are NOT claimed in the delivery log
+// so scan-driven triggers self-heal on a later tick.
+// =============================================================================
+
+func TestDispatch_FrequencyCapBlocksImmediatePush(t *testing.T) {
+	f := &fake{
+		settings:       baseSettingsForDispatch(),
+		recordInserted: true,
+		now:            dispatchTestNow,
+		pushCount:      maxPushesPerWindow, // window is full
+	}
+	d := f.dispatcher()
+
+	decision := d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryFAndA,
+		NotificationType: "friend_request", // immediate delivery
+		DedupKey:         "friendship-42",
+	})
+
+	if decision.Send {
+		t.Fatal("decision.Send = true, want false (cap hit)")
+	}
+	if decision.Reason != ReasonFrequencyCap {
+		t.Errorf("Reason = %q, want %q", decision.Reason, ReasonFrequencyCap)
+	}
+	if len(f.pushes) != 0 {
+		t.Errorf("push fired despite cap: %+v", f.pushes)
+	}
+	// The dedup slot must NOT be burned — the event has to be able to
+	// deliver on a later tick once the window has room.
+	if f.recordCalls != 0 {
+		t.Errorf("recordCalls = %d, want 0 (capped event must not claim the dedup slot)", f.recordCalls)
+	}
+}
+
+func TestDispatch_FrequencyCapUnderLimitSends(t *testing.T) {
+	f := &fake{
+		settings:       baseSettingsForDispatch(),
+		recordInserted: true,
+		now:            dispatchTestNow,
+		pushCount:      maxPushesPerWindow - 1, // one slot left
+	}
+	d := f.dispatcher()
+
+	decision := d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryFAndA,
+		NotificationType: "friend_request",
+		DedupKey:         "friendship-42",
+	})
+
+	if !decision.Send || len(f.pushes) != 1 {
+		t.Errorf("Send=%v pushes=%d, want true/1 (under cap)", decision.Send, len(f.pushes))
+	}
+	if f.countCalls != 1 {
+		t.Errorf("countCalls = %d, want 1", f.countCalls)
+	}
+}
+
+func TestDispatch_FrequencyCapCountErrorFailsOpen(t *testing.T) {
+	// A counting failure must not block notifications.
+	f := &fake{
+		settings:       baseSettingsForDispatch(),
+		recordInserted: true,
+		now:            dispatchTestNow,
+		pushCountErr:   errors.New("db unavailable"),
+	}
+	d := f.dispatcher()
+
+	decision := d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryFAndA,
+		NotificationType: "friend_request",
+		DedupKey:         "friendship-42",
+	})
+
+	if !decision.Send || len(f.pushes) != 1 {
+		t.Errorf("Send=%v pushes=%d, want true/1 (fail open on count error)", decision.Send, len(f.pushes))
+	}
+}
+
+func TestDispatch_FrequencyCapSkipsDigestDelivery(t *testing.T) {
+	// Digest-mode notifications collapse into one email — the push cap
+	// must not starve them.
+	f := &fake{
+		settings:       baseSettingsForDispatch(),
+		recordInserted: true,
+		now:            dispatchTestNow,
+		pushCount:      maxPushesPerWindow + 5, // way over; irrelevant for digest
+	}
+	d := f.dispatcher()
+
+	d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryMyGoals,
+		NotificationType: "missed_task", // default delivery: digest
+		DedupKey:         "task-7",
+	})
+
+	if f.countCalls != 0 {
+		t.Errorf("countCalls = %d, want 0 (cap not consulted for digest delivery)", f.countCalls)
+	}
+	if f.digestCalls != 1 {
+		t.Errorf("digestCalls = %d, want 1 (digest must still queue)", f.digestCalls)
+	}
+}
+
+func TestDispatch_FrequencyCapNilCounterDisablesCap(t *testing.T) {
+	// Older tests / partial deploys may not wire CountRecentPushes — the
+	// cap silently disables rather than blocking sends.
+	f := &fake{
+		settings:       baseSettingsForDispatch(),
+		recordInserted: true,
+		now:            dispatchTestNow,
+	}
+	d := f.dispatcher()
+	d.CountRecentPushes = nil
+
+	decision := d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryFAndA,
+		NotificationType: "friend_request",
+		DedupKey:         "friendship-42",
+	})
+
+	if !decision.Send || len(f.pushes) != 1 {
+		t.Errorf("Send=%v pushes=%d, want true/1 (nil counter = cap disabled)", decision.Send, len(f.pushes))
 	}
 }
 

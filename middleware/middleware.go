@@ -4,7 +4,6 @@ import (
 	"context"
 	"dr/server/log"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -89,6 +88,10 @@ func AuthMiddleware() gin.HandlerFunc {
 // -H "apikey: SUPABASE_KEY" \
 // -H "Authorization: Bearer USER_TOKEN"
 
+// authLog is the logger for the auth path, which runs outside any request
+// context (parseToken fires before the request ID middleware can tag one).
+var authLog = log.NewLogger("auth")
+
 func parseToken(accessToken string) string {
 	_ = godotenv.Load(".env")
 
@@ -97,7 +100,7 @@ func parseToken(accessToken string) string {
 
 	req, err := http.NewRequest("GET", supabaseApi+"/auth/v1/user", nil)
 	if err != nil {
-		fmt.Println("Error creating request:", err)
+		authLog.Error("supabase auth: error creating request", err.Error())
 		return ""
 	}
 	req.Header.Add("apiKey", supabaseKey)
@@ -107,23 +110,29 @@ func parseToken(accessToken string) string {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Error sending request:", err)
+		authLog.Error("supabase auth: error sending request", err.Error())
 		return ""
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Error reading response body:", err)
+		authLog.Error("supabase auth: error reading response body", err.Error())
 		return ""
 	}
 
-	fmt.Println("Response Status:", resp.Status)
-	fmt.Println("Response Body:", string(body))
+	// The response body is the full Supabase user record — emails, identities,
+	// sign-in history. That's PII, so it only ever logs at debug level.
+	// Routine token rejections (expired/invalid) come back non-200 and are
+	// worth a status-only line at warn.
+	if resp.StatusCode != http.StatusOK {
+		authLog.Warn("supabase auth: non-OK response", resp.Status)
+	}
+	authLog.Debug("supabase auth response", "status", resp.Status, "body", string(body))
 
 	var user AuthenticatedUser
 	if err := json.Unmarshal(body, &user); err != nil {
-		fmt.Println("unable to unmarshall json")
+		authLog.Error("supabase auth: unable to unmarshal user response", err.Error())
 	}
 	return user.ID
 

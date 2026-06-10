@@ -2,15 +2,13 @@
 // state changes and dispatch the right notifications. These run on the
 // schedule registered in main.setupScheduler.
 //
-// Step 6 lands this package with stub bodies — each scan logs that it ran
-// and returns. Steps 7–10 fill in the real queries:
-//
-//	ScanMissedTasks       -> Step 7 (missed-task EOD detection)
-//	ScanAtRiskMilestones  -> Step 7 (uses ComputeAllStatuses output)
-//	ScanFallingBehind     -> Step 8 (B ∪ D formula from the LOE doc)
-//	DeliverDueDigests     -> Step 10 (daily + weekly composition)
-//	DeliverAnchorBatches  -> Step 10 (9am-local fan-out)
-//	CleanupDeliveryLog    -> Step 12 (retention sweep, e.g. drop > 90 days)
+//	ScanMissedTasks             -> missed_tasks.go            (Step 7)
+//	ScanAtRiskMilestones        -> at_risk_milestones.go      (Step 7)
+//	ScanFallingBehind           -> falling_behind.go          (Step 8)
+//	DeliverPendingNotifications -> deliver_pending.go         (Step 9)
+//	DeliverDueDigests           -> deliver_digests.go         (Step 10)
+//	DeliverAnchorBatches        -> deliver_anchor_batches.go  (Step 10)
+//	CleanupDeliveryLog          -> cleanup.go                 (Step 12)
 //
 // Each function takes the *gorm.DB and returns a `func()` that cron can
 // register. The closure captures the DB so jobs don't read a package
@@ -19,10 +17,10 @@ package jobs
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"dr/server/log"
-
-	"gorm.io/gorm"
 )
 
 // scanCtx returns a log context tagged with the job name. Centralized so all
@@ -32,19 +30,36 @@ func scanCtx(jobName string) context.Context {
 	return log.WithLogger(context.Background(), log.NewLogger("cron:"+jobName))
 }
 
-// Per-job functions live in their own files:
-//   ScanMissedTasks       → missed_tasks.go         (Step 7)
-//   ScanAtRiskMilestones  → at_risk_milestones.go   (Step 7)
-//   ScanFallingBehind     → falling_behind.go       (Step 8)
-//   DeliverPendingNotifications → deliver_pending.go (Step 9)
-//   DeliverDueDigests     → deliver_digests.go      (Step 10)
-//   DeliverAnchorBatches  → deliver_anchor_batches.go (Step 10)
+// summarize logs a job's per-run summary line — Info when the run did real
+// work, Debug when it was a no-op. The per-minute cadence makes Info-level
+// no-op lines pure noise at production log levels.
+func summarize(ctx context.Context, didWork bool, msg string) {
+	if didWork {
+		log.Info(ctx, msg)
+		return
+	}
+	log.Debug(ctx, msg)
+}
 
-// CleanupDeliveryLog drops notification_delivery_log rows older than the
-// retention window. STUB until Step 12; suggested retention is 90 days.
-func CleanupDeliveryLog(_ *gorm.DB) func() {
+// slowJobThreshold is how long a single cron run can take before Timed logs
+// a warning. SkipIfStillRunning starts dropping ticks once a job crosses its
+// own cadence (60s for the per-minute jobs), so warn well before that.
+const slowJobThreshold = 10 * time.Second
+
+// Timed wraps a job closure with duration logging: Debug for normal runs,
+// Warn when a run crosses slowJobThreshold. main.setupScheduler wraps every
+// registration so slow scans surface in logs before they start eating ticks.
+func Timed(name string, fn func()) func() {
 	return func() {
-		ctx := scanCtx("cleanup_delivery_log")
-		log.Info(ctx, "stub: 0 rows removed")
+		start := time.Now()
+		fn()
+		elapsed := time.Since(start).Round(time.Millisecond)
+
+		ctx := scanCtx(name)
+		if elapsed >= slowJobThreshold {
+			log.Warn(ctx, fmt.Sprintf("slow job: run took %s", elapsed))
+			return
+		}
+		log.Debug(ctx, fmt.Sprintf("run took %s", elapsed))
 	}
 }

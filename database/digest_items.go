@@ -1,6 +1,8 @@
 package database
 
 import (
+	"time"
+
 	"dr/server/types"
 
 	"gorm.io/gorm/clause"
@@ -42,5 +44,14 @@ func ListDigestItemsForUser(userID string) ([]types.DigestItem, error) {
 // from the cron after a successful digest send.
 func DeleteDigestItemsForUser(userID string) (int64, error) {
 	res := db.Where("user_id = ?", userID).Delete(&types.DigestItem{})
+	return res.RowsAffected, res.Error
+}
+
+// CleanupStaleDigestItems deletes digest items older than the cutoff. Safety
+// net for items that will never drain — e.g. the user queued digest-mode
+// notifications and then switched digest_frequency back to 'none', or their
+// email emptied out. Returns the number of rows removed.
+func CleanupStaleDigestItems(cutoff time.Time) (int64, error) {
+	res := db.Where("created_at < ?", cutoff).Delete(&types.DigestItem{})
 	return res.RowsAffected, res.Error
 }

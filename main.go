@@ -44,23 +44,27 @@ func setupScheduler(db *gorm.DB) *cron.Cron {
 	//   - Every 5 minutes for status-change scans that don't need sub-minute
 	//     freshness (falling-behind, at-risk).
 	//   - Hourly for retention sweeps.
-	mustRegister(c, "* * * * *", jobs.ScanMissedTasks(db))
-	mustRegister(c, "*/5 * * * *", jobs.ScanFallingBehind(db))
-	mustRegister(c, "*/5 * * * *", jobs.ScanAtRiskMilestones(db))
-	mustRegister(c, "* * * * *", jobs.DeliverDueDigests(db))
-	mustRegister(c, "* * * * *", jobs.DeliverAnchorBatches(db))
-	mustRegister(c, "* * * * *", jobs.DeliverPendingNotifications(db))
-	mustRegister(c, "0 * * * *", jobs.CleanupDeliveryLog(db))
+	//
+	// Names match each job's internal scanCtx tag so the Timed duration lines
+	// correlate with the job's own log output.
+	mustRegister(c, "* * * * *", "scan_missed_tasks", jobs.ScanMissedTasks(db))
+	mustRegister(c, "*/5 * * * *", "scan_falling_behind", jobs.ScanFallingBehind(db))
+	mustRegister(c, "*/5 * * * *", "scan_at_risk_milestones", jobs.ScanAtRiskMilestones(db))
+	mustRegister(c, "* * * * *", "deliver_due_digests", jobs.DeliverDueDigests(db))
+	mustRegister(c, "* * * * *", "deliver_anchor_batches", jobs.DeliverAnchorBatches(db))
+	mustRegister(c, "* * * * *", "deliver_pending", jobs.DeliverPendingNotifications(db))
+	mustRegister(c, "0 * * * *", "cleanup_delivery_log", jobs.CleanupDeliveryLog(db))
 
 	return c
 }
 
 // mustRegister adds a job to the cron and fatally exits if the spec
 // fails to parse. We register at startup, so a misconfigured spec should
-// crash the binary loudly rather than silently fail.
-func mustRegister(c *cron.Cron, spec string, fn func()) {
-	if _, err := c.AddFunc(spec, fn); err != nil {
-		log.Fatalf("cron.AddFunc(%q): %v", spec, err)
+// crash the binary loudly rather than silently fail. Every job is wrapped
+// with jobs.Timed so run durations land in the logs (Warn when slow).
+func mustRegister(c *cron.Cron, spec, name string, fn func()) {
+	if _, err := c.AddFunc(spec, jobs.Timed(name, fn)); err != nil {
+		log.Fatalf("cron.AddFunc(%q, %q): %v", spec, name, err)
 	}
 }
 

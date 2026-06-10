@@ -100,7 +100,7 @@ func deliverDueDigestsWith(
 
 		candidates, err := listCandidates()
 		if err != nil {
-			log.Info(ctx, "find candidates failed", err)
+			log.Error(ctx, "find candidates failed", err)
 			return
 		}
 
@@ -108,7 +108,7 @@ func deliverDueDigestsWith(
 		for _, c := range candidates {
 			items, err := listItems(c.UserID)
 			if err != nil {
-				log.Info(ctx, "list items failed", err, "user_id", c.UserID)
+				log.Error(ctx, "list items failed", err, "user_id", c.UserID)
 				continue
 			}
 			// Silent skip on empty per the product decision.
@@ -130,7 +130,7 @@ func deliverDueDigestsWith(
 			dedupeKey := truncateToDate(items[0].CreatedAt.UTC().Format("2006-01-02"))
 
 			if err := sender.Send(context.Background(), c.UserID, kind, vars, dedupeKey); err != nil {
-				log.Info(ctx, "send digest failed", err, "user_id", c.UserID)
+				log.Error(ctx, "send digest failed", err, "user_id", c.UserID)
 				continue
 			}
 
@@ -143,7 +143,7 @@ func deliverDueDigestsWith(
 			sent++
 		}
 
-		log.Info(ctx, fmt.Sprintf("processed %d candidates: %d sent, %d skipped (empty)", len(candidates), sent, skipped))
+		summarize(ctx, len(candidates) > 0, fmt.Sprintf("processed %d candidates: %d sent, %d skipped (empty)", len(candidates), sent, skipped))
 	}
 }
 

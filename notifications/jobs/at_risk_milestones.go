@@ -76,7 +76,7 @@ func scanAtRiskMilestonesWith(db *gorm.DB, dispatch func(notifications.DispatchO
 
 		candidates, err := findAtRiskMilestoneCandidates(db)
 		if err != nil {
-			log.Info(ctx, "find candidates failed", err)
+			log.Error(ctx, "find candidates failed", err)
 			return
 		}
 		for _, c := range candidates {
@@ -93,6 +93,6 @@ func scanAtRiskMilestonesWith(db *gorm.DB, dispatch func(notifications.DispatchO
 				},
 			})
 		}
-		log.Info(ctx, fmt.Sprintf("processed %d candidates", len(candidates)))
+		summarize(ctx, len(candidates) > 0, fmt.Sprintf("processed %d candidates", len(candidates)))
 	}
 }

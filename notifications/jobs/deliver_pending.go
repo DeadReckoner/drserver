@@ -45,7 +45,7 @@ func deliverPendingNotificationsWith(
 
 		pending, err := listDue(maxPendingAttempts)
 		if err != nil {
-			log.Info(ctx, "list due pending failed", err)
+			log.Error(ctx, "list due pending failed", err)
 			return
 		}
 
@@ -69,7 +69,7 @@ func deliverPendingNotificationsWith(
 			// (decision.Send=false with no SnoozeUntil — type disabled,
 			// muted, etc). Either way the row is done.
 			if err := deleteRow(p.ID); err != nil {
-				log.Info(ctx, "delete pending row failed", err, "id", p.ID)
+				log.Error(ctx, "delete pending row failed", err, "id", p.ID)
 				continue
 			}
 			if decision.Send {
@@ -78,7 +78,7 @@ func deliverPendingNotificationsWith(
 				cleanedUp++
 			}
 		}
-		log.Info(ctx, fmt.Sprintf("processed %d pending: %d sent, %d re-snoozed, %d cleaned up",
+		summarize(ctx, len(pending) > 0, fmt.Sprintf("processed %d pending: %d sent, %d re-snoozed, %d cleaned up",
 			len(pending), sent, resnoozed, cleanedUp))
 	}
 }

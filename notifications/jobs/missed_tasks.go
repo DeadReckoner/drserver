@@ -20,10 +20,25 @@ type missedTaskCandidate struct {
 	Title       string `gorm:"column:title"`
 }
 
+// missedTaskWindowDays bounds how far back a task's date can be and still
+// trigger a missed-task push. Two reasons it exists:
+//
+//  1. Retention safety: missed_task dedup is once-ever (dedup key = task_id),
+//     and the cleanup cron drops delivery-log rows after deliveryLogRetention
+//     (90 days). Without a candidate bound, a still-incomplete old task would
+//     re-notify the moment its log row aged out. The window must stay well
+//     under the retention period — a tripwire test in cleanup_test.go guards
+//     the relationship.
+//  2. Product: a task missed a month ago isn't news; pushing about it would
+//     read as spam (e.g. un-archiving an old roadmap shouldn't unleash its
+//     entire backlog).
+const missedTaskWindowDays = 30
+
 // findMissedTaskCandidates returns every task that:
 //   - belongs to a non-archived, non-paused roadmap
 //   - is incomplete and has a scheduled date
-//   - whose date has passed in the owner's timezone
+//   - whose date has passed in the owner's timezone, but is within the last
+//     missedTaskWindowDays days
 //   - has NOT already had a missed_task push delivered (dedup key = task_id)
 //
 // Timezone math runs in Postgres so the cron stays stateless.
@@ -38,6 +53,7 @@ func findMissedTaskCandidates(db *gorm.DB) ([]missedTaskCandidate, error) {
 		  AND r.archived = false
 		  AND r.paused_at IS NULL
 		  AND t.date::date < (now() AT TIME ZONE COALESCE(NULLIF(u.timezone, ''), 'UTC'))::date
+		  AND t.date::date >= (now() AT TIME ZONE COALESCE(NULLIF(u.timezone, ''), 'UTC'))::date - (? * interval '1 day')
 		  AND NOT EXISTS (
 		    SELECT 1 FROM notification_delivery_log dl
 		    WHERE dl.user_id           = t.user_id
@@ -47,7 +63,7 @@ func findMissedTaskCandidates(db *gorm.DB) ([]missedTaskCandidate, error) {
 		  )
 	`
 	var out []missedTaskCandidate
-	if err := db.Raw(q).Scan(&out).Error; err != nil {
+	if err := db.Raw(q, missedTaskWindowDays).Scan(&out).Error; err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -68,7 +84,7 @@ func scanMissedTasksWith(db *gorm.DB, dispatch func(notifications.DispatchOption
 
 		candidates, err := findMissedTaskCandidates(db)
 		if err != nil {
-			log.Info(ctx, "find candidates failed", err)
+			log.Error(ctx, "find candidates failed", err)
 			return
 		}
 		for _, c := range candidates {
@@ -86,6 +102,6 @@ func scanMissedTasksWith(db *gorm.DB, dispatch func(notifications.DispatchOption
 				},
 			})
 		}
-		log.Info(ctx, fmt.Sprintf("processed %d candidates", len(candidates)))
+		summarize(ctx, len(candidates) > 0, fmt.Sprintf("processed %d candidates", len(candidates)))
 	}
 }

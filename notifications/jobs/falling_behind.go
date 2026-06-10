@@ -145,7 +145,7 @@ func scanFallingBehindWith(db *gorm.DB, dispatch func(notifications.DispatchOpti
 
 		stats, err := findFallingBehindStats(db)
 		if err != nil {
-			log.Info(ctx, "find stats failed", err)
+			log.Error(ctx, "find stats failed", err)
 			return
 		}
 
@@ -170,7 +170,9 @@ func scanFallingBehindWith(db *gorm.DB, dispatch func(notifications.DispatchOpti
 			})
 			fired++
 		}
-		log.Info(ctx, fmt.Sprintf("evaluated %d roadmaps, %d firing", len(stats), fired))
+		// Evaluating roadmaps without any firing is the steady state — only
+		// surface the line at Info when something actually fired.
+		summarize(ctx, fired > 0, fmt.Sprintf("evaluated %d roadmaps, %d firing", len(stats), fired))
 	}
 }
 

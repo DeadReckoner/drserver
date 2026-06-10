@@ -66,6 +66,11 @@ const (
 	ReasonTypeDisabled    = "type_disabled"
 	ReasonTargetMute      = "target_mute_active"
 	ReasonQuietHours      = "quiet_hours_defer"
+
+	// ReasonFrequencyCap is set by Dispatch (not Resolve) when the user has
+	// already received the maximum number of immediate pushes for the rolling
+	// window. Listed here so all reason codes live in one place.
+	ReasonFrequencyCap = "frequency_cap"
 )
 
 // Resolve runs the cascade. It returns a Decision describing what the caller
