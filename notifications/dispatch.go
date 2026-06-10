@@ -59,9 +59,27 @@ type Dispatcher struct {
 	// v1 stopgap of sending digest-mode pushes immediately.
 	QueueDigest func(item types.DigestItem) error
 
+	// CountRecentPushes returns how many push deliveries the user has claimed
+	// in the delivery log since the given time, across all notification
+	// types. Backs the per-user frequency cap; leave nil to disable the cap
+	// (tests that don't care about it).
+	CountRecentPushes func(userID string, since time.Time) (int64, error)
+
 	Send PushSender
 	Now  func() time.Time
 }
+
+// Frequency cap: at most maxPushesPerWindow immediate pushes per user per
+// rolling pushCapWindow, across all notification types. A safety valve, not
+// a tuning instrument — per-type dedup keys (once-ever, once-per-ISO-week)
+// do the day-to-day rate limiting; this stops pathological bursts (e.g. many
+// roadmaps tripping at once) from carpet-bombing one phone.
+//
+// Tuning knobs for Step 12's "watch prod and adjust" follow-up.
+const (
+	maxPushesPerWindow = 10
+	pushCapWindow      = 24 * time.Hour
+)
 
 // production is the singleton Dispatcher wired to the real database + push.
 var production = Dispatcher{
@@ -78,6 +96,7 @@ var production = Dispatcher{
 	RecordDelivery:       database.RecordDelivery,
 	QueuePending:         database.UpsertPendingNotification,
 	QueueDigest:          database.UpsertDigestItem,
+	CountRecentPushes:    database.CountRecentPushes,
 	Send:                 DefaultPushSender,
 	Now:                  time.Now,
 }
@@ -96,7 +115,7 @@ func (d Dispatcher) Dispatch(opts DispatchOptions) Decision {
 
 	settings, err := d.LoadSettings(opts.UserID)
 	if err != nil {
-		log.Info(ctx, "notifications.Dispatch: failed to load settings", err)
+		log.Error(ctx, "notifications.Dispatch: failed to load settings", err)
 		return Decision{Reason: "settings_load_error"}
 	}
 
@@ -150,15 +169,36 @@ func (d Dispatcher) Dispatch(opts DispatchOptions) Decision {
 				Data:              opts.Data,
 				ScheduledFor:      *decision.SnoozeUntil,
 			}); err != nil {
-				log.Info(ctx, "notifications.Dispatch: queue pending failed", err)
+				log.Error(ctx, "notifications.Dispatch: queue pending failed", err)
 			}
 		}
-		log.Info(ctx, "notifications.Dispatch: not sending",
+		log.Debug(ctx, "notifications.Dispatch: not sending",
 			"type", opts.NotificationType,
 			"reason", decision.Reason,
 			"snooze_until", decision.SnoozeUntil,
 		)
 		return decision
+	}
+
+	// Frequency cap: bound immediate pushes per user per rolling window.
+	// Checked BEFORE the delivery-log claim so a capped event isn't burned —
+	// scan-driven triggers re-candidate on their next tick and deliver once
+	// the window has room. Digest-mode deliveries skip the cap; they collapse
+	// into a single email anyway.
+	if decision.Delivery != types.DeliveryDigest && d.CountRecentPushes != nil {
+		n, err := d.CountRecentPushes(opts.UserID, d.Now().Add(-pushCapWindow))
+		if err != nil {
+			// Fail open — a counting error shouldn't block notifications.
+			log.Error(ctx, "notifications.Dispatch: frequency cap count failed (continuing)", err)
+		} else if n >= maxPushesPerWindow {
+			decision.Send = false
+			decision.Reason = ReasonFrequencyCap
+			log.Info(ctx, "notifications.Dispatch: frequency cap hit, skipping",
+				"type", opts.NotificationType,
+				"recent_pushes", n,
+			)
+			return decision
+		}
 	}
 
 	// Idempotency: claim the delivery log row first. If a duplicate trigger
@@ -167,11 +207,11 @@ func (d Dispatcher) Dispatch(opts DispatchOptions) Decision {
 	if err != nil {
 		// Don't fail the whole event — log and skip. The next firing of the
 		// same trigger will retry naturally.
-		log.Info(ctx, "notifications.Dispatch: delivery log write failed", err)
+		log.Error(ctx, "notifications.Dispatch: delivery log write failed", err)
 		return decision
 	}
 	if !inserted {
-		log.Info(ctx, "notifications.Dispatch: already delivered, skipping",
+		log.Debug(ctx, "notifications.Dispatch: already delivered, skipping",
 			"type", opts.NotificationType,
 			"dedup_key", opts.DedupKey,
 		)
@@ -192,7 +232,7 @@ func (d Dispatcher) Dispatch(opts DispatchOptions) Decision {
 			Body:             opts.Body,
 			Data:             opts.Data,
 		}); err != nil {
-			log.Info(ctx, "notifications.Dispatch: queue digest failed", err)
+			log.Error(ctx, "notifications.Dispatch: queue digest failed", err)
 		}
 		return decision
 	}

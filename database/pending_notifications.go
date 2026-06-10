@@ -57,6 +57,15 @@ func DeletePendingNotification(id string) error {
 	return db.Where("id = ?", id).Delete(&types.PendingNotification{}).Error
 }
 
+// CleanupExhaustedPendingNotifications deletes pending rows that hit the
+// attempts cap. ListDuePendingNotifications already excludes them from
+// delivery; this retention sweep stops them from accumulating forever.
+// Returns the number of rows removed.
+func CleanupExhaustedPendingNotifications(maxAttempts int) (int64, error) {
+	res := db.Where("attempts >= ?", maxAttempts).Delete(&types.PendingNotification{})
+	return res.RowsAffected, res.Error
+}
+
 // gormExpr is a thin wrapper around gorm.Expr so the call sites read cleanly.
 // Kept here rather than exposing gorm internals at the use site.
 func gormExpr(s string) any {

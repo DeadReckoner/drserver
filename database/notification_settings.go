@@ -241,6 +241,17 @@ func CleanupDeliveryLog(cutoff time.Time) (int64, error) {
 	return res.RowsAffected, res.Error
 }
 
+// CountRecentPushes counts delivery-log claims on the push channel for one
+// user since the lookback point, across all notification types. Backs the
+// per-user frequency cap in notifications.Dispatch.
+func CountRecentPushes(userID string, since time.Time) (int64, error) {
+	var n int64
+	err := db.Model(&types.NotificationDeliveryLog{}).
+		Where("user_id = ? AND channel = ? AND delivered_at >= ?", userID, types.NotificationChannelPush, since).
+		Count(&n).Error
+	return n, err
+}
+
 // =============================================================================
 // Authorization helpers (used by per-target override endpoints)
 // =============================================================================

@@ -151,11 +151,11 @@ func deliverAnchorBatchesWith(
 
 		candidates, err := listCandidates()
 		if err != nil {
-			log.Info(ctx, "find candidates failed", err)
+			log.Error(ctx, "find candidates failed", err)
 			return
 		}
 		if len(candidates) == 0 {
-			log.Info(ctx, "no candidates")
+			log.Debug(ctx, "no candidates")
 			return
 		}
 
@@ -165,7 +165,7 @@ func deliverAnchorBatchesWith(
 		}
 		summaries, err := listSummaries(anchorIDs)
 		if err != nil {
-			log.Info(ctx, "find summaries failed", err)
+			log.Error(ctx, "find summaries failed", err)
 			return
 		}
 
@@ -198,7 +198,7 @@ func deliverAnchorBatchesWith(
 			}
 			dedupeKey := "anchor-batch" // 23h email_log dedupe is the real guard
 			if err := sender.Send(context.Background(), c.AnchorUserID, email.KindAnchorDailySummary, vars, dedupeKey); err != nil {
-				log.Info(ctx, "send anchor summary failed", err, "anchor_user_id", c.AnchorUserID)
+				log.Error(ctx, "send anchor summary failed", err, "anchor_user_id", c.AnchorUserID)
 				continue
 			}
 			sent++
