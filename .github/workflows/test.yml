@@ -1,0 +1,31 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # tidy, fmt, build, test (with coverage), clean — matches local `make ci`
+      - run: make ci
+
+      # Fail if `go mod tidy` or `go fmt` changed anything: keeps go.mod/go.sum
+      # and formatting honest at PR time instead of drifting silently.
+      - name: Check for tidy/fmt drift
+        run: git diff --exit-code
+
+  # A Docker-enabled `integration` job (testcontainers Postgres, build tag
+  # `integration`) will be added when the integration suite lands.
