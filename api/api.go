@@ -28,3 +28,10 @@ func NewRouterWithOptions(db *gorm.DB, opts routes.Options) *gin.Engine {
 	h := handlers.NewHandlers(db, storageClient, appleClient)
 	return routes.SetupRoutesWithOptions(h, opts)
 }
+
+// NewRouterFromHandlers builds the router from a pre-built *handlers.Handlers
+// struct. Intended for tests that want to inject fake services on individual
+// handlers without going through the live database adapter.
+func NewRouterFromHandlers(h *handlers.Handlers, opts routes.Options) *gin.Engine {
+	return routes.SetupRoutesWithOptions(h, opts)
+}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"dr/server/api"
+	"dr/server/api/handlers"
 	"dr/server/api/routes"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +35,17 @@ func NewTestRouter(db *gorm.DB) *gin.Engine {
 func NewTestRouterAs(db *gorm.DB, userID string) *gin.Engine {
 	return api.NewRouterWithOptions(db, routes.Options{
 		AuthMiddleware: FakeAuthMiddlewareAs(userID),
+	})
+}
+
+// NewTestRouterFromHandlers builds a router from a pre-built *handlers.Handlers
+// struct, wired with the fake auth middleware. Use when individual handlers
+// have been constructed with fake services. Other handler fields can be left
+// nil so long as the test doesn't hit their routes (method values on nil
+// receivers are safe to register; only invocation panics).
+func NewTestRouterFromHandlers(h *handlers.Handlers) *gin.Engine {
+	return api.NewRouterFromHandlers(h, routes.Options{
+		AuthMiddleware: FakeAuthMiddleware(),
 	})
 }
 

@@ -18,7 +18,7 @@ import (
 )
 
 type RoadmapHandler struct {
-	db *gorm.DB
+	service RoadmapService
 }
 
 type anchorUserResponse struct {
@@ -32,8 +32,16 @@ type roadmapWithAnchorResponse struct {
 	Anchor *anchorUserResponse `json:"anchor,omitempty"`
 }
 
+// NewRoadmapHandler builds a handler backed by the live database adapter.
+// Tests use NewRoadmapHandlerWithService to inject a fake.
 func NewRoadmapHandler(db *gorm.DB) *RoadmapHandler {
-	return &RoadmapHandler{db: db}
+	return &RoadmapHandler{service: DBRoadmapService{}}
+}
+
+// NewRoadmapHandlerWithService is the test-friendly constructor; production
+// code should use NewRoadmapHandler.
+func NewRoadmapHandlerWithService(service RoadmapService) *RoadmapHandler {
+	return &RoadmapHandler{service: service}
 }
 
 func (h *RoadmapHandler) CreateRoadmap(c *gin.Context) {
@@ -59,7 +67,7 @@ func (h *RoadmapHandler) CreateRoadmap(c *gin.Context) {
 
 	fmt.Printf("Roadmap received: %+v\n", newRoadmap)
 
-	createdRoadmap, err := database.CreateRoadmap(c, newRoadmap)
+	createdRoadmap, err := h.service.Create(c, newRoadmap)
 	if err != nil {
 		utils.InternalErrorResponse(c, err)
 		return
@@ -70,7 +78,7 @@ func (h *RoadmapHandler) CreateRoadmap(c *gin.Context) {
 }
 
 func (h *RoadmapHandler) GetRoadmapsByUser(c *gin.Context) {
-	roadmaps := database.GetRoadmapsByUser(c)
+	roadmaps := h.service.ListByUser(c)
 	utils.DataResponse(c, http.StatusOK, roadmaps)
 }
 
@@ -84,13 +92,13 @@ func (h *RoadmapHandler) GetRoadmap(c *gin.Context) {
 	switch view {
 	case "strategic":
 		// Load only strategic view (phases with milestones, no tasks)
-		roadmap = database.GetRoadmapWithStrategicView(c, roadmapID)
+		roadmap = h.service.GetStrategic(c, roadmapID)
 	case "milestones":
 		// Load only detailed milestones (tactical view with tasks)
-		roadmap = database.GetRoadmap(c, roadmapID)
+		roadmap = h.service.Get(c, roadmapID)
 	case "full":
 		// Load everything (phases, milestones, tasks, steps)
-		roadmap = database.GetRoadmapFull(c, roadmapID)
+		roadmap = h.service.GetFull(c, roadmapID)
 	default:
 		utils.BadRequestResponse(c, "Invalid view parameter. Use 'strategic', 'milestones', or 'full'")
 		return
@@ -140,7 +148,7 @@ func (h *RoadmapHandler) UpdateRoadmap(c *gin.Context) {
 
 	fmt.Printf("Updated roadmap received: %+v\n", updatedRoadmap)
 
-	roadmap := database.UpdateRoadmap(c, roadmapID, updatedRoadmap)
+	roadmap := h.service.Update(c, roadmapID, updatedRoadmap)
 	if roadmap.RoadmapID == "" {
 		utils.NotFoundResponse(c, "Roadmap")
 		return
@@ -154,7 +162,7 @@ func (h *RoadmapHandler) DeleteRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
-	err := database.DeleteRoadmap(c, roadmapID)
+	err := h.service.Delete(c, roadmapID)
 	if err != nil {
 		utils.InternalErrorResponse(c, err)
 		return
@@ -615,7 +623,7 @@ func (h *RoadmapHandler) RestartRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
-	roadmap, err := database.RestartRoadmap(c, roadmapID)
+	roadmap, err := h.service.Restart(c, roadmapID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "roadmap not found" {
@@ -645,7 +653,7 @@ func (h *RoadmapHandler) ShiftDates(c *gin.Context) {
 		return
 	}
 
-	roadmap, err := database.ShiftRoadmapDates(c, roadmapID, req.Days)
+	roadmap, err := h.service.ShiftDates(c, roadmapID, req.Days)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "roadmap not found" {
@@ -706,7 +714,7 @@ func (h *RoadmapHandler) PauseRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
-	err := database.PauseRoadmap(c, roadmapID)
+	err := h.service.Pause(c, roadmapID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "roadmap not found" {
@@ -730,7 +738,7 @@ func (h *RoadmapHandler) ResumeRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
-	roadmap, err := database.ResumeRoadmap(c, roadmapID)
+	roadmap, err := h.service.Resume(c, roadmapID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "roadmap not found" {
@@ -762,7 +770,7 @@ func (h *RoadmapHandler) ArchiveRoadmap(c *gin.Context) {
 		return
 	}
 
-	err := database.ArchiveRoadmap(c, roadmapID)
+	err := h.service.Archive(c, roadmapID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "roadmap not found" {
@@ -786,7 +794,7 @@ func (h *RoadmapHandler) RestoreRoadmap(c *gin.Context) {
 	// Body is optional, so we don't use BindJSONOrAbort
 	_ = c.ShouldBindJSON(&req)
 
-	roadmap, err := database.RestoreRoadmap(c, roadmapID, req.StartFromToday)
+	roadmap, err := h.service.Restore(c, roadmapID, req.StartFromToday)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "roadmap not found" {
