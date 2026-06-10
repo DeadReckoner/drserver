@@ -14,11 +14,19 @@ import (
 )
 
 type TaskHandler struct {
-	db *gorm.DB
+	service TaskService
 }
 
+// NewTaskHandler builds a handler backed by the live database adapter.
+// Tests use NewTaskHandlerWithService to inject a fake.
 func NewTaskHandler(db *gorm.DB) *TaskHandler {
-	return &TaskHandler{db: db}
+	return &TaskHandler{service: DBTaskService{}}
+}
+
+// NewTaskHandlerWithService is the test-friendly constructor; production
+// code should use NewTaskHandler.
+func NewTaskHandlerWithService(service TaskService) *TaskHandler {
+	return &TaskHandler{service: service}
 }
 
 func (h *TaskHandler) CreateTask(c *gin.Context) {
@@ -30,7 +38,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 
 	fmt.Printf("Task received: %+v\n", newTask)
 
-	createdTask, err := database.CreateTask(c, newTask)
+	createdTask, err := h.service.Create(c, newTask)
 	if err != nil {
 		utils.InternalErrorResponse(c, err)
 		return
@@ -57,7 +65,7 @@ func (h *TaskHandler) GetTasks(c *gin.Context) {
 	fmt.Println("date range: ", dateRange)
 	fmt.Println("roadmap_id: ", roadmapID)
 
-	tasks := database.GetTasks(c, startDate, endDate, roadmapID)
+	tasks := h.service.List(c, startDate, endDate, roadmapID)
 	utils.DataResponse(c, http.StatusOK, tasks)
 }
 
@@ -78,7 +86,7 @@ func (h *TaskHandler) GetTasksByMilestone(c *gin.Context) {
 
 func (h *TaskHandler) GetTask(c *gin.Context) {
 	taskID := c.Param("taskid")
-	task := database.GetTask(c, taskID)
+	task := h.service.Get(c, taskID)
 
 	if task.TaskID == "" {
 		utils.NotFoundResponse(c, "Task")
@@ -96,7 +104,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		return
 	}
 
-	task := database.UpdateTask(c, taskID, updatedTask)
+	task := h.service.Update(c, taskID, updatedTask)
 	if task.TaskID == "" {
 		utils.NotFoundResponse(c, "Task")
 		return
@@ -109,7 +117,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 func (h *TaskHandler) DeleteTask(c *gin.Context) {
 	taskID := c.Param("taskid")
 
-	err := database.DeleteTask(c, taskID)
+	err := h.service.Delete(c, taskID)
 	if err != nil {
 		utils.InternalErrorResponse(c, err)
 		return
@@ -148,7 +156,7 @@ func (h *TaskHandler) UpdateStep(c *gin.Context) {
 		return
 	}
 
-	step := database.UpdateStep(c, taskID, stepID, updatedStep)
+	step := h.service.UpdateStep(c, taskID, stepID, updatedStep)
 	if step.StepID == "" {
 		utils.NotFoundResponse(c, "Step")
 		return
@@ -177,7 +185,7 @@ func (h *TaskHandler) DeleteStep(c *gin.Context) {
 func (h *TaskHandler) CompleteAllSteps(c *gin.Context) {
 	taskID := c.Param("taskid")
 
-	stepsCompleted, err := database.CompleteAllSteps(c, taskID)
+	stepsCompleted, err := h.service.CompleteAllSteps(c, taskID)
 	if err != nil {
 		if err.Error() == "task not found" {
 			utils.NotFoundResponse(c, "Task")
