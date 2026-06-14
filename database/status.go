@@ -2,11 +2,30 @@ package database
 
 import (
 	"log"
+	"time"
 
 	"dr/server/types"
 
 	"gorm.io/gorm"
 )
+
+// resolveUserLocation loads a user's IANA timezone and returns the matching
+// *time.Location, falling back to UTC when the user is missing, has no
+// timezone set, or the stored value doesn't parse. Used to make the overdue
+// boundary in ComputeAllStatusesInLocation match the user's local day, the
+// same way the notification jobs compare against users.timezone.
+func resolveUserLocation(userID string) *time.Location {
+	if userID == "" {
+		return time.UTC
+	}
+	var tz string
+	if err := db.Model(&types.User{}).
+		Where("user_id = ?", userID).
+		Pluck("timezone", &tz).Error; err != nil {
+		return time.UTC
+	}
+	return types.LocationOrUTC(tz)
+}
 
 // RecomputeAndSaveStatuses loads a roadmap with all nested data, recomputes all statuses
 // using Roadmap.ComputeAllStatuses(), and saves all statuses to the database.
@@ -32,8 +51,9 @@ func RecomputeAndSaveStatuses(roadmapID string) error {
 		return err
 	}
 
-	// Compute all statuses in memory
-	roadmap.ComputeAllStatuses()
+	// Compute all statuses in memory, using the owner's timezone so the
+	// overdue boundary matches their local day.
+	roadmap.ComputeAllStatusesInLocation(resolveUserLocation(roadmap.UserID))
 
 	// Save all statuses to database in a transaction
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -119,10 +139,19 @@ func UpdateAllStatuses() (tasksUpdated int64, milestonesUpdated int64, err error
 		return 0, 0, err
 	}
 
+	// Cache locations per user so a user with many roadmaps costs one lookup.
+	locByUser := make(map[string]*time.Location)
+
 	// Process each roadmap
 	for _, roadmap := range roadmaps {
-		// Compute all statuses in memory
-		roadmap.ComputeAllStatuses()
+		loc, ok := locByUser[roadmap.UserID]
+		if !ok {
+			loc = resolveUserLocation(roadmap.UserID)
+			locByUser[roadmap.UserID] = loc
+		}
+
+		// Compute all statuses in memory, using the owner's timezone.
+		roadmap.ComputeAllStatusesInLocation(loc)
 
 		// Save statuses for milestones in phases
 		for i := range roadmap.Phases {
