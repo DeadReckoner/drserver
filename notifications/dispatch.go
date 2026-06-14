@@ -81,6 +81,22 @@ const (
 	pushCapWindow      = 24 * time.Hour
 )
 
+// capExempt reports whether a notification type bypasses the per-user frequency
+// cap. Conversational pushes (new messages) can legitimately exceed the cap
+// during an active chat; counting them would let one busy thread starve every
+// other notification type for the rest of the window.
+func capExempt(notificationType string) bool {
+	return notificationType == "message_new"
+}
+
+// quietHoursDrop reports whether a type should be dropped outright (rather than
+// deferred to a pending row) when it lands in quiet hours. Message pushes are
+// stale by morning and the content is already in the thread, so a pile of
+// next-morning chat pushes is pure noise — drop them instead.
+func quietHoursDrop(notificationType string) bool {
+	return notificationType == "message_new"
+}
+
 // production is the singleton Dispatcher wired to the real database + push.
 var production = Dispatcher{
 	LoadSettings: database.EnsureNotificationSettings,
@@ -155,7 +171,7 @@ func (d Dispatcher) Dispatch(opts DispatchOptions) Decision {
 		// pending_notifications row that the DeliverPendingNotifications
 		// cron will pick up. Permanent skips (disabled, muted, unknown
 		// type) still drop immediately.
-		if decision.SnoozeUntil != nil && d.QueuePending != nil {
+		if decision.SnoozeUntil != nil && d.QueuePending != nil && !quietHoursDrop(opts.NotificationType) {
 			if err := d.QueuePending(types.PendingNotification{
 				UserID:            opts.UserID,
 				NotificationType:  opts.NotificationType,
@@ -185,7 +201,7 @@ func (d Dispatcher) Dispatch(opts DispatchOptions) Decision {
 	// scan-driven triggers re-candidate on their next tick and deliver once
 	// the window has room. Digest-mode deliveries skip the cap; they collapse
 	// into a single email anyway.
-	if decision.Delivery != types.DeliveryDigest && d.CountRecentPushes != nil {
+	if decision.Delivery != types.DeliveryDigest && d.CountRecentPushes != nil && !capExempt(opts.NotificationType) {
 		n, err := d.CountRecentPushes(opts.UserID, d.Now().Add(-pushCapWindow))
 		if err != nil {
 			// Fail open — a counting error shouldn't block notifications.

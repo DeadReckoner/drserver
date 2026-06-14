@@ -5,6 +5,7 @@ import (
 	"dr/server/api/utils"
 	"dr/server/database"
 	"dr/server/log"
+	"dr/server/notifications"
 	"dr/server/types"
 	"net/http"
 	"strconv"
@@ -600,14 +601,19 @@ func sendHabitAnchorRequestNotification(anchorRequest types.AnchorRequest) {
 
 	requesterName := requester.FirstName + " " + requester.LastName
 
-	utils.SendPushNotification(
-		anchorRequest.AnchorID,
-		"habit_anchor_request",
-		"New Habit Anchor Request",
-		requesterName+" wants you to be their habit anchor",
-		map[string]any{
+	// Rides the anchor_request toggle (mapped in FAndAPrefs.Lookup). FriendID is
+	// the requester so a per-friend mute applies from the recipient's side.
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           anchorRequest.AnchorID,
+		Category:         notifications.CategoryFAndA,
+		NotificationType: "habit_anchor_request",
+		DedupKey:         anchorRequest.RequestID,
+		FriendID:         anchorRequest.RequesterID,
+		Title:            "New Habit Anchor Request",
+		Body:             requesterName + " wants you to be their habit anchor",
+		Data: map[string]any{
 			"request_id": anchorRequest.RequestID,
 			"habit_id":   anchorRequest.HabitID,
 		},
-	)
+	})
 }

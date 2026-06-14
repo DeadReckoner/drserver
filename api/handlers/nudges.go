@@ -7,6 +7,7 @@ import (
 
 	"dr/server/api/utils"
 	"dr/server/database"
+	"dr/server/notifications"
 	"dr/server/types"
 
 	"github.com/gin-gonic/gin"
@@ -69,18 +70,22 @@ func (h *NudgeHandler) NudgeRoadmap(c *gin.Context) {
 		senderName = "Your accountability partner"
 	}
 
-	// Send push notification to roadmap owner
-	go utils.SendPushNotification(
-		roadmap.UserID,
-		"roadmap_nudge",
-		"Nudge from "+senderName,
-		senderName+" nudged you on '"+roadmap.Goal+"'",
-		map[string]any{
+	// Send push notification to roadmap owner. FriendID is the nudger so a
+	// per-friend mute applies; rides the nudges toggle (FAndAPrefs.Lookup).
+	go notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           roadmap.UserID,
+		Category:         notifications.CategoryFAndA,
+		NotificationType: "roadmap_nudge",
+		DedupKey:         nudge.NudgeID,
+		FriendID:         callerID,
+		Title:            "Nudge from " + senderName,
+		Body:             senderName + " nudged you on '" + roadmap.Goal + "'",
+		Data: map[string]any{
 			"roadmap_id": roadmapID,
 			"sender_id":  callerID,
 			"nudge_id":   nudge.NudgeID,
 		},
-	)
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"nudge_id": nudge.NudgeID,
@@ -136,18 +141,22 @@ func (h *NudgeHandler) NudgeHabit(c *gin.Context) {
 		senderName = "Your accountability partner"
 	}
 
-	// Send push notification to habit owner
-	go utils.SendPushNotification(
-		habit.UserID,
-		"habit_nudge",
-		"Nudge from "+senderName,
-		senderName+" nudged you on '"+habit.Title+"'",
-		map[string]any{
+	// Send push notification to habit owner. FriendID is the nudger so a
+	// per-friend mute applies; rides the nudges toggle (FAndAPrefs.Lookup).
+	go notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           habit.UserID,
+		Category:         notifications.CategoryFAndA,
+		NotificationType: "habit_nudge",
+		DedupKey:         nudge.NudgeID,
+		FriendID:         callerID,
+		Title:            "Nudge from " + senderName,
+		Body:             senderName + " nudged you on '" + habit.Title + "'",
+		Data: map[string]any{
 			"habit_id":  habitID,
 			"sender_id": callerID,
 			"nudge_id":  nudge.NudgeID,
 		},
-	)
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"nudge_id": nudge.NudgeID,
