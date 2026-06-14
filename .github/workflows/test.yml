@@ -44,4 +44,4 @@ jobs:
       # `integration` build tag gates these tests; the unit job never
       # compiles them.
       - name: Run integration suite
-        run: go test -tags integration -count=1 ./test/integration/...
+        run: make integration_test

@@ -210,4 +210,4 @@ Tester: ______________  Build: ______________  Date: ______________
 - API + type→toggle map: [`notifications-api.md`](notifications-api.md)
 - Server logic: `notifications/` package
 - Cron jobs (digests, anchor batch, scans): `notifications/jobs/`
-- Automated E2E (real Postgres): `test/integration/` (run with `-tags integration`)
+- Automated E2E (real Postgres): `test/integration/` (run with `make integration_test`; needs Docker)
