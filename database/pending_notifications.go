@@ -21,6 +21,11 @@ import (
 // makes Dispatch idempotent during a deferral — a second trigger firing
 // while the first is still pending just refreshes the schedule.
 func UpsertPendingNotification(p types.PendingNotification) error {
+	// data is jsonb NOT NULL; a nil map would serialize to jsonb 'null'.
+	// Normalize to {} so the stored shape matches the column's '{}' default.
+	if p.Data == nil {
+		p.Data = map[string]any{}
+	}
 	return db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "user_id"},
