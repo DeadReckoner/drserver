@@ -1524,7 +1524,7 @@ type PendingNotification struct {
 	// so it can hold whatever shape the caller put in DispatchOptions.Data.
 	Title string         `gorm:"column:title;not null" json:"title"`
 	Body  string         `gorm:"column:body;not null" json:"body"`
-	Data  map[string]any `gorm:"type:jsonb;column:data;not null" json:"data"`
+	Data  map[string]any `gorm:"type:jsonb;column:data;not null;serializer:json" json:"data"`
 
 	ScheduledFor time.Time `gorm:"column:scheduled_for;not null" json:"scheduled_for"`
 	Attempts     int       `gorm:"column:attempts;not null;default:0" json:"attempts"`
@@ -1549,7 +1549,7 @@ type DigestItem struct {
 	DedupKey         string         `gorm:"column:dedup_key;not null" json:"dedup_key"`
 	Title            string         `gorm:"column:title;not null" json:"title"`
 	Body             string         `gorm:"column:body;not null" json:"body"`
-	Data             map[string]any `gorm:"type:jsonb;column:data;not null" json:"data"`
+	Data             map[string]any `gorm:"type:jsonb;column:data;not null;serializer:json" json:"data"`
 	CreatedAt        time.Time      `gorm:"column:created_at;not null;default:now()" json:"created_at"`
 }
 

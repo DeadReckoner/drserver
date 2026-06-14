@@ -20,6 +20,11 @@ import (
 // counter to bump because the item content is captured-at-trigger and
 // shouldn't be overwritten.
 func UpsertDigestItem(item types.DigestItem) error {
+	// data is jsonb NOT NULL; a nil map would serialize to jsonb 'null'.
+	// Normalize to {} so the stored shape matches the column's '{}' default.
+	if item.Data == nil {
+		item.Data = map[string]any{}
+	}
 	return db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "user_id"},
