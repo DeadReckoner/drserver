@@ -110,6 +110,7 @@ func TestDefaultMyGoalsPrefs_AllEnabled(t *testing.T) {
 		"MilestoneAtRisk":        d.MilestoneAtRisk,
 		"FollowOnMilestoneReady": d.FollowOnMilestoneReady,
 		"GoalMilestoneCompleted": d.GoalMilestoneCompleted,
+		"AgentUpdates":           d.AgentUpdates,
 	}
 	for name, p := range cases {
 		if !p.Enabled {
@@ -133,6 +134,8 @@ func TestDefaultFAndAPrefs_AllEnabled(t *testing.T) {
 		"MilestoneCompleted":    d.MilestoneCompleted,
 		"GoalCompleted":         d.GoalCompleted,
 		"TimelineUpdated":       d.TimelineUpdated,
+		"Nudges":                d.Nudges,
+		"Messages":              d.Messages,
 	}
 	for name, p := range cases {
 		if !p.Enabled {

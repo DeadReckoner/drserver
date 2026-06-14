@@ -1159,6 +1159,12 @@ type MyGoalsPrefs struct {
 	MilestoneAtRisk        NotificationTypePref `json:"milestone_at_risk"`
 	FollowOnMilestoneReady NotificationTypePref `json:"follow_on_milestone_ready"`
 	GoalMilestoneCompleted NotificationTypePref `json:"goal_milestone_completed"`
+
+	// AgentUpdates covers all AI-generation outcome pushes (roadmap and
+	// next-milestone, success and failure). Users think of these as one
+	// thing — "tell me when my generation finishes" — so the four distinct
+	// notification-type strings all resolve to this single toggle in Lookup.
+	AgentUpdates NotificationTypePref `json:"agent_updates"`
 }
 
 // Scan implements sql.Scanner so GORM can read JSONB into a typed struct.
@@ -1171,7 +1177,48 @@ func (p *MyGoalsPrefs) Scan(value any) error {
 	if !ok {
 		return fmt.Errorf("MyGoalsPrefs.Scan: unsupported type %T", value)
 	}
-	return json.Unmarshal(b, p)
+	if err := json.Unmarshal(b, p); err != nil {
+		return err
+	}
+	p.fillMissing()
+	return nil
+}
+
+// fillMissing backfills any pref key absent from the stored JSONB with its
+// system default. A real stored pref always has Delivery set ("immediate" or
+// "digest"), so an empty Delivery reliably marks a key that didn't exist when
+// the row was written — which is exactly what happens to existing users when a
+// new notification type is added. This makes adding a type a code-only change;
+// the SQL backfill migration is belt-and-suspenders for fresh SQL inserts.
+func (p *MyGoalsPrefs) fillMissing() {
+	d := DefaultMyGoalsPrefs()
+	if p.DailyTaskReminder.Delivery == "" {
+		p.DailyTaskReminder = d.DailyTaskReminder
+	}
+	if p.TaskDueReminder.Delivery == "" {
+		p.TaskDueReminder = d.TaskDueReminder
+	}
+	if p.MissedTask.Delivery == "" {
+		p.MissedTask = d.MissedTask
+	}
+	if p.FallingBehind.Delivery == "" {
+		p.FallingBehind = d.FallingBehind
+	}
+	if p.MilestoneDue.Delivery == "" {
+		p.MilestoneDue = d.MilestoneDue
+	}
+	if p.MilestoneAtRisk.Delivery == "" {
+		p.MilestoneAtRisk = d.MilestoneAtRisk
+	}
+	if p.FollowOnMilestoneReady.Delivery == "" {
+		p.FollowOnMilestoneReady = d.FollowOnMilestoneReady
+	}
+	if p.GoalMilestoneCompleted.Delivery == "" {
+		p.GoalMilestoneCompleted = d.GoalMilestoneCompleted
+	}
+	if p.AgentUpdates.Delivery == "" {
+		p.AgentUpdates = d.AgentUpdates
+	}
 }
 
 // Value implements driver.Valuer so GORM can write the typed struct to JSONB.
@@ -1198,6 +1245,10 @@ func (p MyGoalsPrefs) Lookup(notificationType string) (NotificationTypePref, boo
 		return p.FollowOnMilestoneReady, true
 	case "goal_milestone_completed":
 		return p.GoalMilestoneCompleted, true
+	// All four agent-generation outcomes share the single agent_updates toggle.
+	case "agent_updates", "roadmap_complete", "roadmap_failed",
+		"next_milestone_complete", "next_milestone_failed":
+		return p.AgentUpdates, true
 	}
 	return NotificationTypePref{}, false
 }
@@ -1214,6 +1265,13 @@ type FriendsAndAccountabilityPrefs struct {
 	MilestoneCompleted    NotificationTypePref `json:"milestone_completed"`
 	GoalCompleted         NotificationTypePref `json:"goal_completed"`
 	TimelineUpdated       NotificationTypePref `json:"timeline_updated"`
+
+	// Nudges covers both roadmap and habit nudges from an accountability partner.
+	Nudges NotificationTypePref `json:"nudges"`
+	// Messages covers new-message pushes. Conversational, so Dispatch treats
+	// this type specially: exempt from the frequency cap and dropped (not
+	// deferred) during quiet hours. See notifications.capExempt/quietHoursDrop.
+	Messages NotificationTypePref `json:"messages"`
 }
 
 func (p *FriendsAndAccountabilityPrefs) Scan(value any) error {
@@ -1225,7 +1283,50 @@ func (p *FriendsAndAccountabilityPrefs) Scan(value any) error {
 	if !ok {
 		return fmt.Errorf("FriendsAndAccountabilityPrefs.Scan: unsupported type %T", value)
 	}
-	return json.Unmarshal(b, p)
+	if err := json.Unmarshal(b, p); err != nil {
+		return err
+	}
+	p.fillMissing()
+	return nil
+}
+
+// fillMissing backfills absent pref keys with their system defaults. See
+// MyGoalsPrefs.fillMissing for the rationale (empty Delivery == missing key).
+func (p *FriendsAndAccountabilityPrefs) fillMissing() {
+	d := DefaultFAndAPrefs()
+	if p.FriendRequest.Delivery == "" {
+		p.FriendRequest = d.FriendRequest
+	}
+	if p.AnchorRequest.Delivery == "" {
+		p.AnchorRequest = d.AnchorRequest
+	}
+	if p.AnchorAcceptedRemoved.Delivery == "" {
+		p.AnchorAcceptedRemoved = d.AnchorAcceptedRemoved
+	}
+	if p.MissedProgress.Delivery == "" {
+		p.MissedProgress = d.MissedProgress
+	}
+	if p.FallingBehind.Delivery == "" {
+		p.FallingBehind = d.FallingBehind
+	}
+	if p.MilestoneAtRisk.Delivery == "" {
+		p.MilestoneAtRisk = d.MilestoneAtRisk
+	}
+	if p.MilestoneCompleted.Delivery == "" {
+		p.MilestoneCompleted = d.MilestoneCompleted
+	}
+	if p.GoalCompleted.Delivery == "" {
+		p.GoalCompleted = d.GoalCompleted
+	}
+	if p.TimelineUpdated.Delivery == "" {
+		p.TimelineUpdated = d.TimelineUpdated
+	}
+	if p.Nudges.Delivery == "" {
+		p.Nudges = d.Nudges
+	}
+	if p.Messages.Delivery == "" {
+		p.Messages = d.Messages
+	}
 }
 
 func (p FriendsAndAccountabilityPrefs) Value() (driver.Value, error) {
@@ -1255,6 +1356,17 @@ func (p FriendsAndAccountabilityPrefs) Lookup(notificationType string) (Notifica
 		return p.GoalCompleted, true
 	case "timeline_updated":
 		return p.TimelineUpdated, true
+	case "nudges", "roadmap_nudge", "habit_nudge":
+		return p.Nudges, true
+	case "messages", "message_new":
+		return p.Messages, true
+	// Shared toggles: request follow-ups ride the original request's pref.
+	case "friend_accepted", "friend_rejected":
+		return p.FriendRequest, true
+	case "anchor_rejected":
+		return p.AnchorAcceptedRemoved, true
+	case "habit_anchor_request":
+		return p.AnchorRequest, true
 	}
 	return NotificationTypePref{}, false
 }
@@ -1273,6 +1385,7 @@ func DefaultMyGoalsPrefs() MyGoalsPrefs {
 		MilestoneAtRisk:        immediate, // major status change
 		FollowOnMilestoneReady: immediate,
 		GoalMilestoneCompleted: immediate,
+		AgentUpdates:           immediate, // generation finished — wants to know now
 	}
 }
 
@@ -1291,6 +1404,8 @@ func DefaultFAndAPrefs() FriendsAndAccountabilityPrefs {
 		MilestoneCompleted:    digest,
 		GoalCompleted:         immediate,
 		TimelineUpdated:       digest,
+		Nudges:                immediate, // a partner reached out — time-sensitive
+		Messages:              immediate, // conversational; cap-exempt in Dispatch
 	}
 }
 

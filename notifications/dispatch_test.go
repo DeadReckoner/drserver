@@ -641,5 +641,72 @@ func TestDispatch_FrequencyCapNilCounterDisablesCap(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// message_new policy: cap-exempt + quiet-hours-drop
+// =============================================================================
+
+func TestDispatch_MessageNewExemptFromFrequencyCap(t *testing.T) {
+	// An active chat can legitimately blow past the cap. message_new must
+	// bypass it entirely — and must not even consult the counter.
+	f := &fake{
+		settings:       baseSettingsForDispatch(),
+		recordInserted: true,
+		now:            dispatchTestNow,
+		pushCount:      maxPushesPerWindow + 50, // wildly over the cap
+	}
+	d := f.dispatcher()
+
+	decision := d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryFAndA,
+		NotificationType: "message_new",
+		DedupKey:         "msg-99",
+		FriendID:         "friend-2",
+		Title:            "Pat",
+		Body:             "hey!",
+	})
+
+	if !decision.Send || len(f.pushes) != 1 {
+		t.Errorf("Send=%v pushes=%d, want true/1 (message_new is cap-exempt)", decision.Send, len(f.pushes))
+	}
+	if f.countCalls != 0 {
+		t.Errorf("countCalls = %d, want 0 (cap-exempt types must not consult the counter)", f.countCalls)
+	}
+}
+
+func TestDispatch_MessageNewDroppedInQuietHoursNotDeferred(t *testing.T) {
+	// Messages are stale by morning, so quiet-hours messages drop rather than
+	// pile up in the pending queue. Contrast TestDispatch_QuietHoursSnooze...
+	// where friend_request DOES defer.
+	s := baseSettingsForDispatch()
+	s.QuietHoursEnabled = true
+	f := &fake{
+		settings: s,
+		tz:       "UTC",
+		now:      time.Date(2026, 5, 18, 23, 0, 0, 0, time.UTC), // inside 22:00–08:00
+	}
+	d := f.dispatcher()
+
+	decision := d.Dispatch(DispatchOptions{
+		UserID:           "user-1",
+		Category:         CategoryFAndA,
+		NotificationType: "message_new",
+		DedupKey:         "msg-99",
+		FriendID:         "friend-2",
+		Title:            "Pat",
+		Body:             "hey!",
+	})
+
+	if decision.Reason != ReasonQuietHours {
+		t.Errorf("reason = %q, want %q", decision.Reason, ReasonQuietHours)
+	}
+	if len(f.pushes) != 0 {
+		t.Errorf("push fired during quiet hours: %+v", f.pushes)
+	}
+	if f.queueCalls != 0 {
+		t.Errorf("queueCalls = %d, want 0 (message_new drops in quiet hours, never defers)", f.queueCalls)
+	}
+}
+
 // Helper to avoid colliding with the strPtr in resolver_test.go.
 func strPtrDispatch(s string) *string { return &s }

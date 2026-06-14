@@ -293,16 +293,21 @@ func sendFriendStatusNotification(friendship types.Friendship, status string) {
 		return // Unknown status
 	}
 
-	utils.SendPushNotification(
-		friendship.RequesterID,
-		notificationType,
-		title,
-		body,
-		map[string]any{
+	// Both accepted/rejected ride the friend_request toggle (mapped in
+	// FAndAPrefs.Lookup). FriendID is the addressee so a per-friend mute applies.
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           friendship.RequesterID,
+		Category:         notifications.CategoryFAndA,
+		NotificationType: notificationType,
+		DedupKey:         friendship.ID + ":" + status,
+		FriendID:         friendship.AddresseeID,
+		Title:            title,
+		Body:             body,
+		Data: map[string]any{
 			"friendship_id": friendship.ID,
 			"addressee_id":  friendship.AddresseeID,
 		},
-	)
+	})
 }
 
 // cleanupFriendRequestNotification removes the original friend_request notification

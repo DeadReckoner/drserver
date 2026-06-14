@@ -6,6 +6,7 @@ import (
 	"dr/server/agent/anthropic"
 	"dr/server/database"
 	"dr/server/log"
+	"dr/server/notifications"
 	"dr/server/types"
 	"dr/server/websocket"
 	"fmt"
@@ -299,11 +300,17 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 	})
 
 	log.Info(ctx, "Sending roadmap completion push notification", fmt.Sprintf("UserID: %s, RoadmapID: %s", userID, roadmapID))
-	utils.SendPushNotification(userID, "roadmap_complete",
-		"Your roadmap is ready for review!", fmt.Sprintf("Your %s roadmap has been generated successfully.", req.GoalName),
-		map[string]any{
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           userID,
+		Category:         notifications.CategoryMyGoals,
+		NotificationType: "roadmap_complete",
+		DedupKey:         jobID + ":complete",
+		Title:            "Your roadmap is ready for review!",
+		Body:             fmt.Sprintf("Your %s roadmap has been generated successfully.", req.GoalName),
+		Data: map[string]any{
 			"roadmap_id": roadmapID,
-		})
+		},
+	})
 	log.Info(ctx, "Push notification sent successfully", fmt.Sprintf("UserID: %s, Type: roadmap_complete", userID))
 }
 
@@ -357,13 +364,18 @@ func handleGenerationError(jobID, roadmapID, userID string, err error) {
 	})
 
 	log.Info(ctx, "Sending roadmap failure push notification", fmt.Sprintf("UserID: %s, RoadmapID: %s", userID, roadmapID))
-	utils.SendPushNotification(userID, "roadmap_failed",
-		"Roadmap Generation Failed",
-		"We encountered an issue. Please try again.",
-		map[string]any{
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           userID,
+		Category:         notifications.CategoryMyGoals,
+		NotificationType: "roadmap_failed",
+		DedupKey:         jobID + ":failed",
+		Title:            "Roadmap Generation Failed",
+		Body:             "We encountered an issue. Please try again.",
+		Data: map[string]any{
 			"roadmap_id": roadmapID,
 			"error":      err.Error(),
-		})
+		},
+	})
 	log.Info(ctx, "Push notification sent successfully", fmt.Sprintf("UserID: %s, Type: roadmap_failed", userID))
 
 }
@@ -581,13 +593,18 @@ func processNextMilestoneGeneration(ctx context.Context, jobID, milestoneID, use
 
 	log.Info(ctx, "Sending next milestone completion push notification",
 		fmt.Sprintf("UserID: %s, MilestoneID: %s", userID, milestoneID))
-	utils.SendPushNotification(userID, "next_milestone_complete",
-		"Your next milestone is ready!",
-		fmt.Sprintf("%s is ready to start.", milestone.SubGoal),
-		map[string]any{
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           userID,
+		Category:         notifications.CategoryMyGoals,
+		NotificationType: "next_milestone_complete",
+		DedupKey:         jobID + ":complete",
+		Title:            "Your next milestone is ready!",
+		Body:             fmt.Sprintf("%s is ready to start.", milestone.SubGoal),
+		Data: map[string]any{
 			"milestone_id": milestoneID,
 			"roadmap_id":   milestone.RoadmapID,
-		})
+		},
+	})
 }
 
 // handleNextMilestoneError marks the job failed and notifies the user, WITHOUT
@@ -615,13 +632,18 @@ func handleNextMilestoneError(jobID, milestoneID, userID string, err error) {
 		Data:    map[string]string{"error": err.Error()},
 	})
 
-	utils.SendPushNotification(userID, "next_milestone_failed",
-		"Next Milestone Generation Failed",
-		"We encountered an issue. Please try again.",
-		map[string]any{
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           userID,
+		Category:         notifications.CategoryMyGoals,
+		NotificationType: "next_milestone_failed",
+		DedupKey:         jobID + ":failed",
+		Title:            "Next Milestone Generation Failed",
+		Body:             "We encountered an issue. Please try again.",
+		Data: map[string]any{
 			"milestone_id": milestoneID,
 			"error":        err.Error(),
-		})
+		},
+	})
 }
 
 func (h *AgentHandler) StartAISession(c *gin.Context) {

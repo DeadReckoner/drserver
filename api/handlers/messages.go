@@ -4,6 +4,7 @@ import (
 	"dr/server/api/utils"
 	"dr/server/database"
 	"dr/server/log"
+	"dr/server/notifications"
 	"dr/server/types"
 	"dr/server/websocket"
 	"encoding/json"
@@ -365,16 +366,22 @@ func sendMessageNotifications(threadID, senderID, messageID, content string) {
 			displayContent = content[:100] + "..."
 		}
 
-		utils.SendPushNotification(
-			participant.UserID,
-			"message_new",
-			senderName,
-			displayContent,
-			map[string]any{
+		// FriendID is the sender so muting a friend mutes their messages.
+		// message_new is cap-exempt and dropped (not deferred) in quiet hours
+		// — see notifications.capExempt/quietHoursDrop.
+		notifications.Dispatch(notifications.DispatchOptions{
+			UserID:           participant.UserID,
+			Category:         notifications.CategoryFAndA,
+			NotificationType: "message_new",
+			DedupKey:         messageID,
+			FriendID:         senderID,
+			Title:            senderName,
+			Body:             displayContent,
+			Data: map[string]any{
 				"thread_id":  threadID,
 				"message_id": messageID,
 				"sender_id":  senderID,
 			},
-		)
+		})
 	}
 }

@@ -518,12 +518,10 @@ func sendAnchorRequestNotification(anchorRequest types.AnchorRequest) {
 // sendAnchorStatusNotification sends a notification when an anchor request is
 // accepted or rejected.
 //
-// Acceptance routes through notifications.Dispatch as the spec'd
-// "anchor_accepted_removed" type. Rejection is not in the F&A pref taxonomy
-// (the spec doesn't list a notification type for it), so it stays on the
-// direct path until product decides how to gate it. TODO(notifications):
-// either add an "anchor_request_declined" type to FAndAPrefs or fold this
-// into anchor_accepted_removed with a status field.
+// Both acceptance and rejection route through notifications.Dispatch. Rejection
+// rides the "anchor_accepted_removed" toggle (FAndAPrefs.Lookup maps the
+// "anchor_rejected" type string to it) so the recipient's F&A settings, mutes,
+// and quiet hours all apply.
 func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status string) {
 	ctx := context.Background()
 	anchor, err := database.GetUserByID(anchorRequest.AnchorID)
@@ -545,12 +543,13 @@ func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status stri
 		data["habit_id"] = *anchorRequest.HabitID
 	}
 
+	roadmapID := ""
+	if anchorRequest.RoadmapID != nil {
+		roadmapID = *anchorRequest.RoadmapID
+	}
+
 	switch status {
 	case "accepted":
-		roadmapID := ""
-		if anchorRequest.RoadmapID != nil {
-			roadmapID = *anchorRequest.RoadmapID
-		}
 		notifications.Dispatch(notifications.DispatchOptions{
 			UserID:            anchorRequest.RequesterID,
 			Category:          notifications.CategoryFAndA,
@@ -563,15 +562,16 @@ func sendAnchorStatusNotification(anchorRequest types.AnchorRequest, status stri
 		})
 
 	case "rejected":
-		// Not yet modeled in FAndAPrefs — keep the direct path so we don't
-		// silently drop rejections. See the function comment.
-		utils.SendPushNotification(
-			anchorRequest.RequesterID,
-			"anchor_rejected",
-			"Anchor Request Declined",
-			anchorName+" declined your anchor request",
-			data,
-		)
+		notifications.Dispatch(notifications.DispatchOptions{
+			UserID:            anchorRequest.RequesterID,
+			Category:          notifications.CategoryFAndA,
+			NotificationType:  "anchor_rejected",
+			DedupKey:          anchorRequest.RequestID + ":rejected",
+			AnchoredRoadmapID: roadmapID,
+			Title:             "Anchor Request Declined",
+			Body:              anchorName + " declined your anchor request",
+			Data:              data,
+		})
 
 	default:
 		return // Unknown status

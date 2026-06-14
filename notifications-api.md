@@ -84,6 +84,7 @@ type MyGoalsPrefs = {
   milestone_at_risk:         NotificationTypePref;
   follow_on_milestone_ready: NotificationTypePref;
   goal_milestone_completed:  NotificationTypePref;
+  agent_updates:             NotificationTypePref; // AI generation finished (success + failure)
 };
 
 // Per-type prefs for Friends & Accountability notifications.
@@ -97,6 +98,8 @@ type FriendsAndAccountabilityPrefs = {
   milestone_completed:     NotificationTypePref;
   goal_completed:          NotificationTypePref;
   timeline_updated:        NotificationTypePref;
+  nudges:                  NotificationTypePref; // partner nudges (roadmap + habit)
+  messages:                NotificationTypePref; // new chat message
 };
 
 type DigestFrequency = "none" | "daily" | "weekly";
@@ -187,6 +190,7 @@ const defaults: NotificationSettings = {
     milestone_at_risk:         { enabled: true, delivery: "immediate" },
     follow_on_milestone_ready: { enabled: true, delivery: "immediate" },
     goal_milestone_completed:  { enabled: true, delivery: "immediate" },
+    agent_updates:             { enabled: true, delivery: "immediate" },
   },
 
   f_and_a_enabled:      true,
@@ -201,6 +205,8 @@ const defaults: NotificationSettings = {
     milestone_completed:     { enabled: true, delivery: "digest"    },
     goal_completed:          { enabled: true, delivery: "immediate" },
     timeline_updated:        { enabled: true, delivery: "digest"    },
+    nudges:                  { enabled: true, delivery: "immediate" },
+    messages:                { enabled: true, delivery: "immediate" },
   },
 
   created_at: "...",
@@ -457,34 +463,50 @@ about loss — nothing is lost.
 
 ### What gets gated today
 
-Three notification types currently route through the settings system:
-- `friend_request` (when someone sends you a friend request)
-- `anchor_request` (when someone requests you to be their anchor)
-- `anchor_accepted_removed` (when someone accepts your anchor request)
-
-For these, the recipient's settings actually matter:
-- If `f_and_a_enabled = false`, no push fires.
-- If `apply_to_all_friends = false` AND an override exists with that
-  notification type disabled, no push fires.
-- If `apply_to_all_friends = false` AND `mute_until > now` for the target,
+**Every** server-originated push now routes through the settings system. For
+each, the recipient's settings apply:
+- If the type's pref is disabled (or `f_and_a_enabled = false` for F&A types),
   no push fires.
-- If `quiet_hours_enabled = true` AND the current time is in the window,
-  the push is **dropped** in v1 (Step 9 will defer it to end of quiet hours).
-- Duplicate triggers within the same delivery key no longer double-fire —
-  the server tracks `(user, type, dedup_key)` to enforce idempotency.
+- If `apply_to_all_friends = false` AND an override disables/mutes the target,
+  no push fires.
+- If `quiet_hours_enabled = true` AND the current time is in the window, the
+  push is **deferred** to the end of quiet hours (except `message_new` — see
+  below).
+- Duplicate triggers within the same delivery key don't double-fire — the
+  server tracks `(user, type, dedup_key)` for idempotency.
+- A per-user frequency cap (max 10 immediate pushes / rolling 24h) backstops
+  pathological bursts. `message_new` is exempt.
 
-### What's still firing unconditionally
+Which pref toggle controls each notification type:
 
-These pushes don't go through the new settings system yet (out of scope for
-the Step 5 cut):
-- `friend_accepted`, `friend_rejected`, `anchor_rejected` — not modeled in
-  `f_and_a_prefs` yet
-- Nudges (anchor nudges roadmap owner)
-- New message notifications
-- AI job completion (`roadmap_complete`, `roadmap_failed`, `next_milestone_complete`, `next_milestone_failed`)
+| Notification type(s) | Category | Controlled by toggle |
+|---|---|---|
+| `friend_request` | F&A | `friend_request` |
+| `friend_accepted`, `friend_rejected` | F&A | `friend_request` |
+| `anchor_request`, `habit_anchor_request` | F&A | `anchor_request` |
+| `anchor_accepted_removed`, `anchor_rejected` | F&A | `anchor_accepted_removed` |
+| `roadmap_nudge`, `habit_nudge` | F&A | `nudges` |
+| `message_new` | F&A | `messages` |
+| `missed_progress`, `falling_behind`, `milestone_at_risk`, `milestone_completed`, `goal_completed`, `timeline_updated` | F&A | same-named key |
+| `roadmap_complete`, `roadmap_failed`, `next_milestone_complete`, `next_milestone_failed` | My Goals | `agent_updates` |
+| `missed_task`, `falling_behind`, `milestone_due`, `milestone_at_risk`, daily/due reminders, etc. | My Goals | same-named key |
 
-These will be wired through `notifications.Dispatch` in a follow-up PR once
-their notification types are added to the pref taxonomy.
+Note several types **share** one toggle (e.g. accept/decline ride the original
+request's toggle). There is intentionally no separate switch for them in the
+settings UI — surface one control per toggle key, not one per type string.
+
+#### `messages` is special
+
+New-message pushes are conversational, so Dispatch treats `message_new`
+differently from every other type:
+- **Cap-exempt:** an active chat won't burn the 10/24h frequency cap (and
+  therefore can't starve other notification types).
+- **Quiet-hours drop, not defer:** messages that arrive during quiet hours are
+  dropped rather than queued — a stack of stale chat pushes at 8am is noise,
+  and the messages are already in the thread.
+
+Muting a specific friend (`apply_to_all_friends = false` + per-friend mute)
+still mutes their messages, since the sender is the override target.
 
 ### Push tokens and the existing badge endpoint
 
@@ -608,8 +630,9 @@ be designed but not implemented until the corresponding backend step lands:
 | Quiet-hours deferred delivery | Pushes during quiet hours currently drop | UI can fully support quiet hours; behavior improves in Step 9 |
 | Digest delivery (daily/weekly) | Pref exists; composer lands in Step 10 | Show toggle as functional now; effectively a no-op until Step 10 |
 | Email channel | Toggle exists; provider not integrated | Hide the email row in v1 OR show as "coming soon" |
-| Frequency caps | Not exposed in API yet | Server-side default caps will apply once Step 7+ jobs fire |
-| `friend_accepted` / `_rejected`, `anchor_rejected` | Not in `f_and_a_prefs` yet | Don't show toggles for these specifically — they fire unconditionally |
+| Frequency caps | Live server-side (10 immediate pushes / 24h, not user-tunable) | No UI needed; `message_new` is exempt |
+| `friend_accepted` / `_rejected`, `anchor_rejected` | Now gated — ride the originating request's toggle (see "What gets gated today") | Don't add separate toggles; they follow `friend_request` / `anchor_accepted_removed` |
+| Nudges, messages, agent updates | Live — `nudges`, `messages`, `agent_updates` toggles | Surface these three toggles in settings |
 
 ---
 
