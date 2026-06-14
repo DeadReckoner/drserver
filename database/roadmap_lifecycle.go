@@ -670,8 +670,8 @@ func GetRoadmapFullByID(roadmapID string) (types.Roadmap, error) {
 		return types.Roadmap{}, result.Error
 	}
 
-	// Compute all statuses
-	roadmap.ComputeAllStatuses()
+	// Compute all statuses, judging overdue against the owner's local day.
+	roadmap.ComputeAllStatusesInLocation(resolveUserLocation(roadmap.UserID))
 
 	return roadmap, nil
 }

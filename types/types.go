@@ -219,7 +219,24 @@ type Roadmap struct {
 //   - Milestones: Derived from child tasks. "completed" if all tasks done, "overdue" if any
 //     task is overdue, "in_progress" if any task is in_progress, otherwise "not_started".
 //   - Phases: Derived from child milestones using the same logic.
+//
+// ComputeAllStatuses judges "overdue" against the server's UTC calendar day.
+// Prefer ComputeAllStatusesInLocation with the owning user's timezone so the
+// overdue boundary matches the user's local day (and the notification jobs,
+// which already compare against the user's timezone). Retained for callers
+// that don't have a timezone in hand.
 func (r *Roadmap) ComputeAllStatuses() {
+	r.ComputeAllStatusesInLocation(time.UTC)
+}
+
+// ComputeAllStatusesInLocation is ComputeAllStatuses with an explicit calendar
+// location for the overdue boundary. A task is overdue when its date is before
+// "today" as observed in loc, so the flip happens at the user's local midnight
+// rather than the server's. A nil loc is treated as UTC.
+func (r *Roadmap) ComputeAllStatusesInLocation(loc *time.Location) {
+	if loc == nil {
+		loc = time.UTC
+	}
 	roadmapStarted := r.StartDate != nil
 	foundCurrentTask := false
 	foundCurrentMilestone := false
@@ -240,7 +257,7 @@ func (r *Roadmap) ComputeAllStatuses() {
 				task.Status = string(StatusCompleted)
 			case !roadmapStarted:
 				task.Status = string(StatusNotStarted)
-			case isDateBeforeToday(task.Date):
+			case isDateBeforeTodayInLocation(task.Date, loc):
 				// Past due and incomplete → overdue, regardless of whether
 				// this is the current task. The first incomplete task still
 				// counts as "current" (consumes the in_progress slot) even
@@ -493,16 +510,39 @@ type Task struct {
 	Steps []Step `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps,omitempty"`
 }
 
-// isDateBeforeToday checks if the given date is before today (ignoring time component).
-// Returns false if date is nil.
-func isDateBeforeToday(date *time.Time) bool {
+// isDateBeforeTodayInLocation reports whether date's calendar day is before
+// today's calendar day, with "today" observed in loc. The task date is read as
+// its UTC calendar day (matching how dates are stored and how the notification
+// SQL casts them with a UTC session), while "today" is taken in the user's
+// location so the overdue boundary flips at the user's local midnight. Both
+// sides are projected onto UTC midnight purely to compare calendar days.
+// Returns false if date is nil; a nil loc is treated as UTC.
+func isDateBeforeTodayInLocation(date *time.Time, loc *time.Location) bool {
 	if date == nil {
 		return false
 	}
-	now := Now()
+	if loc == nil {
+		loc = time.UTC
+	}
+	now := Now().In(loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	dateOnly := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
+	d := date.UTC()
+	dateOnly := time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.UTC)
 	return dateOnly.Before(today)
+}
+
+// LocationOrUTC parses an IANA timezone name (e.g. "America/Los_Angeles")
+// into a *time.Location, returning UTC when tz is empty or does not parse.
+// Mirrors the notification jobs' COALESCE(NULLIF(timezone,”),'UTC') fallback.
+func LocationOrUTC(tz string) *time.Location {
+	if tz == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
 }
 
 type Step struct {

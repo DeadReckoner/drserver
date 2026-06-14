@@ -266,8 +266,9 @@ func GetRoadmapWithStrategicView(c *gin.Context, roadmapID string) types.Roadmap
 		log.Println("Error fetching roadmap strategic view:", result.Error)
 	}
 
-	// Compute all statuses dynamically based on current date/state
-	roadmap.ComputeAllStatuses()
+	// Compute all statuses dynamically based on current date/state, judging
+	// overdue against the owner's local day.
+	roadmap.ComputeAllStatusesInLocation(resolveUserLocation(roadmap.UserID))
 
 	return roadmap
 }
@@ -313,8 +314,9 @@ func GetRoadmapFull(c *gin.Context, roadmapID string) types.Roadmap {
 		log.Println("Error fetching full roadmap:", result.Error)
 	}
 
-	// Compute all statuses dynamically based on current date/state
-	roadmap.ComputeAllStatuses()
+	// Compute all statuses dynamically based on current date/state, judging
+	// overdue against the owner's local day.
+	roadmap.ComputeAllStatusesInLocation(resolveUserLocation(roadmap.UserID))
 
 	return roadmap
 }
@@ -344,8 +346,9 @@ func GetRoadmap(c *gin.Context, roadmapID string) types.Roadmap {
 		log.Println("Error fetching roadmap:", result.Error)
 	}
 
-	// Compute all statuses dynamically based on current date/state
-	roadmap.ComputeAllStatuses()
+	// Compute all statuses dynamically based on current date/state, judging
+	// overdue against the owner's local day.
+	roadmap.ComputeAllStatusesInLocation(resolveUserLocation(roadmap.UserID))
 
 	return roadmap
 }
