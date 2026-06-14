@@ -211,34 +211,47 @@ type Roadmap struct {
 // This is the single source of truth for status computation.
 //
 // Logic:
-//   - Tasks: Only ONE task across the entire roadmap is "in_progress" - the first incomplete
-//     task in the first incomplete milestone. Completed tasks are "completed". The current
-//     task is "overdue" if its date is before today. All other incomplete tasks are "not_started".
-//   - Milestones: Derived from child tasks. "completed" if all tasks done, "in_progress" if
-//     any task is in_progress, "overdue" if any task is overdue, otherwise "not_started".
+//   - Tasks: Completed tasks are "completed". Any incomplete task whose date is before today
+//     is "overdue" (overdue is independent of position, so a user behind on several tasks
+//     sees all of them flagged). At most ONE task across the entire roadmap is "in_progress":
+//     the first incomplete task in the first incomplete milestone, and only when it is not
+//     itself overdue. All remaining incomplete tasks are "not_started".
+//   - Milestones: Derived from child tasks. "completed" if all tasks done, "overdue" if any
+//     task is overdue, "in_progress" if any task is in_progress, otherwise "not_started".
 //   - Phases: Derived from child milestones using the same logic.
 func (r *Roadmap) ComputeAllStatuses() {
 	roadmapStarted := r.StartDate != nil
 	foundCurrentTask := false
 	foundCurrentMilestone := false
 
-	// Helper to compute task statuses for a milestone
+	// Helper to compute task statuses for a milestone.
+	//
+	// "Overdue" is an independent property: ANY incomplete task whose date is
+	// before today is overdue, no matter where it sits in the sequence. The
+	// "current task" is the first incomplete task; it shows in_progress only
+	// when it is not itself overdue. This keeps the one-current-task model
+	// (at most one in_progress across the roadmap) while still surfacing every
+	// past-due task as overdue.
 	computeMilestoneTaskStatuses := func(m *Milestone) {
 		for i := range m.Tasks {
 			task := &m.Tasks[i]
-			if task.Completed {
+			switch {
+			case task.Completed:
 				task.Status = string(StatusCompleted)
-			} else if !roadmapStarted {
+			case !roadmapStarted:
 				task.Status = string(StatusNotStarted)
-			} else if !foundCurrentTask {
-				// This is the current task
+			case isDateBeforeToday(task.Date):
+				// Past due and incomplete → overdue, regardless of whether
+				// this is the current task. The first incomplete task still
+				// counts as "current" (consumes the in_progress slot) even
+				// though it's displayed as overdue.
+				task.Status = string(StatusOverdue)
 				foundCurrentTask = true
-				if isDateBeforeToday(task.Date) {
-					task.Status = string(StatusOverdue)
-				} else {
-					task.Status = string(StatusInProgress)
-				}
-			} else {
+			case !foundCurrentTask:
+				// First incomplete, on-time task → the current task.
+				foundCurrentTask = true
+				task.Status = string(StatusInProgress)
+			default:
 				task.Status = string(StatusNotStarted)
 			}
 		}
