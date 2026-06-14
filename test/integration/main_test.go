@@ -7,9 +7,11 @@
 //
 // Run locally with Docker:
 //
-//	go test -tags integration ./test/integration/...
+//	make integration_test
+//	# or: go test -tags integration ./test/integration/...
 //
-// CI runs the same command in the `integration` job (see .github/workflows/test.yml).
+// CI runs `make integration_test` in the `integration` job (see
+// .github/workflows/test.yml).
 //
 // SCHEMA STRATEGY
 // The very first app migration is a full Supabase pg_dump (pg_graphql,
