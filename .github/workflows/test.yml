@@ -27,5 +27,21 @@ jobs:
       - name: Check for tidy/fmt drift
         run: git diff --exit-code
 
-  # A Docker-enabled `integration` job (testcontainers Postgres, build tag
-  # `integration`) will be added when the integration suite lands.
+  integration:
+    name: Integration tests (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # GitHub-hosted ubuntu runners ship a running Docker daemon, so
+      # testcontainers can start the throwaway Postgres on its own. The
+      # `integration` build tag gates these tests; the unit job never
+      # compiles them.
+      - name: Run integration suite
+        run: go test -tags integration -count=1 ./test/integration/...
