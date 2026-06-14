@@ -122,28 +122,127 @@ func TestCompute_StartedTask_NilDate_InProgressNotOverdue(t *testing.T) {
 
 // --- 3. The "only one in_progress task per roadmap" invariant ---------------
 
-func TestCompute_OnlyFirstIncompleteTaskIsInProgress(t *testing.T) {
+func TestCompute_AllPastDueTasksAreOverdue(t *testing.T) {
+	// Overdue is an independent property: every incomplete past-due task is
+	// overdue, not just the first/current one. (Regression for the bug where
+	// only the single current task could ever show overdue, so users behind
+	// on several tasks saw at most one flagged.)
 	freeze(t)
 
 	r := testutil.NewRoadmap("u1",
 		testutil.WithStartDate(*dayOffset(-1)),
 		testutil.WithMilestones(testutil.NewMilestone(testutil.WithTasks(
-			testutil.NewTask(testutil.WithTaskDate(*dayOffset(-3))), // first incomplete
-			testutil.NewTask(testutil.WithTaskDate(*dayOffset(-2))), // also overdue date, but should NOT be flagged
-			testutil.NewTask(testutil.WithTaskDate(*dayOffset(2))),
+			testutil.NewTask(testutil.WithTaskDate(*dayOffset(-3))), // current + overdue
+			testutil.NewTask(testutil.WithTaskDate(*dayOffset(-2))), // also past due → overdue
+			testutil.NewTask(testutil.WithTaskDate(*dayOffset(2))),  // future → not_started
 		))),
 	)
 	r.ComputeAllStatuses()
 
 	ts := r.Milestones[0].Tasks
 	if ts[0].Status != string(types.StatusOverdue) {
-		t.Errorf("task[0] (first incomplete + past date): got %q, want %q", ts[0].Status, types.StatusOverdue)
+		t.Errorf("task[0] (current + past date): got %q, want %q", ts[0].Status, types.StatusOverdue)
 	}
-	if ts[1].Status != string(types.StatusNotStarted) {
-		t.Errorf("task[1] (later incomplete): got %q, want %q (even though its date is past, only the first incomplete task gets the current-task treatment)", ts[1].Status, types.StatusNotStarted)
+	if ts[1].Status != string(types.StatusOverdue) {
+		t.Errorf("task[1] (later, still past due): got %q, want %q", ts[1].Status, types.StatusOverdue)
 	}
 	if ts[2].Status != string(types.StatusNotStarted) {
-		t.Errorf("task[2]: got %q, want %q", ts[2].Status, types.StatusNotStarted)
+		t.Errorf("task[2] (future): got %q, want %q", ts[2].Status, types.StatusNotStarted)
+	}
+}
+
+func TestCompute_NoInProgressWhileBehind(t *testing.T) {
+	// The one-current-task model: when the current (first incomplete) task is
+	// itself overdue, no separate future task is promoted to in_progress.
+	// At most one in_progress across the roadmap, and it never coexists with
+	// the user being behind.
+	freeze(t)
+
+	r := testutil.NewRoadmap("u1",
+		testutil.WithStartDate(*dayOffset(-5)),
+		testutil.WithMilestones(testutil.NewMilestone(testutil.WithTasks(
+			testutil.NewTask(testutil.WithTaskDate(*dayOffset(-2))), // overdue (current)
+			testutil.NewTask(testutil.WithTaskDate(*dayOffset(1))),  // future
+			testutil.NewTask(testutil.WithTaskDate(*dayOffset(3))),  // future
+		))),
+	)
+	r.ComputeAllStatuses()
+
+	ts := r.Milestones[0].Tasks
+	if ts[0].Status != string(types.StatusOverdue) {
+		t.Errorf("task[0]: got %q, want %q", ts[0].Status, types.StatusOverdue)
+	}
+	for i := 1; i < len(ts); i++ {
+		if ts[i].Status == string(types.StatusInProgress) {
+			t.Errorf("task[%d]: got in_progress, want not_started (no in_progress while a current overdue task exists)", i)
+		}
+		if ts[i].Status != string(types.StatusNotStarted) {
+			t.Errorf("task[%d]: got %q, want %q", i, ts[i].Status, types.StatusNotStarted)
+		}
+	}
+}
+
+func TestCompute_OnTimeCurrentTaskIsInProgress_LaterTasksNotStarted(t *testing.T) {
+	// When the current task is on time, it is in_progress and later tasks are
+	// not_started — the original happy path, unchanged by the overdue fix.
+	freeze(t)
+
+	r := testutil.NewRoadmap("u1",
+		testutil.WithStartDate(*dayOffset(-1)),
+		testutil.WithMilestones(testutil.NewMilestone(testutil.WithTasks(
+			testutil.NewTask(testutil.WithTaskDate(*dayOffset(1))), // current, on time
+			testutil.NewTask(testutil.WithTaskDate(*dayOffset(2))),
+			testutil.NewTask(testutil.WithTaskDate(*dayOffset(3))),
+		))),
+	)
+	r.ComputeAllStatuses()
+
+	ts := r.Milestones[0].Tasks
+	if ts[0].Status != string(types.StatusInProgress) {
+		t.Errorf("task[0] (on-time current): got %q, want %q", ts[0].Status, types.StatusInProgress)
+	}
+	for i := 1; i < len(ts); i++ {
+		if ts[i].Status != string(types.StatusNotStarted) {
+			t.Errorf("task[%d]: got %q, want %q", i, ts[i].Status, types.StatusNotStarted)
+		}
+	}
+}
+
+func TestCompute_OverdueSpansMilestones(t *testing.T) {
+	// Past-due incomplete tasks in a LATER milestone are also overdue — the
+	// fix is not limited to the current milestone. Mirrors the real-world
+	// case of falling behind across milestone boundaries.
+	freeze(t)
+
+	r := testutil.NewRoadmap("u1",
+		testutil.WithStartDate(*dayOffset(-10)),
+		testutil.WithMilestones(
+			testutil.NewMilestone(testutil.WithTasks(
+				testutil.NewTask(testutil.WithTaskDate(*dayOffset(-5))), // overdue (current)
+			)),
+			testutil.NewMilestone(testutil.WithTasks(
+				testutil.NewTask(testutil.WithTaskDate(*dayOffset(-3))), // overdue, later milestone
+				testutil.NewTask(testutil.WithTaskDate(*dayOffset(4))),  // future
+			)),
+		),
+	)
+	r.ComputeAllStatuses()
+
+	if got := r.Milestones[0].Tasks[0].Status; got != string(types.StatusOverdue) {
+		t.Errorf("m0.t0: got %q, want %q", got, types.StatusOverdue)
+	}
+	if got := r.Milestones[1].Tasks[0].Status; got != string(types.StatusOverdue) {
+		t.Errorf("m1.t0 (past due in later milestone): got %q, want %q", got, types.StatusOverdue)
+	}
+	if got := r.Milestones[1].Tasks[1].Status; got != string(types.StatusNotStarted) {
+		t.Errorf("m1.t1 (future): got %q, want %q", got, types.StatusNotStarted)
+	}
+	// Both milestones roll up to overdue.
+	if got := r.Milestones[0].Status; got != string(types.StatusOverdue) {
+		t.Errorf("m0 status: got %q, want %q", got, types.StatusOverdue)
+	}
+	if got := r.Milestones[1].Status; got != string(types.StatusOverdue) {
+		t.Errorf("m1 status: got %q, want %q", got, types.StatusOverdue)
 	}
 }
 
