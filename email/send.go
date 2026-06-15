@@ -115,6 +115,69 @@ func (d *Dispatcher) Send(ctx context.Context, userID string, kind EmailKind, va
 	return sendErr
 }
 
+// SendToAddress dispatches to an explicit recipient (e.g. the support inbox)
+// rather than to a looked-up user. Used for reports, which go to support, not
+// to the reporting user. It still:
+//   - dedupes on (attributedUserID, kind, dedupeKey) when dedupeKey != ""
+//   - renders the template
+//   - sends through Resend with retry
+//   - records the outcome in email_log (user_id = attributedUserID for audit)
+//
+// attributedUserID is recorded on the email_log row for traceability (it is the
+// reporter, not the recipient). Callers fire-and-forget; the report row in the
+// database is the durable artifact, so a send failure here is logged, not fatal.
+func (d *Dispatcher) SendToAddress(ctx context.Context, to, attributedUserID string, kind EmailKind, vars Vars, dedupeKey string) error {
+	if to == "" {
+		return errors.New("email: recipient address required")
+	}
+
+	// Dedupe so a client retry / double-submit doesn't double-notify support.
+	if dedupeKey != "" && attributedUserID != "" {
+		alreadySent, err := database.EmailAlreadySent(d.DB, attributedUserID, string(kind), dedupeKey)
+		if err != nil {
+			log.Warn(ctx, "email: dedupe check failed", err.Error())
+		}
+		if alreadySent {
+			d.recordSkip(attributedUserID, to, kind, dedupeKey, "already sent with same dedupe_key")
+			return nil
+		}
+	}
+
+	subject, htmlBody, err := Render(kind, vars)
+	if err != nil {
+		d.recordError(attributedUserID, to, kind, dedupeKey, "render: "+err.Error())
+		return fmt.Errorf("email: render: %w", err)
+	}
+
+	id, sendErr := d.Client.Send(ctx, SendRequest{
+		From:    d.Client.From,
+		To:      []string{to},
+		Subject: subject,
+		HTML:    htmlBody,
+	})
+
+	row := &types.EmailLog{
+		ID:        uuid.NewString(),
+		UserID:    attributedUserID,
+		Kind:      string(kind),
+		ToEmail:   to,
+		DedupeKey: dedupeKey,
+		CreatedAt: time.Now().UTC(),
+	}
+	if sendErr != nil {
+		row.Status = string(StatusError)
+		row.ErrorText = sendErr.Error()
+	} else {
+		row.Status = string(StatusSent)
+		row.ProviderMessageID = id
+	}
+	if logErr := database.InsertEmailLog(d.DB, row); logErr != nil {
+		log.Error(ctx, "email: failed to write email_log", logErr)
+	}
+
+	return sendErr
+}
+
 // recordSkip writes a status=skipped row for visibility.
 func (d *Dispatcher) recordSkip(userID, toEmail string, kind EmailKind, dedupeKey, reason string) {
 	row := &types.EmailLog{

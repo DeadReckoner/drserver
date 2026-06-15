@@ -59,6 +59,12 @@ func CreateFriendRequest(c *gin.Context, addresseeID string) (types.Friendship, 
 		return types.Friendship{}, errors.New("cannot send friend request to yourself")
 	}
 
+	// Block gate: a block in either direction prevents (re-)connecting. Only the
+	// blocker can lift their block and re-invite; the blocked user is refused.
+	if BlockExistsBetween(requesterIDStr, addresseeID) {
+		return types.Friendship{}, errors.New("cannot send friend request to this user")
+	}
+
 	// Check if friendship already exists (in either direction)
 	var existingFriendship types.Friendship
 	result := db.Where(
@@ -248,6 +254,42 @@ func RemoveFriend(c *gin.Context, friendUserID string) error {
 	}
 
 	return nil
+}
+
+// BlockUser blocks blockedUserID on behalf of the current user ("Remove &
+// Block"). It records the block, then tears down any existing friendship and
+// message thread. Blocking does not require an existing friendship, so a
+// missing friendship is not an error. Idempotent.
+func BlockUser(c *gin.Context, blockedUserID string) error {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return errors.New("missing or invalid user_id")
+	}
+	blockerID := userID.(string)
+	if blockerID == blockedUserID {
+		return errors.New("cannot block yourself")
+	}
+
+	if err := CreateBlock(blockerID, blockedUserID); err != nil {
+		return err
+	}
+
+	// End the friendship + messaging. The block is independent of the
+	// friendship, so a missing friendship is fine.
+	if err := RemoveFriend(c, blockedUserID); err != nil && err.Error() != "friendship not found" {
+		return err
+	}
+	return nil
+}
+
+// UnblockUser lifts the current user's block on blockedUserID, allowing them to
+// re-invite that person. Only the blocker's own row is removed.
+func UnblockUser(c *gin.Context, blockedUserID string) error {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return errors.New("missing or invalid user_id")
+	}
+	return RemoveBlock(userID.(string), blockedUserID)
 }
 
 // UpdateFriendshipStatus updates the status of a friend request (accept or reject)

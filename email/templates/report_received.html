@@ -1,0 +1,54 @@
+{{define "subject"}}New {{if eq .ReportType "ai"}}AI content{{else}}user{{end}} report: {{.ReportReason}}{{end}}
+
+{{define "body"}}
+<h1>New report submitted</h1>
+
+<p>
+  A {{if eq .ReportType "ai"}}<strong>AI content</strong>{{else}}<strong>user</strong>{{end}} report was submitted{{if .ReportCreatedAt}} on {{.ReportCreatedAt}}{{end}}.
+</p>
+
+<p>
+  <strong>Report ID:</strong> {{.ReportID}}<br>
+  <strong>Type:</strong> {{.ReportType}}<br>
+  <strong>Reason:</strong> {{.ReportReason}}
+</p>
+
+<p>
+  <strong>Reporter:</strong> {{if .ReporterName}}{{.ReporterName}} {{end}}({{.ReporterID}}){{if .ReporterEmail}}<br><strong>Reporter email:</strong> {{.ReporterEmail}}{{end}}
+</p>
+
+{{if eq .ReportType "user"}}
+<p>
+  <strong>Reported user:</strong> {{if .ReportedUserName}}{{.ReportedUserName}} {{end}}({{.ReportedUserID}})
+  {{if .ReportThreadID}}<br><strong>Thread:</strong> {{.ReportThreadID}}{{end}}
+  {{if .ReportMessageID}}<br><strong>Message:</strong> {{.ReportMessageID}}{{end}}
+</p>
+{{else}}
+<p>
+  <strong>Output type:</strong> {{.ReportOutputType}}
+  {{if .ReportOutputID}}<br><strong>Output ID:</strong> {{.ReportOutputID}}{{end}}
+  {{if .ReportRoadmapID}}<br><strong>Roadmap ID:</strong> {{.ReportRoadmapID}}{{end}}
+  {{if .ReportJobID}}<br><strong>Job ID:</strong> {{.ReportJobID}}{{end}}
+</p>
+{{end}}
+
+{{if .ReportNote}}
+<p>
+  <strong>Note from reporter:</strong><br>
+  {{.ReportNote}}
+</p>
+{{end}}
+
+{{if .ReportContext}}
+<p>
+  <strong>Captured content:</strong>
+</p>
+<pre style="white-space: pre-wrap; word-break: break-word; background: #f1f1f1; padding: 12px; border-radius: 6px; font-size: 13px;">{{.ReportContext}}</pre>
+{{end}}
+
+<p>
+  Review this report in the moderation queue and take action as needed.
+</p>
+{{end}}
+
+{{template "layout" .}}

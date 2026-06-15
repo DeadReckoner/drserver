@@ -86,6 +86,7 @@ func setupV1Routes(router *gin.Engine, h *handlers.Handlers, opts Options) {
 	setupWebSocketRoutes(v1, h.Agent, h.Message)
 	setupTaskRoutes(v1, h.Task)
 	setupBillingRoutes(v1, h.Billing)
+	setupReportRoutes(v1, h.Report)
 }
 
 func setupBillingRoutes(rg *gin.RouterGroup, h *handlers.BillingHandler) {
@@ -131,6 +132,9 @@ func setupFriendRoutes(rg *gin.RouterGroup, h *handlers.FriendHandler) {
 		friends.PATCH("/:id", utils.ValidateUUID("id"), h.UpdateFriendRequestStatus)
 		friends.GET("", h.GetFriends)
 		friends.DELETE("/:id", utils.ValidateUUID("id"), h.RemoveFriend)
+		// Remove & Block (and unblock to re-invite). Independent of plain Remove.
+		friends.POST("/:id/block", utils.ValidateUUID("id"), h.BlockFriend)
+		friends.DELETE("/:id/block", utils.ValidateUUID("id"), h.UnblockFriend)
 	}
 }
 
@@ -323,6 +327,13 @@ func setupFeedbackRoutes(rg *gin.RouterGroup, h *handlers.FeedbackHandler) {
 	feedback := rg.Group("/feedback")
 	{
 		feedback.POST("", h.CreateFeedback)
+	}
+}
+
+func setupReportRoutes(rg *gin.RouterGroup, h *handlers.ReportHandler) {
+	reports := rg.Group("/reports")
+	{
+		reports.POST("", h.CreateReport)
 	}
 }
 

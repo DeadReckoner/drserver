@@ -24,6 +24,7 @@ type Handlers struct {
 	Billing              *BillingHandler
 	Admin                *AdminHandler
 	Webhook              *WebhookHandler
+	Report               *ReportHandler
 }
 
 // NewHandlers creates all handlers with the given database connection
@@ -47,5 +48,6 @@ func NewHandlers(db *gorm.DB, storageClient *storage.StorageClient, appleClient 
 		Billing:              NewBillingHandler(db),
 		Admin:                NewAdminHandler(db),
 		Webhook:              NewWebhookHandler(db, mailer),
+		Report:               NewReportHandler(db, mailer),
 	}
 }

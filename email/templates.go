@@ -36,6 +36,27 @@ type Vars struct {
 
 	// Anchor summary variables (KindAnchorDailySummary)
 	AnchoredUsers []AnchoredUserVar
+
+	// Report variables (KindReportReceived). All strings so the template can
+	// render whatever subset is present for a given report type. ReportContext
+	// is a pre-formatted (pretty-printed JSON) snapshot of the reported content.
+	ReportID         string
+	ReportType       string
+	ReportReason     string
+	ReportNote       string
+	ReporterID       string
+	ReporterName     string
+	ReporterEmail    string
+	ReportedUserID   string
+	ReportedUserName string
+	ReportThreadID   string
+	ReportMessageID  string
+	ReportOutputType string
+	ReportOutputID   string
+	ReportRoadmapID  string
+	ReportJobID      string
+	ReportContext    string
+	ReportCreatedAt  string
 }
 
 // DigestItemVar is one row in the user's own-goals digest. Title + Body are
