@@ -98,7 +98,7 @@ func (h *AgentHandler) AgentGenerateAsync(c *gin.Context) {
 		return
 	}
 
-	log.Info(ctx, "Roadmap generation request received", fmt.Sprintf("UserID: %s, Goal: %s", userID, req.GoalName))
+	log.Info(ctx, "Roadmap generation request received")
 
 	job := types.BackgroundJob{
 		JobID:    uuid.NewString(),
@@ -409,7 +409,7 @@ func (h *AgentHandler) AgentGenerateMilestone(c *gin.Context) {
 		utils.NotFoundResponse(c, "Milestone")
 		return
 	}
-	log.Info(ctx, "Got milestone for task generation:", milestone.SubGoal)
+	log.Info(ctx, "Got milestone for task generation", milestone.MilestoneID)
 
 	var goalReq types.GoalRequest
 
@@ -481,8 +481,7 @@ func (h *AgentHandler) AgentGenerateNextMilestoneAsync(c *gin.Context) {
 		return
 	}
 
-	log.Info(ctx, "Next milestone generation request received",
-		fmt.Sprintf("UserID: %s, MilestoneID: %s, SubGoal: %s", userID, milestoneID, milestone.SubGoal))
+	log.Info(ctx, "Next milestone generation request received", milestoneID)
 
 	job := types.BackgroundJob{
 		JobID:    uuid.NewString(),

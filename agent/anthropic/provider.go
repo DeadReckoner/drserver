@@ -28,7 +28,7 @@ func NewProvider() *Provider {
 
 // GenerateStrategicRoadmap generates the high-level roadmap with phases and milestones
 func (p *Provider) GenerateStrategicRoadmap(ctx context.Context, goalReq types.GoalRequest) (*types.Roadmap, error) {
-	log.Info(ctx, "Starting Anthropic strategic roadmap generation", fmt.Sprintf("Goal: %s", goalReq.GoalName))
+	log.Info(ctx, "Starting Anthropic strategic roadmap generation")
 
 	userPrompt := buildGoalPrompt(goalReq)
 	systemPrompt := strategicRoadmapSystemPrompt()
@@ -76,7 +76,7 @@ func (p *Provider) GenerateStrategicRoadmap(ctx context.Context, goalReq types.G
 
 // GenerateMilestoneTasks generates tasks for a specific milestone
 func (p *Provider) GenerateMilestoneTasks(ctx context.Context, goalReq types.GoalRequest, milestone *types.Milestone) ([]types.Task, error) {
-	log.Info(ctx, "Starting Anthropic milestone tasks generation", fmt.Sprintf("Milestone: %s", milestone.SubGoal))
+	log.Info(ctx, "Starting Anthropic milestone tasks generation", milestone.MilestoneID)
 
 	userPrompt := buildGoalPrompt(goalReq)
 	milestoneContext := buildMilestoneContext(milestone)
