@@ -102,9 +102,9 @@ func GenerateGoalFromStructure(ctx context.Context, goalReq types.GoalRequest) (
 // GenerateStrategicRoadmapFromGoalRequest generates the strategic roadmap (phases with milestones) from a goal request
 // This allows for progress tracking between strategic and tactical generation
 func GenerateStrategicRoadmapFromGoalRequest(ctx context.Context, goalReq types.GoalRequest) (*types.Roadmap, error) {
-	log.Info(ctx, "Starting strategic roadmap generation", fmt.Sprintf("Goal: %s", goalReq.GoalName))
+	log.Info(ctx, "Starting strategic roadmap generation")
 	prompt := buildGoalPrompt(goalReq)
-	log.Info(ctx, "User Prompt", prompt)
+	log.Info(ctx, "Built goal prompt", len(prompt))
 
 	// Generate strategic roadmap
 	log.Info(ctx, "Calling OpenAI API for strategic roadmap generation", "")
@@ -129,7 +129,7 @@ func GenerateStrategicRoadmapFromGoalRequest(ctx context.Context, goalReq types.
 // GenerateMilestoneTasksFromGoalRequest generates tasks for a specific milestone
 // This allows for progress tracking between strategic and tactical generation
 func GenerateMilestoneTasksFromGoalRequest(ctx context.Context, goalReq types.GoalRequest, milestone *types.Milestone) ([]types.Task, error) {
-	log.Info(ctx, "Starting milestone tasks generation", fmt.Sprintf("Goal: %s, Milestone: %s", goalReq.GoalName, milestone.SubGoal))
+	log.Info(ctx, "Starting milestone tasks generation", milestone.MilestoneID)
 	prompt := buildGoalPrompt(goalReq)
 
 	// Generate tasks using the milestone as context
@@ -163,7 +163,7 @@ func GenerateMilestoneTasksFromGoalRequest(ctx context.Context, goalReq types.Go
 // 5. Return the complete roadmap
 func generateRoadmapFromPrompt(ctx context.Context, userPrompt string) (*GeneratedRoadmap, error) {
 
-	log.Info(ctx, "User Prompt", userPrompt)
+	log.Info(ctx, "Built goal prompt", len(userPrompt))
 	// STEP 1: Generate Strategic Roadmap
 	// This creates the high-level plan with 2-4 phases and milestones with strategic metadata
 	strategicResp, err := generateStrategicRoadmap(ctx, userPrompt)

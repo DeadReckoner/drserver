@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"dr/server/api/utils"
 	"dr/server/database"
 	"dr/server/log"
@@ -69,7 +70,7 @@ func (h *MessageHandler) GetThreads(c *gin.Context) {
 
 	threads, err := database.GetThreadsByUser(c, userID.(string))
 	if err != nil {
-		fmt.Printf("Failed to get threads for user %s: %v\n", userID, err)
+		log.Error(ctx, "Failed to get threads", err)
 		utils.InternalErrorResponse(c, err)
 		return
 	}
@@ -79,7 +80,7 @@ func (h *MessageHandler) GetThreads(c *gin.Context) {
 	for _, thread := range threads {
 		participants, err := database.GetThreadParticipants(c, thread.ThreadID)
 		if err != nil {
-			fmt.Printf("Failed to get participants for thread %s: %v\n", thread.ThreadID, err)
+			log.Error(ctx, "Failed to get participants for thread", thread.ThreadID, err)
 			continue
 		}
 
@@ -125,7 +126,7 @@ func (h *MessageHandler) GetMessages(c *gin.Context) {
 			utils.ForbiddenResponse(c, "You are not a participant of this thread")
 			return
 		}
-		fmt.Printf("Failed to get messages for thread %s, user %s: %v\n", threadID, userID, err)
+		log.Error(ctx, "Failed to get messages for thread", threadID, err)
 		utils.InternalErrorResponse(c, err)
 		return
 	}
@@ -172,7 +173,7 @@ func (room *ThreadRoom) handleBroadcast() {
 
 		msgBytes, err := json.Marshal(outMsg)
 		if err != nil {
-			fmt.Printf("Error marshaling message: %v\n", err)
+			log.Error(context.Background(), "Error marshaling message", err)
 			continue
 		}
 
@@ -180,7 +181,7 @@ func (room *ThreadRoom) handleBroadcast() {
 		for conn := range room.clients {
 			err := conn.WriteMessage(gorillaws.TextMessage, msgBytes)
 			if err != nil {
-				fmt.Printf("Error sending message to client: %v\n", err)
+				log.Error(context.Background(), "Error sending message to client", err)
 				_ = conn.Close()
 				delete(room.clients, conn)
 			}
@@ -197,7 +198,7 @@ func (h *MessageHandler) WSHandler(c *gin.Context) {
 	// Get authenticated user
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
-		fmt.Println("WebSocket error: missing user_id")
+		log.Warn(ctx, "WebSocket error: missing user_id")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
@@ -207,11 +208,11 @@ func (h *MessageHandler) WSHandler(c *gin.Context) {
 	err := database.VerifyThreadParticipant(c, threadID, userIDStr)
 	if err != nil {
 		if err.Error() == "access denied: user is not a participant of this thread" {
-			fmt.Printf("WebSocket access denied: user %s not participant of thread %s\n", userIDStr, threadID)
+			log.Warn(ctx, "WebSocket access denied: user not participant of thread", threadID)
 			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
 			return
 		}
-		fmt.Printf("WebSocket error checking thread access: %v\n", err)
+		log.Error(ctx, "WebSocket error checking thread access", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
@@ -219,7 +220,7 @@ func (h *MessageHandler) WSHandler(c *gin.Context) {
 	// Upgrade connection using shared upgrader
 	conn, err := websocket.UpgradeConnection(c)
 	if err != nil {
-		fmt.Printf("WebSocket upgrade error: %v\n", err)
+		log.Error(ctx, "WebSocket upgrade error", err)
 		return
 	}
 	defer func() { _ = conn.Close() }()
@@ -237,14 +238,13 @@ func (h *MessageHandler) WSHandler(c *gin.Context) {
 	room.clients[conn] = client
 	room.mutex.Unlock()
 
-	fmt.Printf("WebSocket connected: user %s joined thread %s\n", userIDStr, threadID)
 	log.Info(ctx, fmt.Sprintf("WebSocket connected: user %s joined thread %s", userIDStr, threadID))
 
 	// Read messages from client
 	for {
 		_, msgBytes, err := conn.ReadMessage()
 		if err != nil {
-			fmt.Printf("WebSocket read error (user %s, thread %s): %v\n", userIDStr, threadID, err)
+			log.Info(ctx, "WebSocket read error", threadID, err)
 			room.mutex.Lock()
 			delete(room.clients, conn)
 			room.mutex.Unlock()
@@ -254,7 +254,7 @@ func (h *MessageHandler) WSHandler(c *gin.Context) {
 		// Parse incoming message
 		var inMsg IncomingMessage
 		if err := json.Unmarshal(msgBytes, &inMsg); err != nil {
-			fmt.Printf("Error parsing message from user %s: %v\n", userIDStr, err)
+			log.Warn(ctx, "Error parsing message from client", err)
 			// Send error back to client
 			errMsg := map[string]string{"error": "invalid message format"}
 			errBytes, _ := json.Marshal(errMsg)
@@ -264,7 +264,7 @@ func (h *MessageHandler) WSHandler(c *gin.Context) {
 
 		// Validate content is not empty
 		if inMsg.Content == "" {
-			fmt.Printf("Empty message content from user %s\n", userIDStr)
+			log.Warn(ctx, "Empty message content from client")
 			errMsg := map[string]string{"error": "message content cannot be empty"}
 			errBytes, _ := json.Marshal(errMsg)
 			_ = conn.WriteMessage(gorillaws.TextMessage, errBytes)
@@ -274,7 +274,7 @@ func (h *MessageHandler) WSHandler(c *gin.Context) {
 		// Save message to database
 		savedMessage, err := database.CreateMessage(c, threadID, userIDStr, inMsg.Content)
 		if err != nil {
-			fmt.Printf("Error saving message to database (user %s, thread %s): %v\n", userIDStr, threadID, err)
+			log.Error(ctx, "Error saving message to database", threadID, err)
 			errMsg := map[string]string{"error": "failed to save message"}
 			errBytes, _ := json.Marshal(errMsg)
 			_ = conn.WriteMessage(gorillaws.TextMessage, errBytes)
@@ -282,14 +282,13 @@ func (h *MessageHandler) WSHandler(c *gin.Context) {
 		}
 
 		// Broadcast persisted message to all clients in this thread room
-		fmt.Printf("Broadcasting saved message %s in thread %s from user %s\n", savedMessage.MessageID, threadID, userIDStr)
+		log.Info(ctx, "Broadcasting saved message", savedMessage.MessageID, threadID)
 		room.broadcast <- &savedMessage
 
 		// Send push notifications to other thread participants
 		go sendMessageNotifications(threadID, userIDStr, savedMessage.MessageID, inMsg.Content)
 	}
 
-	fmt.Printf("WebSocket disconnected: user %s left thread %s\n", userIDStr, threadID)
 	log.Info(ctx, fmt.Sprintf("WebSocket disconnected: user %s left thread %s", userIDStr, threadID))
 }
 
@@ -325,7 +324,7 @@ func (h *MessageHandler) GetMessageById(c *gin.Context) {
 			utils.ForbiddenResponse(c, "You are not a participant of this thread")
 			return
 		}
-		fmt.Printf("Failed to get message %s for user %s: %v\n", messageID, userID, err)
+		log.Error(ctx, "Failed to get message", messageID, err)
 		utils.InternalErrorResponse(c, err)
 		return
 	}
@@ -341,14 +340,14 @@ func sendMessageNotifications(threadID, senderID, messageID, content string) {
 	// Get all thread participants
 	participants, err := database.GetThreadParticipants(ctx, threadID)
 	if err != nil {
-		fmt.Printf("Failed to get thread participants for notifications: %v\n", err)
+		log.Error(context.Background(), "Failed to get thread participants for notifications", err)
 		return
 	}
 
 	// Get sender's name
 	sender, err := database.GetUserByID(senderID)
 	if err != nil {
-		fmt.Printf("Failed to get sender info for notification: %v\n", err)
+		log.Error(context.Background(), "Failed to get sender info for notification", err)
 		return
 	}
 

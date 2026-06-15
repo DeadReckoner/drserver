@@ -65,8 +65,6 @@ func (h *RoadmapHandler) CreateRoadmap(c *gin.Context) {
 		newRoadmap.Type = "custom_made"
 	}
 
-	fmt.Printf("Roadmap received: %+v\n", newRoadmap)
-
 	createdRoadmap, err := h.service.Create(c, newRoadmap)
 	if err != nil {
 		utils.InternalErrorResponse(c, err)
@@ -146,7 +144,7 @@ func (h *RoadmapHandler) UpdateRoadmap(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("Updated roadmap received: %+v\n", updatedRoadmap)
+	log.Info(ctx, "Updating roadmap", roadmapID)
 
 	roadmap := h.service.Update(c, roadmapID, updatedRoadmap)
 	if roadmap.RoadmapID == "" {
@@ -218,7 +216,7 @@ func (h *RoadmapHandler) CreateMilestone(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("Milestone received: %+v\n", newMilestone)
+	log.Info(ctx, "Creating milestone for roadmap", roadmapID)
 
 	createdMilestone, err := database.CreateMilestone(c, roadmapID, newMilestone)
 	if err != nil {

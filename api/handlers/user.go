@@ -63,8 +63,6 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	// Parse full_name into first_name/last_name if provided (for Apple/Google sign-in)
 	newUser.ParseFullName()
 
-	fmt.Printf("User received: %+v\n", newUser)
-
 	tx := database.CreateUser(c, newUser)
 	if tx.Error != nil {
 		utils.InternalErrorResponse(c, tx.Error)
@@ -247,7 +245,7 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("Deleting User: %s\n", userID)
+	log.Info(ctx, "Deleting user", userID)
 
 	// Apple requires deleted accounts to have their refresh token revoked. The
 	// mobile client passes the original authorization code when the user

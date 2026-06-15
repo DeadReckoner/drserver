@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"dr/server/database"
+	"dr/server/log"
 	"dr/server/types"
 	"fmt"
-	"log"
 	"net/http"
 
 	"dr/server/api/utils"
@@ -30,13 +30,12 @@ func NewTaskHandlerWithService(service TaskService) *TaskHandler {
 }
 
 func (h *TaskHandler) CreateTask(c *gin.Context) {
+	ctx := c.Request.Context()
 	var newTask types.Task
 
 	if !utils.BindJSONOrAbort(c, &newTask) {
 		return
 	}
-
-	fmt.Printf("Task received: %+v\n", newTask)
 
 	createdTask, err := h.service.Create(c, newTask)
 	if err != nil {
@@ -45,25 +44,16 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	}
 
 	utils.DataResponse(c, http.StatusCreated, createdTask)
-	log.Println("Task created successfully")
-}
-
-type DateRange struct {
-	StartDate string `json:"start_date"`
-	EndDate   string `json:"end_date,omitempty"`
+	log.Info(ctx, "Task created successfully")
 }
 
 func (h *TaskHandler) GetTasks(c *gin.Context) {
+	ctx := c.Request.Context()
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
 	roadmapID := c.Query("roadmap_id")
 
-	dateRange := DateRange{
-		StartDate: startDate,
-		EndDate:   endDate,
-	}
-	fmt.Println("date range: ", dateRange)
-	fmt.Println("roadmap_id: ", roadmapID)
+	log.Info(ctx, "GetTasks: fetching tasks", fmt.Sprintf("roadmap_id=%s, start=%s, end=%s", roadmapID, startDate, endDate))
 
 	tasks := h.service.List(c, startDate, endDate, roadmapID)
 	utils.DataResponse(c, http.StatusOK, tasks)
@@ -97,6 +87,7 @@ func (h *TaskHandler) GetTask(c *gin.Context) {
 }
 
 func (h *TaskHandler) UpdateTask(c *gin.Context) {
+	ctx := c.Request.Context()
 	taskID := c.Param("taskid")
 	var updatedTask types.Task
 
@@ -111,10 +102,11 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	}
 
 	utils.DataResponse(c, http.StatusOK, task)
-	log.Println("Task updated successfully")
+	log.Info(ctx, "Task updated successfully")
 }
 
 func (h *TaskHandler) DeleteTask(c *gin.Context) {
+	ctx := c.Request.Context()
 	taskID := c.Param("taskid")
 
 	err := h.service.Delete(c, taskID)
@@ -124,18 +116,17 @@ func (h *TaskHandler) DeleteTask(c *gin.Context) {
 	}
 
 	utils.MessageResponse(c, http.StatusOK, "Task deleted successfully")
-	log.Println("Task deleted successfully")
+	log.Info(ctx, "Task deleted successfully")
 }
 
 func (h *TaskHandler) CreateStep(c *gin.Context) {
+	ctx := c.Request.Context()
 	taskID := c.Param("taskid")
 	var newStep types.Step
 
 	if !utils.BindJSONOrAbort(c, &newStep) {
 		return
 	}
-
-	fmt.Printf("Step received: %+v\n", newStep)
 
 	createdStep, err := database.CreateStep(c, taskID, newStep)
 	if err != nil {
@@ -144,10 +135,11 @@ func (h *TaskHandler) CreateStep(c *gin.Context) {
 	}
 
 	utils.DataResponse(c, http.StatusCreated, createdStep)
-	log.Println("Step created successfully")
+	log.Info(ctx, "Step created successfully")
 }
 
 func (h *TaskHandler) UpdateStep(c *gin.Context) {
+	ctx := c.Request.Context()
 	taskID := c.Param("taskid")
 	stepID := c.Param("stepid")
 	var updatedStep types.Step
@@ -163,10 +155,11 @@ func (h *TaskHandler) UpdateStep(c *gin.Context) {
 	}
 
 	utils.DataResponse(c, http.StatusOK, step)
-	log.Println("Step updated successfully")
+	log.Info(ctx, "Step updated successfully")
 }
 
 func (h *TaskHandler) DeleteStep(c *gin.Context) {
+	ctx := c.Request.Context()
 	taskID := c.Param("taskid")
 	stepID := c.Param("stepid")
 
@@ -177,12 +170,13 @@ func (h *TaskHandler) DeleteStep(c *gin.Context) {
 	}
 
 	utils.MessageResponse(c, http.StatusOK, "Step deleted successfully")
-	log.Println("Step deleted successfully")
+	log.Info(ctx, "Step deleted successfully")
 }
 
 // CompleteAllSteps marks all steps of a task as complete in a single operation.
 // This also triggers cascade completion for the task, milestone, and roadmap.
 func (h *TaskHandler) CompleteAllSteps(c *gin.Context) {
+	ctx := c.Request.Context()
 	taskID := c.Param("taskid")
 
 	stepsCompleted, err := h.service.CompleteAllSteps(c, taskID)
@@ -200,5 +194,5 @@ func (h *TaskHandler) CompleteAllSteps(c *gin.Context) {
 		"steps_completed": stepsCompleted,
 		"task_id":         taskID,
 	})
-	log.Printf("All steps completed for task %s: %d steps", taskID, stepsCompleted)
+	log.Info(ctx, "All steps completed for task", fmt.Sprintf("task_id=%s, steps=%d", taskID, stepsCompleted))
 }
