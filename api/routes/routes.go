@@ -22,7 +22,19 @@ func SetupRoutes(h *handlers.Handlers) *gin.Engine {
 }
 
 func SetupRoutesWithOptions(h *handlers.Handlers, opts Options) *gin.Engine {
-	router := gin.Default()
+	// gin.New() instead of gin.Default() so we control the global middleware:
+	// our structured JSON access logger and JSON panic recovery in place of
+	// gin's text logger + text recovery.
+	router := gin.New()
+	// Fly terminates TLS at its edge and forwards the real client IP in the
+	// Fly-Client-IP header; without this c.ClientIP() returns the edge proxy
+	// address instead.
+	router.TrustedPlatform = gin.PlatformFlyIO
+	// RequestLogger OUTER, Recovery INNER: Recovery turns a handler panic into a
+	// normal 500 before control returns to RequestLogger's post-Next code, so
+	// panic-induced 500s still get an access-log line.
+	router.Use(middleware.RequestLogger())
+	router.Use(middleware.Recovery())
 
 	setupHealthRoutes(router)
 

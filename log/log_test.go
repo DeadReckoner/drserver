@@ -2,7 +2,7 @@ package log
 
 import (
 	"bytes"
-	"log"
+	"log/slog"
 	"testing"
 )
 
@@ -31,14 +31,14 @@ func TestParseLevel(t *testing.T) {
 	}
 }
 
-// captureLogger returns a Logger writing to an in-memory buffer instead of
-// stderr, so tests can assert on emitted (or suppressed) output.
+// captureLogger returns a Logger writing JSON to an in-memory buffer instead of
+// stderr, so tests can assert on emitted (or suppressed) output. The handler is
+// permissive (debug); level filtering is exercised via SetMinLevel, matching
+// how the production logger gates in code.
 func captureLogger() (*Logger, *bytes.Buffer) {
 	var buf bytes.Buffer
-	return &Logger{
-		logger:    log.New(&buf, "", 0),
-		requestID: "test",
-	}, &buf
+	h := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	return &Logger{sl: slog.New(h)}, &buf
 }
 
 func TestMinLevelFiltering(t *testing.T) {

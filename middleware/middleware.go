@@ -4,9 +4,12 @@ import (
 	"context"
 	"dr/server/log"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -150,6 +153,12 @@ func AdminMiddleware() gin.HandlerFunc {
 		c.Set("requestID", requestID)
 
 		logger := log.NewLogger(requestID)
+		// AuthMiddleware runs before this on the /api/v1 group, so user_id is
+		// already resolved — fold it into the request-scoped logger so every
+		// downstream line (handlers, database layer) is tagged with it.
+		if uid := c.GetString("user_id"); uid != "" {
+			logger = logger.With(slog.String("user_id", uid))
+		}
 
 		ctx := context.WithValue(c.Request.Context(), RequestIDKey, requestID)
 		ctx = log.WithLogger(ctx, logger)
@@ -161,6 +170,97 @@ func AdminMiddleware() gin.HandlerFunc {
 
 		c.Next()
 
+	}
+}
+
+// RequestLogger emits one structured JSON line per HTTP request once it
+// completes. These access events are what an aggregator (Axiom) builds API
+// dashboards from: request counts per route, success/error rates (grouped by
+// status), and latency (duration_ms). It reads user_id and request_id from the
+// gin context, which the auth + request-context middleware populate on
+// /api/v1 routes. Replaces gin's default text access logger.
+//
+// Registered OUTER of Recovery so that panic-induced 500s — which Recovery
+// turns into a normal 500 response before this handler's post-Next code runs —
+// still produce an access line with the right status.
+func RequestLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		isWebsocket := c.IsWebsocket()
+
+		c.Next()
+
+		// Prefer the matched route template (e.g. /api/v1/roadmaps/:roadmapid)
+		// so per-endpoint aggregation groups by route rather than by the
+		// thousands of distinct ids that appear in the concrete path. Falls
+		// back to the raw path for unmatched (404) requests.
+		route := c.FullPath()
+		if route == "" {
+			route = c.Request.URL.Path
+		}
+
+		attrs := []slog.Attr{
+			slog.String("method", c.Request.Method),
+			slog.String("route", route),
+			slog.String("path", c.Request.URL.Path),
+			slog.String("client_ip", c.ClientIP()),
+		}
+		if uid := c.GetString("user_id"); uid != "" {
+			attrs = append(attrs, slog.String("user_id", uid))
+		}
+		logger := log.NewLogger(c.GetString("requestID"))
+
+		// WebSocket upgrades hijack the response writer and are long-lived, so
+		// their post-handler status/size are meaningless and their duration is
+		// the whole session — logging that as a normal "request" would wreck
+		// latency percentiles. Emit a distinct event (excluded from request
+		// metrics, which filter on msg == "request") with the session length
+		// under its own field.
+		if isWebsocket {
+			attrs = append(attrs, slog.Int64("session_ms", time.Since(start).Milliseconds()))
+			logger.LogAttrs(log.LevelInfo, "ws_connection", attrs...)
+			return
+		}
+
+		status := c.Writer.Status()
+		attrs = append(attrs,
+			slog.Int("status", status),
+			slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+			slog.Int("bytes", c.Writer.Size()),
+		)
+		if len(c.Errors) > 0 {
+			attrs = append(attrs, slog.String("gin_errors", c.Errors.String()))
+		}
+
+		switch {
+		case status >= 500:
+			logger.LogAttrs(log.LevelError, "request", attrs...)
+		case status >= 400:
+			logger.LogAttrs(log.LevelWarn, "request", attrs...)
+		default:
+			logger.LogAttrs(log.LevelInfo, "request", attrs...)
+		}
+	}
+}
+
+// Recovery catches panics from downstream handlers and logs them as a
+// structured JSON line — with request_id/user_id from context — instead of
+// gin.Recovery's ANSI-colored text dump (which would be non-JSON noise in the
+// log stream). It then returns 500. Registered INNER of RequestLogger so the
+// recovered request still gets an access line with status 500.
+func Recovery() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.FromContext(c.Request.Context()).LogAttrs(
+					log.LevelError, "panic recovered",
+					slog.String("panic", fmt.Sprintf("%v", r)),
+					slog.String("stack", string(debug.Stack())),
+				)
+				c.AbortWithStatus(http.StatusInternalServerError)
+			}
+		}()
+		c.Next()
 	}
 }
 
