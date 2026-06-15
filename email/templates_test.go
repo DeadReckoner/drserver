@@ -79,6 +79,40 @@ func TestRender_BillingIssue(t *testing.T) {
 	assert.Contains(t, body, "https://example.com/manage")
 }
 
+func TestRender_ReportReceived_User(t *testing.T) {
+	subject, body, err := Render(KindReportReceived, Vars{
+		ReportID:         "rep-1",
+		ReportType:       "user",
+		ReportReason:     "harassment",
+		ReporterName:     "Sam Reporter",
+		ReporterID:       "user-1",
+		ReportedUserName: "Bad Actor",
+		ReportedUserID:   "user-2",
+		ReportNote:       "they sent abusive messages",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, subject, "user")
+	assert.Contains(t, subject, "harassment")
+	assert.Contains(t, body, "Bad Actor")
+	assert.Contains(t, body, "they sent abusive messages")
+	assert.Contains(t, body, "<!DOCTYPE html>", "layout should be applied")
+}
+
+func TestRender_ReportReceived_AI(t *testing.T) {
+	subject, body, err := Render(KindReportReceived, Vars{
+		ReportID:         "rep-2",
+		ReportType:       "ai",
+		ReportReason:     "unsafe",
+		ReporterID:       "user-1",
+		ReportOutputType: "roadmap",
+		ReportContext:    "AI suggested an unsafe fasting plan",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, subject, "AI content")
+	assert.Contains(t, body, "roadmap")
+	assert.Contains(t, body, "AI suggested an unsafe fasting plan")
+}
+
 func TestRender_UnknownKind(t *testing.T) {
 	_, _, err := Render("nope", Vars{})
 	require.Error(t, err)

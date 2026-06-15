@@ -83,6 +83,10 @@ func (h *FriendHandler) CreateFriendRequest(c *gin.Context) {
 			utils.ConflictResponse(c, errMsg)
 			return
 		}
+		if errMsg == "cannot send friend request to this user" {
+			utils.ForbiddenResponse(c, errMsg)
+			return
+		}
 		utils.InternalErrorResponse(c, err)
 		return
 	}
@@ -186,6 +190,47 @@ func (h *FriendHandler) RemoveFriend(c *gin.Context) {
 
 	utils.MessageResponse(c, http.StatusOK, "Friendship removed successfully")
 	log.Info(ctx, "Friendship removed successfully")
+}
+
+// BlockFriend handles "Remove & Block": it ends the friendship and messaging
+// and records a block so the other user cannot re-invite or message until the
+// current user unblocks them. Independent of plain Remove (DELETE /friends/:id).
+func (h *FriendHandler) BlockFriend(c *gin.Context) {
+	ctx := c.Request.Context()
+	friendUserID, ok := utils.GetParamOrAbort(c, "id")
+	if !ok {
+		return
+	}
+
+	if err := database.BlockUser(c, friendUserID); err != nil {
+		if err.Error() == "cannot block yourself" {
+			utils.BadRequestResponse(c, err.Error())
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.MessageResponse(c, http.StatusOK, "Friend removed and blocked")
+	log.Info(ctx, "user blocked: "+friendUserID)
+}
+
+// UnblockFriend lifts a block the current user previously placed, allowing them
+// to re-invite that person.
+func (h *FriendHandler) UnblockFriend(c *gin.Context) {
+	ctx := c.Request.Context()
+	friendUserID, ok := utils.GetParamOrAbort(c, "id")
+	if !ok {
+		return
+	}
+
+	if err := database.UnblockUser(c, friendUserID); err != nil {
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.MessageResponse(c, http.StatusOK, "User unblocked")
+	log.Info(ctx, "user unblocked: "+friendUserID)
 }
 
 func (h *FriendHandler) UpdateFriendRequestStatus(c *gin.Context) {

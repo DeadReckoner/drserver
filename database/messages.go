@@ -271,6 +271,19 @@ func CreateMessage(c *gin.Context, threadID, userID, content string) (types.Mess
 		return types.Messages{}, err
 	}
 
+	// Block gate (defense-in-depth): Remove & Block deletes the thread, but if
+	// any thread participant is blocked in either direction, refuse the send.
+	if participants, err := GetThreadParticipants(c, threadID); err == nil {
+		for _, p := range participants {
+			if p.UserID == userID {
+				continue
+			}
+			if BlockExistsBetween(userID, p.UserID) {
+				return types.Messages{}, errors.New("messaging is blocked between these users")
+			}
+		}
+	}
+
 	// Create message
 	message := types.Messages{
 		MessageID: uuid.NewString(),

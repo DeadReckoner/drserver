@@ -53,6 +53,11 @@ const (
 	// with the people I'm holding accountable" vs "what's going on with my
 	// own goals."
 	KindAnchorDailySummary EmailKind = "anchor_daily_summary"
+
+	// KindReportReceived - sent to the support inbox (not the user) when a
+	// member files a report against another user or against AI-generated
+	// content. The template branches on the report type in the body.
+	KindReportReceived EmailKind = "report_received"
 )
 
 // AllKinds is the canonical ordered list, used for iteration in tests.
@@ -66,6 +71,7 @@ var AllKinds = []EmailKind{
 	KindDailyDigest,
 	KindWeeklyDigest,
 	KindAnchorDailySummary,
+	KindReportReceived,
 }
 
 // TemplateFile returns the basename of the html/template file for a kind.
@@ -99,6 +105,8 @@ func (k EmailKind) SubjectFallback() string {
 		return "Your weekly Dead Reckoner digest"
 	case KindAnchorDailySummary:
 		return "Daily anchor update from Dead Reckoner"
+	case KindReportReceived:
+		return "New report submitted"
 	}
 	return "A message from Dead Reckoner"
 }
