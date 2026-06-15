@@ -21,6 +21,10 @@ type UserPlanContext struct {
 // GetEntitlement returns the entitlement row for a user, lazily creating one if
 // it is missing. The DB trigger handles new users, but this guard keeps the API
 // safe if the trigger is ever disabled or a backfill is skipped.
+//
+// Before returning, it applies the Pro email whitelist overlay (see
+// applyProWhitelist): users on a whitelisted domain (e.g. @deadreckoner.io)
+// are reported as paid without a real subscription.
 func GetEntitlement(userID string) (*types.Entitlement, error) {
 	if userID == "" {
 		return nil, errors.New("missing user_id")
@@ -29,6 +33,7 @@ func GetEntitlement(userID string) (*types.Entitlement, error) {
 	var ent types.Entitlement
 	err := db.Where("user_id = ?", userID).First(&ent).Error
 	if err == nil {
+		applyProWhitelist(&ent)
 		return &ent, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -46,11 +51,43 @@ func GetEntitlement(userID string) (*types.Entitlement, error) {
 	if err := db.Create(&ent).Error; err != nil {
 		// Another writer may have created it between First and Create; re-read.
 		if err2 := db.Where("user_id = ?", userID).First(&ent).Error; err2 == nil {
+			applyProWhitelist(&ent)
 			return &ent, nil
 		}
 		return nil, err
 	}
+	applyProWhitelist(&ent)
 	return &ent, nil
+}
+
+// applyProWhitelist is a READ-TIME OVERLAY: if the entitlement's user is on a
+// whitelisted email domain, it reports them as paid (source=comp) in-memory
+// WITHOUT writing to the DB. This keeps the real subscription row untouched -
+// an employee can still test real sandbox purchases and the stored row
+// reflects reality, while they always retain Pro access via this overlay.
+//
+// Skipped when the user is already paid (real subscribers don't need the
+// overlay, and we avoid the extra user-email lookup on that path). The email
+// lookup is a single indexed PK query; for non-paid users it runs once per
+// entitlement resolution, which is acceptable at this app's scale. If it ever
+// shows up in profiling, thread the auth-context email through instead.
+func applyProWhitelist(ent *types.Entitlement) {
+	if ent == nil || ent.IsPaid() {
+		return
+	}
+	var email string
+	if err := db.Model(&types.User{}).
+		Select("email").
+		Where("user_id = ?", ent.UserID).
+		Scan(&email).Error; err != nil {
+		// Soft-fail: a lookup error must not break entitlement resolution.
+		// Worst case the user is treated as free until the next read.
+		return
+	}
+	if types.IsProWhitelistedEmail(email) {
+		ent.Plan = types.PlanPaid
+		ent.Source = types.EntitlementSourceComp
+	}
 }
 
 // GetUserPlanContext returns an entitlement plus active counts in a single call.

@@ -59,15 +59,28 @@ func entitlementRow(plan string, aiUsed int, periodStart time.Time) *sqlmock.Row
 	)
 }
 
+// expectWhitelistEmailLookup stubs the email lookup that applyProWhitelist
+// runs inside GetEntitlement for non-paid users. Returns a non-whitelisted
+// address so the overlay leaves the plan unchanged (free stays free). Paid
+// users skip this lookup, so only insert it on free paths.
+func expectWhitelistEmailLookup(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(`SELECT "email" FROM "users" WHERE user_id = \$1`).
+		WithArgs(testUserID).
+		WillReturnRows(sqlmock.NewRows([]string{"email"}).AddRow("not-whitelisted@gmail.com"))
+}
+
 // expectGetUserPlanContext stubs the read sequence GetUserPlanContext emits:
-// SELECT entitlements, then (optionally) UPDATE counters when the period
-// rolled, then COUNT roadmaps, then COUNT habits.
+// SELECT entitlements, the whitelist email lookup (free users only), then
+// COUNT roadmaps, then COUNT habits.
 func expectGetUserPlanContext(t *testing.T, mock sqlmock.Sqlmock, plan string, aiUsed, roadmapCount, habitCount int) {
 	t.Helper()
 	now := time.Now().UTC()
 	mock.ExpectQuery(`SELECT \* FROM "entitlements" WHERE user_id = \$1`).
 		WithArgs(testUserID, 1).
 		WillReturnRows(entitlementRow(plan, aiUsed, now))
+	if plan != types.PlanPaid {
+		expectWhitelistEmailLookup(mock)
+	}
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "roadmaps" WHERE user_id = \$1 AND archived = \$2`).
 		WithArgs(testUserID, false).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(roadmapCount))
@@ -174,6 +187,7 @@ func TestCheckCreateRoadmapAnchor_FreeWithExistingAnchor_Blocked(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM "entitlements" WHERE user_id = \$1`).
 		WithArgs(testUserID, 1).
 		WillReturnRows(entitlementRow(types.PlanFree, 0, now))
+	expectWhitelistEmailLookup(mock)
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "roadmaps" WHERE user_id = \$1 AND archived = \$2 AND anchor_id IS NOT NULL`).
 		WithArgs(testUserID, false).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
@@ -190,6 +204,7 @@ func TestCheckCreateRoadmapAnchor_FreeNoExistingAnchor_Allowed(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM "entitlements" WHERE user_id = \$1`).
 		WithArgs(testUserID, 1).
 		WillReturnRows(entitlementRow(types.PlanFree, 0, now))
+	expectWhitelistEmailLookup(mock)
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "roadmaps" WHERE user_id = \$1 AND archived = \$2 AND anchor_id IS NOT NULL`).
 		WithArgs(testUserID, false).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
@@ -205,6 +220,7 @@ func TestCheckCreateHabitAnchor_FreeAlwaysBlocked(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM "entitlements" WHERE user_id = \$1`).
 		WithArgs(testUserID, 1).
 		WillReturnRows(entitlementRow(types.PlanFree, 0, now))
+	expectWhitelistEmailLookup(mock)
 
 	res, err := CheckCreateHabitAnchor(testUserID)
 	require.NoError(t, err)
@@ -231,6 +247,7 @@ func TestCheckPaidFeature_Free_Blocked(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM "entitlements" WHERE user_id = \$1`).
 		WithArgs(testUserID, 1).
 		WillReturnRows(entitlementRow(types.PlanFree, 0, now))
+	expectWhitelistEmailLookup(mock)
 
 	res, err := CheckPaidFeature(testUserID, types.FeatureArchive, "Archive is Pro.")
 	require.NoError(t, err)
