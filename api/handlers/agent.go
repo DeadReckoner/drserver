@@ -54,7 +54,7 @@ func (h *AgentHandler) AgentGenerate(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("Goal request received: %+v\n", goalReq)
+	log.Info(ctx, "Goal request received")
 
 	start := time.Now()
 	log.Info(ctx, "Start Time:", start)
@@ -73,7 +73,7 @@ func (h *AgentHandler) AgentGenerate(c *gin.Context) {
 		log.Error(ctx, "AgentGenerate: failed to increment AI counter", err)
 	}
 
-	fmt.Printf("Generated roadmap with phases: %+v\n", generated)
+	log.Info(ctx, "Generated roadmap with phases", fmt.Sprintf("phases=%d", len(generated.Roadmap.Phases)))
 
 	// Set roadmap type to "ai_generated" since this was created by the AI
 	generated.Roadmap.Type = "ai_generated"
@@ -424,7 +424,7 @@ func (h *AgentHandler) AgentGenerateMilestone(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("Goal request received: %+v\n", goalReq)
+	log.Info(ctx, "Goal request received")
 
 	start := time.Now()
 	log.Info(ctx, "Start Time:", start)
@@ -441,7 +441,7 @@ func (h *AgentHandler) AgentGenerateMilestone(c *gin.Context) {
 		log.Error(ctx, "AgentGenerateMilestone: failed to increment AI counter", err)
 	}
 
-	fmt.Printf("Generated tasks for milestone: %d tasks\n", len(tasks))
+	log.Info(ctx, "Generated tasks for milestone", len(tasks))
 
 	// Attach tasks to milestone and update
 	milestone.Tasks = tasks
