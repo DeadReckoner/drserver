@@ -108,7 +108,15 @@ func (h *UserHandler) CreateUserWithImage(c *gin.Context) {
 			return
 		}
 
-		path := fmt.Sprintf("%s/profile", newUser.UserID)
+		// Store under the authenticated user_id (the same id database.CreateUser
+		// keys the row to), never the body-supplied UserID — storage bypasses
+		// RLS, so a body value could target another user's folder.
+		authID := c.GetString("user_id")
+		if authID == "" {
+			utils.ErrorResponse(c, http.StatusUnauthorized, "missing authenticated user")
+			return
+		}
+		path := fmt.Sprintf("%s/profile", authID)
 		contentType := header.Header.Get("Content-Type")
 
 		if err := h.storage.Upload(ctx, avatarsBucket, path, contentType, data); err != nil {
@@ -139,6 +147,12 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		return
 	}
 
+	// A user may only update their own record.
+	if authID := c.GetString("user_id"); authID == "" || authID != userID {
+		utils.ErrorResponse(c, http.StatusForbidden, "cannot update another user's profile")
+		return
+	}
+
 	var updatedUser types.User
 	if !utils.BindJSONOrAbort(c, &updatedUser) {
 		return
@@ -166,6 +180,14 @@ func (h *UserHandler) UpdateUserWithImage(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
+		return
+	}
+
+	// The path :id must match the authenticated principal. Storage uses the
+	// service-role key (RLS bypassed), so this check is the only thing stopping
+	// a user from overwriting another user's avatar at avatars/<id>/profile.
+	if authID := c.GetString("user_id"); authID == "" || authID != userID {
+		utils.ErrorResponse(c, http.StatusForbidden, "cannot update another user's profile")
 		return
 	}
 
@@ -279,6 +301,13 @@ func (h *UserHandler) DeleteUserImage(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID, ok := utils.GetParamOrAbort(c, "id")
 	if !ok {
+		return
+	}
+
+	// Service-role storage bypasses RLS, so enforce ownership here: a user may
+	// only delete their own avatar.
+	if authID := c.GetString("user_id"); authID == "" || authID != userID {
+		utils.ErrorResponse(c, http.StatusForbidden, "cannot delete another user's profile image")
 		return
 	}
 

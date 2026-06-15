@@ -20,7 +20,15 @@ func NewRouter(db *gorm.DB) *gin.Engine {
 // NewRouterWithOptions builds the router with overridable wiring (notably the
 // auth middleware). Tests use this to inject a fake auth middleware.
 func NewRouterWithOptions(db *gorm.DB, opts routes.Options) *gin.Engine {
-	storageClient := storage.NewStorageClient(os.Getenv("API_URL"), os.Getenv("anon_key"))
+	// Storage runs server-side with the service-role key so it bypasses RLS;
+	// the anon key would be rejected by the avatars bucket policies. Warn loudly
+	// if it's unset rather than letting uploads fail later with an opaque
+	// "Invalid Compact JWS" from the storage API.
+	serviceKey := os.Getenv("service_role_key")
+	if serviceKey == "" {
+		log.Warn(context.Background(), "service_role_key is not set; storage uploads/deletes will fail")
+	}
+	storageClient := storage.NewStorageClient(os.Getenv("API_URL"), serviceKey)
 	appleClient, err := apple.NewClientFromEnv()
 	if err != nil {
 		log.Warn(context.Background(), "Apple Sign-In revocation disabled", err)

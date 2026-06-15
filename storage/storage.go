@@ -15,6 +15,13 @@ type StorageClient struct {
 	httpClient *http.Client
 }
 
+// NewStorageClient builds a client for Supabase Storage. apiKey must be the
+// project's service-role key: the client uses it as both the apikey and the
+// Authorization bearer, so it bypasses storage RLS to perform trusted
+// server-side reads/writes. Passing the anon key instead causes uploads to
+// fail with "new row violates row-level security policy" (the anon role is not
+// granted INSERT on buckets); passing an empty/non-JWT value fails earlier with
+// "Invalid Compact JWS". Ownership is enforced in the handlers, not by RLS.
 func NewStorageClient(projectURL, apiKey string) *StorageClient {
 	return &StorageClient{
 		baseURL:    projectURL + "/storage/v1",
@@ -33,6 +40,7 @@ func (s *StorageClient) Upload(ctx context.Context, bucket, path, contentType st
 		return err
 	}
 
+	req.Header.Set("apikey", s.apiKey)
 	req.Header.Set("Authorization", "Bearer "+s.apiKey)
 	req.Header.Set("Content-Type", contentType)
 
@@ -62,6 +70,7 @@ func (s *StorageClient) Download(ctx context.Context, bucket, path string) ([]by
 		return nil, err
 	}
 
+	req.Header.Set("apikey", s.apiKey)
 	req.Header.Set("Authorization", "Bearer "+s.apiKey)
 
 	resp, err := s.httpClient.Do(req)
@@ -90,6 +99,7 @@ func (s *StorageClient) Delete(ctx context.Context, bucket, path string) error {
 		return err
 	}
 
+	req.Header.Set("apikey", s.apiKey)
 	req.Header.Set("Authorization", "Bearer "+s.apiKey)
 
 	resp, err := s.httpClient.Do(req)
