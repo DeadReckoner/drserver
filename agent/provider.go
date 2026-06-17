@@ -12,6 +12,10 @@ import (
 // Both OpenAI and Anthropic implementations can satisfy this interface
 // for the structured roadmap generation flow.
 type Provider interface {
+	// Name returns a short identifier for the backend ("openai", "anthropic").
+	// Used for observability so logs/dashboards show which provider ran a job.
+	Name() string
+
 	// GenerateStrategicRoadmap generates the high-level roadmap with phases and milestones
 	GenerateStrategicRoadmap(ctx context.Context, goalReq types.GoalRequest) (*types.Roadmap, error)
 
@@ -37,6 +41,8 @@ type OpenAIProvider struct{}
 func NewOpenAIProvider() *OpenAIProvider {
 	return &OpenAIProvider{}
 }
+
+func (p *OpenAIProvider) Name() string { return string(ProviderOpenAI) }
 
 func (p *OpenAIProvider) GenerateStrategicRoadmap(ctx context.Context, goalReq types.GoalRequest) (*types.Roadmap, error) {
 	return GenerateStrategicRoadmapFromGoalRequest(ctx, goalReq)
