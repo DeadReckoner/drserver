@@ -244,23 +244,27 @@ func setupHabitRoutes(rg *gin.RouterGroup, h *handlers.HabitHandler, nudge *hand
 func setupAgentRoutes(rg *gin.RouterGroup, h *handlers.AgentHandler) {
 	agent := rg.Group("/agent")
 	{
-		// OpenAI-based generation endpoints (existing)
+		// Structured roadmap generation endpoints. Backend provider is selected
+		// by the AI_PROVIDER env var (anthropic or openai); see agent.DefaultProvider.
+		// Note: /generate (synchronous) is slated for deprecation and remains OpenAI-only.
 		agent.POST("/generate", h.AgentGenerate)
 		agent.POST("/generateMilestone/:milestoneid", h.AgentGenerateMilestone)
 		agent.POST("/generate-async", h.AgentGenerateAsync)
 		agent.POST("/generate-next-milestone-async/:milestoneid", utils.ValidateUUID("milestoneid"), h.AgentGenerateNextMilestoneAsync)
 
-		// Anthropic-based conversational chat endpoint (new)
+		// Anthropic-based conversational chat endpoint
 		// Multi-turn conversation with tool use for roadmap generation, editing, and coaching
 		agent.POST("/chat", h.Chat)
 		agent.DELETE("/chat/session/:session_id", h.EndChatSession)
 
-		// OpenAI-based session endpoints (existing - placeholder implementation)
+		// DEPRECATED: these never had a working implementation (no persistence, no
+		// model call). Superseded by /agent/chat. They now return 410 Gone.
+		// TODO: remove once no clients call them.
 		sessions := agent.Group("/sessions")
 		{
 			sessions.POST("", h.StartAISession)
-			sessions.GET("/:id", utils.ValidateUUID("id"), h.GetAISession)
-			sessions.POST("/:id/reply", utils.ValidateUUID("id"), h.ReplyAISession)
+			sessions.GET("/:id", h.GetAISession)
+			sessions.POST("/:id/reply", h.ReplyAISession)
 		}
 	}
 
