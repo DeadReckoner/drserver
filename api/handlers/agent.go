@@ -223,6 +223,7 @@ func (h *AgentHandler) GetJobStatus(c *gin.Context) {
 
 func processRoadmapGeneration(ctx context.Context, provider agent.Provider, jobID, roadmapID, userID string, req types.GoalRequest) {
 	log.Info(ctx, "Starting roadmap generation process", fmt.Sprintf("JobID: %s, RoadmapID: %s, UserID: %s", jobID, roadmapID, userID))
+	log.Info(ctx, "AI provider selected", fmt.Sprintf("provider=%s, JobID: %s", provider.Name(), jobID))
 
 	updateJobProgress(jobID, 5, string(types.JobStatusProcessing), "Initializing AI generation...")
 
@@ -521,6 +522,7 @@ func (h *AgentHandler) AgentGenerateNextMilestoneAsync(c *gin.Context) {
 func processNextMilestoneGeneration(ctx context.Context, provider agent.Provider, jobID, milestoneID, userID string, req types.GenerateNextMilestoneRequest) {
 	log.Info(ctx, "Starting next milestone generation process",
 		fmt.Sprintf("JobID: %s, MilestoneID: %s, UserID: %s", jobID, milestoneID, userID))
+	log.Info(ctx, "AI provider selected", fmt.Sprintf("provider=%s, JobID: %s", provider.Name(), jobID))
 
 	updateJobProgress(jobID, 5, string(types.JobStatusProcessing), "Reviewing your milestone feedback...")
 
