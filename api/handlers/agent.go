@@ -23,6 +23,7 @@ import (
 
 type AgentHandler struct {
 	db               *gorm.DB
+	provider         agent.Provider
 	anthropicService *anthropic.Service
 }
 
@@ -34,7 +35,11 @@ func NewAgentHandler(db *gorm.DB) *AgentHandler {
 	}
 
 	return &AgentHandler{
-		db:               db,
+		db: db,
+		// Selects the structured-generation backend from the AI_PROVIDER env var
+		// (anthropic vs. openai). Resolved once at startup; env is fixed for the
+		// process lifetime.
+		provider:         agent.DefaultProvider(),
 		anthropicService: anthropicSvc,
 	}
 }
@@ -132,7 +137,7 @@ func (h *AgentHandler) AgentGenerateAsync(c *gin.Context) {
 	// Use background context for the goroutine so it doesn't get cancelled when the HTTP request completes
 	// Create logger with JobID as correlation ID for tracking
 	bgCtx := log.WithLogger(context.Background(), log.NewLogger(job.JobID))
-	go processRoadmapGeneration(bgCtx, job.JobID, draft.RoadmapID, userID, req)
+	go processRoadmapGeneration(bgCtx, h.provider, job.JobID, draft.RoadmapID, userID, req)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"status":     job.Status,
@@ -216,7 +221,7 @@ func (h *AgentHandler) GetJobStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID string, req types.GoalRequest) {
+func processRoadmapGeneration(ctx context.Context, provider agent.Provider, jobID, roadmapID, userID string, req types.GoalRequest) {
 	log.Info(ctx, "Starting roadmap generation process", fmt.Sprintf("JobID: %s, RoadmapID: %s, UserID: %s", jobID, roadmapID, userID))
 
 	updateJobProgress(jobID, 5, string(types.JobStatusProcessing), "Initializing AI generation...")
@@ -225,7 +230,7 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 	log.Info(ctx, "Processing strategic roadmap generation", fmt.Sprintf("JobID: %s, RoadmapID: %s", jobID, roadmapID))
 
 	// Step 1: Generate strategic roadmap (phases with milestones)
-	roadmap, err := agent.GenerateStrategicRoadmapFromGoalRequest(ctx, req)
+	roadmap, err := provider.GenerateStrategicRoadmap(ctx, req)
 	if err != nil {
 		log.Info(ctx, "Strategic roadmap generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
 		handleGenerationError(jobID, roadmapID, userID, err)
@@ -246,7 +251,7 @@ func processRoadmapGeneration(ctx context.Context, jobID, roadmapID, userID stri
 	}
 
 	if firstMilestone != nil {
-		tasks, err := agent.GenerateMilestoneTasksFromGoalRequest(ctx, req, firstMilestone)
+		tasks, err := provider.GenerateMilestoneTasks(ctx, req, firstMilestone)
 		if err != nil {
 			log.Info(ctx, "Milestone tasks generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
 			handleGenerationError(jobID, roadmapID, userID, err)
@@ -430,7 +435,7 @@ func (h *AgentHandler) AgentGenerateMilestone(c *gin.Context) {
 	log.Info(ctx, "Start Time:", start)
 
 	// Generate tasks for this specific milestone
-	tasks, err := agent.GenerateMilestoneTasksFromGoalRequest(ctx, goalReq, &milestone)
+	tasks, err := h.provider.GenerateMilestoneTasks(ctx, goalReq, &milestone)
 	if err != nil {
 		utils.InternalErrorResponse(c, err)
 		return
@@ -498,7 +503,7 @@ func (h *AgentHandler) AgentGenerateNextMilestoneAsync(c *gin.Context) {
 	}
 
 	bgCtx := log.WithLogger(context.Background(), log.NewLogger(job.JobID))
-	go processNextMilestoneGeneration(bgCtx, job.JobID, milestoneID, userID, req)
+	go processNextMilestoneGeneration(bgCtx, h.provider, job.JobID, milestoneID, userID, req)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"status":       job.Status,
@@ -513,7 +518,7 @@ func (h *AgentHandler) AgentGenerateNextMilestoneAsync(c *gin.Context) {
 // processNextMilestoneGeneration runs the two-step AI flow (adjustments +
 // tasks) for the "generate next milestone" endpoint, broadcasting progress
 // over the existing websocket infrastructure.
-func processNextMilestoneGeneration(ctx context.Context, jobID, milestoneID, userID string, req types.GenerateNextMilestoneRequest) {
+func processNextMilestoneGeneration(ctx context.Context, provider agent.Provider, jobID, milestoneID, userID string, req types.GenerateNextMilestoneRequest) {
 	log.Info(ctx, "Starting next milestone generation process",
 		fmt.Sprintf("JobID: %s, MilestoneID: %s, UserID: %s", jobID, milestoneID, userID))
 
@@ -529,7 +534,7 @@ func processNextMilestoneGeneration(ctx context.Context, jobID, milestoneID, use
 
 	updateJobProgress(jobID, 15, string(types.JobStatusProcessing), "Analyzing what to adjust...")
 
-	adjustments, tasks, err := agent.GenerateNextMilestoneFromReview(ctx, req.GoalRequest, &milestone, req.Review)
+	adjustments, tasks, err := provider.GenerateNextMilestoneFromReview(ctx, req.GoalRequest, &milestone, req.Review)
 	if err != nil {
 		log.Info(ctx, "Next milestone generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
 		handleNextMilestoneError(jobID, milestoneID, userID, err)
@@ -645,78 +650,32 @@ func handleNextMilestoneError(jobID, milestoneID, userID string, err error) {
 	})
 }
 
+// sessionsDeprecationMessage points callers at the supported conversational
+// endpoint. The /agent/sessions handlers never had a working implementation
+// (no persistence, no model call), so they return 410 Gone rather than silently
+// succeeding with empty data.
+const sessionsDeprecationMessage = "The /agent/sessions endpoints are deprecated and were never functional. " +
+	"Use POST /api/v1/agent/chat for conversational roadmap generation."
+
+// StartAISession is deprecated.
+//
+// Deprecated: superseded by POST /agent/chat. Returns 410 Gone.
 func (h *AgentHandler) StartAISession(c *gin.Context) {
-	userID := c.GetString("user_id")
-	session := agent.AISession{
-		SessionID: uuid.New(),
-		UserID:    userID,
-		Status:    "collecting",
-		Context:   []agent.Message{},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	agent.SaveAISession(&session)
-
-	firstQ := agent.Message{Role: "assistant", Content: "What kind of goal would you like to achieve?"}
-	session.Context = append(session.Context, firstQ)
-
-	agent.UpdateAISessionContext(session.SessionID, session.Context)
-
-	utils.DataResponse(c, http.StatusOK, gin.H{
-		"session_id": session.SessionID,
-		"message":    firstQ.Content,
-	})
+	utils.ErrorResponse(c, http.StatusGone, sessionsDeprecationMessage)
 }
 
+// ReplyAISession is deprecated.
+//
+// Deprecated: superseded by POST /agent/chat. Returns 410 Gone.
 func (h *AgentHandler) ReplyAISession(c *gin.Context) {
-	sessionID := c.Param("id")
-	var req struct {
-		Message string `json:"message"`
-	}
-
-	if !utils.BindJSONOrAbort(c, &req) {
-		return
-	}
-
-	session, err := agent.LoadAISession(sessionID)
-	if err != nil {
-		utils.NotFoundResponse(c, "AI session")
-		return
-	}
-
-	session.Context = append(session.Context, agent.Message{Role: "user", Content: req.Message})
-
-	reply, isComplete, roadmap, err := agent.ContinueAISession(session.Context)
-	if err != nil {
-		utils.InternalErrorResponse(c, err)
-		return
-	}
-
-	session.Context = append(session.Context, agent.Message{Role: "assistant", Content: reply})
-	if isComplete {
-		session.Status = "complete"
-		session.Roadmap = roadmap
-	}
-	session.UpdatedAt = time.Now()
-
-	agent.UpdateAISession(&session)
-
-	resp := gin.H{"message": reply, "complete": isComplete}
-	if isComplete {
-		resp["roadmap"] = roadmap
-	}
-	utils.DataResponse(c, http.StatusOK, resp)
+	utils.ErrorResponse(c, http.StatusGone, sessionsDeprecationMessage)
 }
 
+// GetAISession is deprecated.
+//
+// Deprecated: superseded by POST /agent/chat. Returns 410 Gone.
 func (h *AgentHandler) GetAISession(c *gin.Context) {
-	sessionID := c.Param("id")
-	session, err := agent.LoadAISession(sessionID)
-	if err != nil {
-		utils.NotFoundResponse(c, "AI session")
-		return
-	}
-	utils.DataResponse(c, http.StatusOK, session)
+	utils.ErrorResponse(c, http.StatusGone, sessionsDeprecationMessage)
 }
 
 // ─── Anthropic Chat Handlers ─────────────────────────────────────────────────

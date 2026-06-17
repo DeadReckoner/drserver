@@ -11,8 +11,6 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 const (
@@ -27,18 +25,6 @@ const (
 type Message struct {
 	Role    string `json:"role"`    // "system", "user", or "assistant"
 	Content string `json:"content"` // The actual message content
-}
-
-// AISession represents an interactive session where the AI asks clarifying questions
-// before generating a roadmap (not currently fully implemented)
-type AISession struct {
-	SessionID uuid.UUID      `json:"session_id"`
-	UserID    string         `json:"user_id"`
-	Status    string         `json:"status"`  // "collecting" or "complete"
-	Context   []Message      `json:"context"` // chat history
-	Roadmap   *types.Roadmap `json:"roadmap,omitempty"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 // AIRequest represents the full request payload sent to OpenAI's API
@@ -1011,47 +997,7 @@ func ParseRoadmap(raw []byte) (*types.Roadmap, error) {
 	return &roadmap, nil
 }
 
-// ============================================================================
-// AI SESSION FUNCTIONS (NOT YET IMPLEMENTED)
-// ============================================================================
-// These functions are placeholders for a future interactive AI session feature
-// where the AI asks clarifying questions before generating a roadmap.
-//
-// Current flow: User provides goal → Generate roadmap immediately
-// Future flow: User provides goal → AI asks questions → Generate tailored roadmap
-// ============================================================================
-
-// ContinueAISession would handle multi-turn conversations with the AI
-// NOT CURRENTLY USED - placeholder for future interactive sessions
-func ContinueAISession(messages []Message) (reply string, isComplete bool, roadmap *types.Roadmap, err error) {
-	// TODO: Implement interactive session logic
-	// - If AI needs more info: return question, isComplete=false
-	// - If AI has enough info: generate roadmap, isComplete=true
-	return
-}
-
-// UpdateAISessionContext would append new messages to a session's context
-// NOT CURRENTLY USED - placeholder for future feature
-func UpdateAISessionContext(sessionID uuid.UUID, message []Message) {
-	// TODO: Update session context in database
-}
-
-// UpdateAISession would modify an existing AI session
-// NOT CURRENTLY USED - placeholder for future feature
-func UpdateAISession(sessionID *AISession) {
-	// TODO: Update session metadata in database
-}
-
-// SaveAISession would persist a session to the database
-// NOT CURRENTLY USED - placeholder for future feature
-func SaveAISession(sessionID *AISession) {
-	// TODO: Save session to database
-}
-
-// LoadAISession would retrieve a session from the database
-// NOT CURRENTLY USED - placeholder for future feature
-func LoadAISession(sessionID string) (AISession, error) {
-	var session AISession
-	// TODO: Load session from database
-	return session, nil
-}
+// AI session multi-turn functionality lives in the Anthropic-backed
+// /agent/chat endpoint (see agent/anthropic). The previous placeholder
+// stubs here were never implemented and have been removed; the legacy
+// /agent/sessions endpoints are deprecated.
