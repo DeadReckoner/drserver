@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -25,6 +26,8 @@ func NewProvider() *Provider {
 	client := anthropic.NewClient(option.WithAPIKey(apiKey))
 	return &Provider{client: client}
 }
+
+func (p *Provider) Name() string { return "anthropic" }
 
 // GenerateStrategicRoadmap generates the high-level roadmap with phases and milestones
 func (p *Provider) GenerateStrategicRoadmap(ctx context.Context, goalReq types.GoalRequest) (*types.Roadmap, error) {
@@ -110,14 +113,12 @@ func (p *Provider) GenerateMilestoneTasks(ctx context.Context, goalReq types.Goa
 	// Extract tool use result
 	for _, block := range msg.Content {
 		if block.Type == "tool_use" && block.Name == "generate_milestone_tasks" {
-			var result struct {
-				Tasks []types.Task `json:"tasks"`
-			}
-			if err := json.Unmarshal(block.Input, &result); err != nil {
+			tasks, err := parseMilestoneTasks(block.Input)
+			if err != nil {
 				return nil, fmt.Errorf("failed to parse tasks from tool output: %w", err)
 			}
-			log.Info(ctx, "Milestone tasks generated", fmt.Sprintf("Tasks: %d", len(result.Tasks)))
-			return result.Tasks, nil
+			log.Info(ctx, "Milestone tasks generated", fmt.Sprintf("Tasks: %d", len(tasks)))
+			return tasks, nil
 		}
 	}
 
@@ -182,14 +183,12 @@ func (p *Provider) GenerateNextMilestoneFromReview(
 	// Extract tasks
 	for _, block := range msg.Content {
 		if block.Type == "tool_use" && block.Name == "generate_milestone_tasks" {
-			var result struct {
-				Tasks []types.Task `json:"tasks"`
-			}
-			if err := json.Unmarshal(block.Input, &result); err != nil {
+			tasks, err := parseMilestoneTasks(block.Input)
+			if err != nil {
 				return nil, nil, fmt.Errorf("failed to parse tasks: %w", err)
 			}
-			log.Info(ctx, "Next milestone tasks generated", fmt.Sprintf("Tasks: %d", len(result.Tasks)))
-			return adjustments, result.Tasks, nil
+			log.Info(ctx, "Next milestone tasks generated", fmt.Sprintf("Tasks: %d", len(tasks)))
+			return adjustments, tasks, nil
 		}
 	}
 
@@ -238,6 +237,65 @@ func (p *Provider) generateAdjustments(ctx context.Context, userPrompt, mileston
 }
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
+
+// parseMilestoneTasks extracts the task list from a generate_milestone_tasks
+// tool call. The tool schema types "dependencies" as a string, but the prompt
+// asks for a JSON array of task titles, so Claude often returns an actual array.
+// types.Task.Dependencies is a *string holding a JSON-array literal (matching the
+// OpenAI path), so any array form is normalized to that string before unmarshaling.
+func parseMilestoneTasks(input []byte) ([]types.Task, error) {
+	var wrapper struct {
+		Tasks []json.RawMessage `json:"tasks"`
+	}
+	if err := json.Unmarshal(input, &wrapper); err != nil {
+		return nil, err
+	}
+
+	tasks := make([]types.Task, 0, len(wrapper.Tasks))
+	for _, rawTask := range wrapper.Tasks {
+		normalized, err := normalizeTaskDependencies(rawTask)
+		if err != nil {
+			return nil, err
+		}
+		var task types.Task
+		if err := json.Unmarshal(normalized, &task); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
+// normalizeTaskDependencies rewrites a task's "dependencies" field from a JSON
+// array (["A","B"]) into a JSON string literal ("[\"A\",\"B\"]") so it unmarshals
+// into types.Task.Dependencies (*string). Values that are already a string (or
+// null/absent) are passed through unchanged.
+func normalizeTaskDependencies(rawTask json.RawMessage) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rawTask, &fields); err != nil {
+		return nil, err
+	}
+
+	dep, ok := fields["dependencies"]
+	if !ok {
+		return rawTask, nil
+	}
+	trimmed := bytes.TrimSpace(dep)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return rawTask, nil // already a string (or null) — leave as-is
+	}
+
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, trimmed); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(compact.String())
+	if err != nil {
+		return nil, err
+	}
+	fields["dependencies"] = encoded
+	return json.Marshal(fields)
+}
 
 func buildGoalPrompt(goalReq types.GoalRequest) string {
 	prompt := fmt.Sprintf(`
