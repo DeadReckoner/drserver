@@ -19,12 +19,13 @@ func SendPushNotification(userID, notificationType, title, body string, data map
 	// Create context with logger using userID as correlation ID
 	ctx := log.WithLogger(context.Background(), log.NewLogger(userID))
 
-	tokens := database.GetActivePushTokens(ctx, userID)
-	if len(tokens) == 0 {
-		log.Info(ctx, "No active push tokens", userID)
-		return
-	}
-
+	// Record the in-app notification FIRST, independent of push delivery. The
+	// Notifications screen reads the notifications table, so it must be written
+	// even when the user has no active push token (web-only, push permission
+	// not granted, or token not yet registered). Previously this lived after
+	// the token check below, so a recipient without a registered device got the
+	// underlying event row (e.g. a pending friendship) but nothing in their
+	// Notifications list.
 	alert := types.Notification{
 		NotificationID: uuid.NewString(),
 		UserID:         userID,
@@ -34,8 +35,15 @@ func SendPushNotification(userID, notificationType, title, body string, data map
 		Data:           data,
 		Status:         string(types.NotificationStatusPending),
 	}
+	if err := database.CreateNotification(ctx, &alert); err != nil {
+		log.Error(ctx, "Failed to record in-app notification", err)
+	}
 
-	_ = database.CreateNotification(ctx, &alert)
+	tokens := database.GetActivePushTokens(ctx, userID)
+	if len(tokens) == 0 {
+		log.Info(ctx, "No active push tokens; recorded in-app notification, skipping push", userID)
+		return
+	}
 
 	// Calculate badge count for the user
 	badgeCount := database.CalculateBadgeCount(ctx, userID)
