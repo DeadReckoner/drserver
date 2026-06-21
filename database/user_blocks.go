@@ -5,6 +5,7 @@ import (
 
 	"dr/server/types"
 
+	"github.com/gin-gonic/gin"
 	"gorm.io/gorm/clause"
 )
 
@@ -38,4 +39,50 @@ func CreateBlock(blockerID, blockedID string) error {
 func RemoveBlock(blockerID, blockedID string) error {
 	return db.Where("blocker_id = ? AND blocked_id = ?", blockerID, blockedID).
 		Delete(&types.UserBlock{}).Error
+}
+
+// GetBlockedUsers returns the users the current user has blocked (blocker_id =
+// me), newest first, with each blocked user's profile. Only the caller's own
+// blocks are returned - a user can never see who has blocked them.
+func GetBlockedUsers(c *gin.Context) ([]types.BlockedUserResponse, error) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return nil, errors.New("missing or invalid user_id")
+	}
+	me := userID.(string)
+
+	var blocks []types.UserBlock
+	if err := db.Where("blocker_id = ?", me).Order("created_at DESC").Find(&blocks).Error; err != nil {
+		return nil, err
+	}
+	if len(blocks) == 0 {
+		return []types.BlockedUserResponse{}, nil
+	}
+
+	// Batch-load the blocked users' profiles in one query.
+	ids := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		ids = append(ids, b.BlockedID)
+	}
+	var users []types.User
+	if err := db.Where("user_id IN ?", ids).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	userMap := make(map[string]types.User, len(users))
+	for _, u := range users {
+		userMap[u.UserID] = u
+	}
+
+	resp := make([]types.BlockedUserResponse, 0, len(blocks))
+	for _, b := range blocks {
+		u, ok := userMap[b.BlockedID]
+		if !ok {
+			continue // blocked user no longer exists
+		}
+		resp = append(resp, types.BlockedUserResponse{
+			User:      u,
+			BlockedAt: b.CreatedAt,
+		})
+	}
+	return resp, nil
 }

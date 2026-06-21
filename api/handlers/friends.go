@@ -215,6 +215,18 @@ func (h *FriendHandler) BlockFriend(c *gin.Context) {
 	log.Info(ctx, "user blocked: "+friendUserID)
 }
 
+// GetBlockedUsers returns the users the current user has blocked, for a
+// "Blocked users" management list. Each entry can be lifted via
+// DELETE /friends/:id/block.
+func (h *FriendHandler) GetBlockedUsers(c *gin.Context) {
+	blocked, err := database.GetBlockedUsers(c)
+	if err != nil {
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+	utils.DataResponse(c, http.StatusOK, blocked)
+}
+
 // UnblockFriend lifts a block the current user previously placed, allowing them
 // to re-invite that person.
 func (h *FriendHandler) UnblockFriend(c *gin.Context) {

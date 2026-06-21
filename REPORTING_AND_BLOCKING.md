@@ -160,6 +160,7 @@ not a friendship id.
 POST   /api/v1/friends/:id/block     # Remove & Block (atomic)
 DELETE /api/v1/friends/:id/block     # Unblock (lets you re-invite them)
 DELETE /api/v1/friends/:id           # Plain Remove (existing, unchanged)
+GET    /api/v1/friends/blocked       # List users you've blocked
 ```
 
 - **Remove** ends the friendship, shared access, and messaging.
@@ -200,6 +201,43 @@ curl -X POST https://<host>/api/v1/friends/11111111-1111-1111-1111-111111111111/
 # Unblock (so you can re-invite later)
 curl -X DELETE https://<host>/api/v1/friends/11111111-1111-1111-1111-111111111111/block \
   -H "Authorization: Bearer $JWT"
+```
+
+### List blocked users
+
+```
+GET /api/v1/friends/blocked
+```
+
+Returns the users **the current user has blocked** (the ones they can unblock),
+newest first. A user can't see who has blocked *them* — only their own blocks.
+
+`200 OK`:
+
+```json
+[
+  {
+    "user": {
+      "user_id": "11111111-1111-1111-1111-111111111111",
+      "first_name": "Bad",
+      "last_name": "Actor",
+      "email": "actor@example.com"
+    },
+    "blocked_at": "2026-06-15T18:20:00Z"
+  }
+]
+```
+
+Empty list (`[]`) when nothing is blocked. Use it for a "Blocked users" settings
+screen — render each row with an Unblock button wired to
+`DELETE /friends/:id/block` (where `:id` is `user.user_id`), and/or to suppress
+re-invite UI for users already on the list.
+
+```ts
+const res = await fetch(`${API}/api/v1/friends/blocked`, {
+  headers: { Authorization: `Bearer ${token}` },
+});
+const blocked = await res.json(); // [{ user, blocked_at }]
 ```
 
 ---
