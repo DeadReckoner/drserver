@@ -176,3 +176,11 @@ type UserBlock struct {
 }
 
 func (UserBlock) TableName() string { return "user_blocks" }
+
+// BlockedUserResponse is one entry in GET /friends/blocked: the blocked user's
+// profile plus when the block was created. Only the blocks the current user
+// owns (blocker_id = me) are returned, since those are the ones they can lift.
+type BlockedUserResponse struct {
+	User      User      `json:"user"`
+	BlockedAt time.Time `json:"blocked_at"`
+}
