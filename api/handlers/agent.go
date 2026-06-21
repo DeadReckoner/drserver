@@ -10,6 +10,7 @@ import (
 	"dr/server/types"
 	"dr/server/websocket"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -222,6 +223,25 @@ func (h *AgentHandler) GetJobStatus(c *gin.Context) {
 }
 
 func processRoadmapGeneration(ctx context.Context, provider agent.Provider, jobID, roadmapID, userID string, req types.GoalRequest) {
+	// Time the whole async generation (job start → finish) and emit it as a
+	// structured "roadmap generation finished" event with a numeric
+	// generation_ms field, so Axiom can chart end-to-end generation latency.
+	// The HTTP request only enqueues this work, so its access-log duration_ms
+	// can't measure this. The defer covers every exit path; outcome stays
+	// "failed" unless the success path sets it.
+	start := time.Now()
+	outcome := "failed"
+	defer func() {
+		log.FromContext(ctx).LogAttrs(log.LevelInfo, "roadmap generation finished",
+			slog.String("job_id", jobID),
+			slog.String("roadmap_id", roadmapID),
+			slog.String("user_id", userID),
+			slog.String("provider", provider.Name()),
+			slog.String("outcome", outcome),
+			slog.Int64("generation_ms", time.Since(start).Milliseconds()),
+		)
+	}()
+
 	log.Info(ctx, "Starting roadmap generation process", fmt.Sprintf("JobID: %s, RoadmapID: %s, UserID: %s", jobID, roadmapID, userID))
 	log.Info(ctx, "AI provider selected", fmt.Sprintf("provider=%s, JobID: %s", provider.Name(), jobID))
 
@@ -287,6 +307,7 @@ func processRoadmapGeneration(ctx context.Context, provider agent.Provider, jobI
 	}
 	_ = database.UpdateBackgroundJob(ctx, &job)
 	_ = database.UpdateRoadmapGenerationStatus(ctx, roadmapID, string(types.GenerationStatusCompleted))
+	outcome = "completed"
 
 	// Bump AI usage counter only on successful completion. Failed generations
 	// (handled via handleGenerationError above) do not consume a credit.
