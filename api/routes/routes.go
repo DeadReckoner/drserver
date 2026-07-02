@@ -128,6 +128,7 @@ func setupFriendRoutes(rg *gin.RouterGroup, h *handlers.FriendHandler) {
 		friends.GET("/search", h.SearchFriends)
 		friends.GET("/requests", h.GetFriendRequests)
 		friends.GET("/blocked", h.GetBlockedUsers)
+		friends.GET("/anchoring", h.GetAnchoring)
 		friends.POST("/request/:id", utils.ValidateUUID("id"), h.CreateFriendRequest)
 		friends.GET("/:id/profile", utils.ValidateUUID("id"), h.GetFriendProfile)
 		friends.PATCH("/:id", utils.ValidateUUID("id"), h.UpdateFriendRequestStatus)

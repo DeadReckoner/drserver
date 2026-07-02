@@ -8,6 +8,7 @@ import (
 	"dr/server/notifications"
 	"dr/server/types"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -168,6 +169,74 @@ func (h *FriendHandler) GetFriendProfile(c *gin.Context) {
 	}
 
 	utils.DataResponse(c, http.StatusOK, response)
+}
+
+// GetAnchoring handles GET /friends/anchoring?date=YYYY-MM-DD
+// Returns every user the current user is an anchor for, grouped with their
+// anchored roadmaps and the tasks on each roadmap for the given day.
+// date defaults to "today" in the requesting user's timezone.
+func (h *FriendHandler) GetAnchoring(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Resolve the target calendar day as UTC midnight bounds, matching how
+	// task dates are stored (UTC calendar days).
+	var day time.Time
+	if dateStr := c.Query("date"); dateStr != "" {
+		parsed, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			log.Warn(ctx, "GetAnchoring: invalid date format", dateStr)
+			utils.BadRequestResponse(c, "invalid date format, use YYYY-MM-DD")
+			return
+		}
+		day = parsed
+	} else {
+		// "Today" flips at the requesting user's local midnight.
+		loc := time.UTC
+		if user, err := database.GetUserByID(c.GetString("user_id")); err == nil {
+			loc = types.LocationOrUTC(user.Timezone)
+		}
+		now := time.Now().In(loc)
+		day = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	}
+
+	owners, roadmaps, tasks, err := database.GetAnchoring(c, day, day.Add(24*time.Hour))
+	if err != nil {
+		log.Error(ctx, "GetAnchoring: failed to fetch anchored roadmaps", err)
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	tasksByRoadmap := make(map[string][]types.Task, len(roadmaps))
+	for _, t := range tasks {
+		tasksByRoadmap[t.RoadmapID] = append(tasksByRoadmap[t.RoadmapID], t)
+	}
+
+	roadmapsByOwner := make(map[string][]types.AnchoringRoadmapResponse, len(owners))
+	for _, r := range roadmaps {
+		roadmapTasks := tasksByRoadmap[r.RoadmapID]
+		if roadmapTasks == nil {
+			roadmapTasks = []types.Task{}
+		}
+		roadmapsByOwner[r.UserID] = append(roadmapsByOwner[r.UserID], types.AnchoringRoadmapResponse{
+			RoadmapID:   r.RoadmapID,
+			Goal:        r.Goal,
+			Description: r.Description,
+			Tasks:       roadmapTasks,
+		})
+	}
+
+	users := make([]types.AnchoringUserResponse, 0, len(owners))
+	for _, owner := range owners {
+		users = append(users, types.AnchoringUserResponse{
+			User:     owner,
+			Roadmaps: roadmapsByOwner[owner.UserID],
+		})
+	}
+
+	utils.DataResponse(c, http.StatusOK, types.AnchoringResponse{
+		Date:  day.Format("2006-01-02"),
+		Users: users,
+	})
 }
 
 func (h *FriendHandler) RemoveFriend(c *gin.Context) {
