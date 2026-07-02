@@ -147,6 +147,29 @@ type FriendProfileResponse struct {
 	ThreadID        string    `json:"thread_id"`
 }
 
+// AnchoringRoadmapResponse is a roadmap the current user anchors, carrying
+// only the tasks dated on the requested day.
+type AnchoringRoadmapResponse struct {
+	RoadmapID   string `json:"roadmap_id"`
+	Goal        string `json:"goal"`
+	Description string `json:"description,omitempty"`
+	Tasks       []Task `json:"tasks"`
+}
+
+// AnchoringUserResponse groups a roadmap owner with the roadmaps of theirs
+// that the current user anchors.
+type AnchoringUserResponse struct {
+	User     User                       `json:"user"`
+	Roadmaps []AnchoringRoadmapResponse `json:"roadmaps"`
+}
+
+// AnchoringResponse is the payload for GET /friends/anchoring: everyone the
+// current user is an anchor for, with each roadmap's tasks for the given day.
+type AnchoringResponse struct {
+	Date  string                  `json:"date"` // YYYY-MM-DD
+	Users []AnchoringUserResponse `json:"users"`
+}
+
 /******************************************************************************
  * ANCHOR REQUESTS
  ******************************************************************************/

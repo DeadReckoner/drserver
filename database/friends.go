@@ -513,6 +513,51 @@ func GetAnchorRequests(c *gin.Context) []types.AnchorRequest {
 	return requests
 }
 
+// GetAnchoring returns everything needed for the anchor's daily view: all
+// non-archived roadmaps where the current user is the anchor, the owners of
+// those roadmaps, and the tasks on those roadmaps dated within
+// [dayStart, dayEnd). Task dates are stored as UTC calendar days, so callers
+// pass UTC midnight bounds for the target day.
+func GetAnchoring(c *gin.Context, dayStart, dayEnd time.Time) ([]types.User, []types.Roadmap, []types.Task, error) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return nil, nil, nil, errors.New("missing or invalid user_id")
+	}
+
+	var roadmaps []types.Roadmap
+	if err := db.Where("anchor_id = ? AND archived = false", userID.(string)).
+		Find(&roadmaps).Error; err != nil {
+		return nil, nil, nil, err
+	}
+	if len(roadmaps) == 0 {
+		return []types.User{}, []types.Roadmap{}, []types.Task{}, nil
+	}
+
+	roadmapIDs := make([]string, 0, len(roadmaps))
+	ownerIDs := make([]string, 0, len(roadmaps))
+	for _, r := range roadmaps {
+		roadmapIDs = append(roadmapIDs, r.RoadmapID)
+		ownerIDs = append(ownerIDs, r.UserID)
+	}
+
+	var owners []types.User
+	if err := db.Where("user_id IN ?", ownerIDs).Find(&owners).Error; err != nil {
+		return nil, nil, nil, err
+	}
+
+	var tasks []types.Task
+	if err := db.Where("roadmap_id IN ? AND date >= ? AND date < ?", roadmapIDs, dayStart, dayEnd).
+		Preload("Steps", func(db *gorm.DB) *gorm.DB {
+			return db.Order("number ASC")
+		}).
+		Order("day ASC").
+		Find(&tasks).Error; err != nil {
+		return nil, nil, nil, err
+	}
+
+	return owners, roadmaps, tasks, nil
+}
+
 // AcceptAnchorRequest accepts an anchor request and updates the roadmap or habit
 func AcceptAnchorRequest(c *gin.Context, requestID string) (types.AnchorRequest, error) {
 	userID, exists := c.Get("user_id")
