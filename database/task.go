@@ -11,6 +11,30 @@ import (
 	"gorm.io/gorm"
 )
 
+// GetMissedTasks returns the overdue, incomplete tasks for a roadmap owned by
+// the current user (drserver#48). Unlike GetOverdueTasks it verifies the
+// roadmap exists and belongs to the caller, returning gorm.ErrRecordNotFound
+// otherwise so the handler can 404 instead of silently returning [].
+func GetMissedTasks(c *gin.Context, roadmapID string) ([]types.Task, error) {
+	userID, exists := c.Get("user_id")
+	if !exists || userID == "" {
+		return nil, errors.New("missing or invalid user_id")
+	}
+
+	var roadmap types.Roadmap
+	if err := db.Select("roadmap_id").
+		Where("roadmap_id = ? AND user_id = ?", roadmapID, userID.(string)).
+		First(&roadmap).Error; err != nil {
+		return nil, err
+	}
+
+	tasks := GetOverdueTasks(c, roadmapID)
+	if tasks == nil {
+		tasks = []types.Task{}
+	}
+	return tasks, nil
+}
+
 // GetOverdueTasks returns all incomplete tasks with dates before today.
 // Optionally filters by roadmap_id if provided.
 // Excludes tasks from archived roadmaps.
