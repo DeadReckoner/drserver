@@ -5,6 +5,7 @@
 //	ScanMissedTasks             -> missed_tasks.go            (Step 7)
 //	ScanAtRiskMilestones        -> at_risk_milestones.go      (Step 7)
 //	ScanFallingBehind           -> falling_behind.go          (Step 8)
+//	ScanNextMilestoneNudges     -> next_milestone.go          (drserver#67)
 //	DeliverPendingNotifications -> deliver_pending.go         (Step 9)
 //	DeliverDueDigests           -> deliver_digests.go         (Step 10)
 //	DeliverAnchorBatches        -> deliver_anchor_batches.go  (Step 10)
