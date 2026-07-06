@@ -246,6 +246,12 @@ func setupHabitRoutes(rg *gin.RouterGroup, h *handlers.HabitHandler, nudge *hand
 func setupAgentRoutes(rg *gin.RouterGroup, h *handlers.AgentHandler) {
 	agent := rg.Group("/agent")
 	{
+		// First-time AI & professional advice acknowledgment (drserver#65).
+		// Generation endpoints 403 with code "ai_ack_required" until the
+		// current version is accepted.
+		agent.GET("/acknowledgment", h.GetAIAcknowledgment)
+		agent.POST("/acknowledgment", h.AcceptAIAcknowledgment)
+
 		// Structured roadmap generation endpoints. Backend provider is selected
 		// by the AI_PROVIDER env var (anthropic or openai); see agent.DefaultProvider.
 		// Note: /generate (synchronous) is slated for deprecation and remains OpenAI-only.

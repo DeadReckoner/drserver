@@ -581,6 +581,30 @@ type Step struct {
  * AI AGENT
  ******************************************************************************/
 
+// CurrentAIAckVersion is the version of the AI & professional advice
+// acknowledgment copy (drserver#65). Bump it when AIAckText changes in a way
+// that requires users to re-accept; acceptance is stored per version.
+const CurrentAIAckVersion = 1
+
+// AIAckText is the acknowledgment copy shown before a user's first AI
+// roadmap generation. Served to the client so copy updates (with a version
+// bump) don't require an app release.
+const AIAckText = "I understand Dead Reckoner uses AI-assisted planning. AI outputs may be wrong, incomplete, outdated, or unsuitable for my circumstances. Dead Reckoner is not professional advice. I am responsible for reviewing any roadmap, task, habit, or recommendation before acting on it."
+
+// AIAcknowledgment records a user's acceptance of one version of the AI
+// acknowledgment. Kept per version as an audit trail of which copy the user
+// agreed to and when.
+type AIAcknowledgment struct {
+	UserID     string    `gorm:"type:uuid;primaryKey" json:"user_id"`
+	Version    int       `gorm:"primaryKey" json:"version"`
+	AppVersion string    `gorm:"column:app_version" json:"app_version"`
+	AcceptedAt time.Time `gorm:"autoCreateTime" json:"accepted_at"`
+}
+
+func (AIAcknowledgment) TableName() string {
+	return "ai_acknowledgments"
+}
+
 type Prompt struct {
 	UserPrompt string `json:"user_prompt"`
 }
