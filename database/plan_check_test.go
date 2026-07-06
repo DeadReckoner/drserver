@@ -158,7 +158,7 @@ func TestCheckAIGeneration_FreeAtLimit_Blocked(t *testing.T) {
 	res, err := CheckAIGeneration(testUserID)
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.Equal(t, "ai_generations_per_month", res.Feature)
+	assert.Equal(t, "ai_generations_per_day", res.Feature)
 	assert.Equal(t, 3, res.Limit)
 	assert.Equal(t, 3, res.Current)
 }
