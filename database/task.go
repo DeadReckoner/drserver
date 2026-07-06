@@ -53,6 +53,7 @@ func GetOverdueTasks(c *gin.Context, roadmapID string) []types.Task {
 		tasks[i].Status = string(types.StatusOverdue)
 	}
 
+	AnnotateTaskPaths(tasks)
 	return tasks
 }
 
@@ -110,6 +111,7 @@ func GetTasks(c *gin.Context, startDate, endDate, roadmapID string) []types.Task
 		log.Printf("Found %d tasks\n", len(tasks))
 	}
 
+	AnnotateTaskPaths(tasks)
 	return tasks
 }
 
@@ -177,9 +179,12 @@ func GetTask(c *gin.Context, taskID string) types.Task {
 
 	if result.Error != nil {
 		log.Println("Error fetching task:", result.Error)
+		return task
 	}
 
-	return task
+	annotated := []types.Task{task}
+	AnnotateTaskPaths(annotated)
+	return annotated[0]
 }
 
 func UpdateTask(c *gin.Context, taskID string, updatedTask types.Task) types.Task {
