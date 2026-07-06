@@ -670,68 +670,86 @@ func RejectAnchorRequest(c *gin.Context, requestID string) (types.AnchorRequest,
 	return anchorRequest, nil
 }
 
-// RemoveAnchor removes an anchor from a roadmap
-func RemoveAnchor(c *gin.Context, roadmapID string) error {
+// RemoveAnchor removes an anchor from a roadmap. Either the roadmap owner or
+// the current anchor themselves may end the relationship (drserver#93).
+// Returns the roadmap as it was before removal so callers can notify both
+// parties.
+func RemoveAnchor(c *gin.Context, roadmapID string) (types.Roadmap, error) {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
-		return errors.New("missing or invalid user_id")
+		return types.Roadmap{}, errors.New("missing or invalid user_id")
 	}
 
 	userIDStr := userID.(string)
 
-	// Verify the roadmap exists and belongs to the user
 	var roadmap types.Roadmap
-	if err := db.Where("roadmap_id = ? AND user_id = ?", roadmapID, userIDStr).First(&roadmap).Error; err != nil {
+	if err := db.Where("roadmap_id = ?", roadmapID).First(&roadmap).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return errors.New("roadmap not found or you don't have permission")
+			return types.Roadmap{}, errors.New("roadmap not found or you don't have permission")
 		}
-		return err
+		return types.Roadmap{}, err
+	}
+
+	isOwner := roadmap.UserID == userIDStr
+	isAnchor := roadmap.AnchorID != nil && *roadmap.AnchorID == userIDStr
+	if !isOwner && !isAnchor {
+		// Same message as the not-found case so strangers can't probe
+		// whether a roadmap ID exists.
+		return types.Roadmap{}, errors.New("roadmap not found or you don't have permission")
 	}
 
 	// Check if there's an anchor
 	if roadmap.AnchorID == nil {
-		return errors.New("no anchor assigned to this roadmap")
+		return types.Roadmap{}, errors.New("no anchor assigned to this roadmap")
 	}
 
 	// Remove the anchor
 	if err := db.Model(&types.Roadmap{}).
 		Where("roadmap_id = ?", roadmapID).
 		Update("anchor_id", nil).Error; err != nil {
-		return err
+		return types.Roadmap{}, err
 	}
 
-	return nil
+	return roadmap, nil
 }
 
-// RemoveHabitAnchor removes an anchor from a habit
-func RemoveHabitAnchor(c *gin.Context, habitID string) error {
+// RemoveHabitAnchor removes an anchor from a habit. Either the habit owner or
+// the current anchor themselves may end the relationship (drserver#93).
+// Returns the habit as it was before removal so callers can notify both
+// parties.
+func RemoveHabitAnchor(c *gin.Context, habitID string) (types.Habit, error) {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
-		return errors.New("missing or invalid user_id")
+		return types.Habit{}, errors.New("missing or invalid user_id")
 	}
 
 	userIDStr := userID.(string)
 
-	// Verify the habit exists and belongs to the user
 	var habit types.Habit
-	if err := db.Where("habit_id = ? AND user_id = ?", habitID, userIDStr).First(&habit).Error; err != nil {
+	if err := db.Where("habit_id = ?", habitID).First(&habit).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return errors.New("habit not found or you don't have permission")
+			return types.Habit{}, errors.New("habit not found or you don't have permission")
 		}
-		return err
+		return types.Habit{}, err
+	}
+
+	isOwner := habit.UserID == userIDStr
+	isAnchor := habit.AnchorID != nil && *habit.AnchorID == userIDStr
+	if !isOwner && !isAnchor {
+		return types.Habit{}, errors.New("habit not found or you don't have permission")
 	}
 
 	// Check if there's an anchor
 	if habit.AnchorID == nil {
-		return errors.New("no anchor assigned to this habit")
+		return types.Habit{}, errors.New("no anchor assigned to this habit")
 	}
 
 	// Remove the anchor
 	if err := db.Model(&types.Habit{}).
 		Where("habit_id = ?", habitID).
 		Update("anchor_id", nil).Error; err != nil {
-		return err
+		return types.Habit{}, err
 	}
 
-	return nil
+	return habit, nil
 }
