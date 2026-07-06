@@ -77,6 +77,13 @@ type User struct {
 	// for quiet hours, 9am-local anchor batches, and digest delivery times.
 	// Defaults to 'UTC' at the database level for safety.
 	Timezone string `gorm:"column:timezone;not null;default:UTC" json:"timezone,omitempty"`
+
+	// OnboardingCompleted persists first-run onboarding completion
+	// server-side (drmobile#185) so re-login or a new device doesn't replay
+	// onboarding. Set by the client via PATCH /users/:id; one-way in practice
+	// (GORM struct Updates ignores false, which is fine for a completion
+	// flag).
+	OnboardingCompleted bool `gorm:"column:onboarding_completed;default:false" json:"onboarding_completed"`
 }
 
 // ParseFullName splits FullName into FirstName and LastName if they are not already set.
