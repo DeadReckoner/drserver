@@ -3,6 +3,7 @@ package database
 import (
 	"errors"
 	"log"
+	"sort"
 	"time"
 
 	"dr/server/types"
@@ -515,47 +516,70 @@ func GetAnchorRequests(c *gin.Context) []types.AnchorRequest {
 
 // GetAnchoring returns everything needed for the anchor's daily view: all
 // non-archived roadmaps where the current user is the anchor, the owners of
-// those roadmaps, and the tasks on those roadmaps dated within
-// [dayStart, dayEnd). Task dates are stored as UTC calendar days, so callers
-// pass UTC midnight bounds for the target day.
-func GetAnchoring(c *gin.Context, dayStart, dayEnd time.Time) ([]types.User, []types.Roadmap, []types.Task, error) {
+// those roadmaps, the tasks on those roadmaps dated within [dayStart, dayEnd),
+// and the non-archived habits the user anchors (with completions for the same
+// day window, so the caller can tell whether each habit was done that day).
+// Task/completion dates are stored as UTC calendar days, so callers pass UTC
+// midnight bounds for the target day.
+func GetAnchoring(c *gin.Context, dayStart, dayEnd time.Time) ([]types.User, []types.Roadmap, []types.Task, []types.Habit, error) {
 	userID, exists := c.Get("user_id")
 	if !exists || userID == "" {
-		return nil, nil, nil, errors.New("missing or invalid user_id")
+		return nil, nil, nil, nil, errors.New("missing or invalid user_id")
 	}
+	userIDStr := userID.(string)
 
 	var roadmaps []types.Roadmap
-	if err := db.Where("anchor_id = ? AND archived = false", userID.(string)).
+	if err := db.Where("anchor_id = ? AND archived = false", userIDStr).
 		Find(&roadmaps).Error; err != nil {
-		return nil, nil, nil, err
-	}
-	if len(roadmaps) == 0 {
-		return []types.User{}, []types.Roadmap{}, []types.Task{}, nil
+		return nil, nil, nil, nil, err
 	}
 
+	var habits []types.Habit
+	if err := db.Where("anchor_id = ? AND archived = false", userIDStr).
+		Preload("Completions", func(db *gorm.DB) *gorm.DB {
+			return db.Where("date >= ? AND date < ?", dayStart, dayEnd)
+		}).
+		Find(&habits).Error; err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	if len(roadmaps) == 0 && len(habits) == 0 {
+		return []types.User{}, []types.Roadmap{}, []types.Task{}, []types.Habit{}, nil
+	}
+
+	ownerIDSet := make(map[string]struct{})
 	roadmapIDs := make([]string, 0, len(roadmaps))
-	ownerIDs := make([]string, 0, len(roadmaps))
 	for _, r := range roadmaps {
 		roadmapIDs = append(roadmapIDs, r.RoadmapID)
-		ownerIDs = append(ownerIDs, r.UserID)
+		ownerIDSet[r.UserID] = struct{}{}
 	}
+	for _, h := range habits {
+		ownerIDSet[h.UserID] = struct{}{}
+	}
+	ownerIDs := make([]string, 0, len(ownerIDSet))
+	for id := range ownerIDSet {
+		ownerIDs = append(ownerIDs, id)
+	}
+	sort.Strings(ownerIDs)
 
 	var owners []types.User
 	if err := db.Where("user_id IN ?", ownerIDs).Find(&owners).Error; err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	var tasks []types.Task
-	if err := db.Where("roadmap_id IN ? AND date >= ? AND date < ?", roadmapIDs, dayStart, dayEnd).
-		Preload("Steps", func(db *gorm.DB) *gorm.DB {
-			return db.Order("number ASC")
-		}).
-		Order("day ASC").
-		Find(&tasks).Error; err != nil {
-		return nil, nil, nil, err
+	if len(roadmapIDs) > 0 {
+		if err := db.Where("roadmap_id IN ? AND date >= ? AND date < ?", roadmapIDs, dayStart, dayEnd).
+			Preload("Steps", func(db *gorm.DB) *gorm.DB {
+				return db.Order("number ASC")
+			}).
+			Order("day ASC").
+			Find(&tasks).Error; err != nil {
+			return nil, nil, nil, nil, err
+		}
 	}
 
-	return owners, roadmaps, tasks, nil
+	return owners, roadmaps, tasks, habits, nil
 }
 
 // AcceptAnchorRequest accepts an anchor request and updates the roadmap or habit

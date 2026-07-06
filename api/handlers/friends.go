@@ -173,7 +173,8 @@ func (h *FriendHandler) GetFriendProfile(c *gin.Context) {
 
 // GetAnchoring handles GET /friends/anchoring?date=YYYY-MM-DD
 // Returns every user the current user is an anchor for, grouped with their
-// anchored roadmaps and the tasks on each roadmap for the given day.
+// anchored roadmaps (with each roadmap's tasks for the given day) and their
+// anchored habits (with completions for that day).
 // date defaults to "today" in the requesting user's timezone.
 func (h *FriendHandler) GetAnchoring(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -199,7 +200,7 @@ func (h *FriendHandler) GetAnchoring(c *gin.Context) {
 		day = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	}
 
-	owners, roadmaps, tasks, err := database.GetAnchoring(c, day, day.Add(24*time.Hour))
+	owners, roadmaps, tasks, habits, err := database.GetAnchoring(c, day, day.Add(24*time.Hour))
 	if err != nil {
 		log.Error(ctx, "GetAnchoring: failed to fetch anchored roadmaps", err)
 		utils.InternalErrorResponse(c, err)
@@ -225,11 +226,25 @@ func (h *FriendHandler) GetAnchoring(c *gin.Context) {
 		})
 	}
 
+	habitsByOwner := make(map[string][]types.Habit, len(owners))
+	for _, h := range habits {
+		habitsByOwner[h.UserID] = append(habitsByOwner[h.UserID], h)
+	}
+
 	users := make([]types.AnchoringUserResponse, 0, len(owners))
 	for _, owner := range owners {
+		ownerRoadmaps := roadmapsByOwner[owner.UserID]
+		if ownerRoadmaps == nil {
+			ownerRoadmaps = []types.AnchoringRoadmapResponse{}
+		}
+		ownerHabits := habitsByOwner[owner.UserID]
+		if ownerHabits == nil {
+			ownerHabits = []types.Habit{}
+		}
 		users = append(users, types.AnchoringUserResponse{
 			User:     owner,
-			Roadmaps: roadmapsByOwner[owner.UserID],
+			Roadmaps: ownerRoadmaps,
+			Habits:   ownerHabits,
 		})
 	}
 
