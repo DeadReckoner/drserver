@@ -156,11 +156,14 @@ type AnchoringRoadmapResponse struct {
 	Tasks       []Task `json:"tasks"`
 }
 
-// AnchoringUserResponse groups a roadmap owner with the roadmaps of theirs
-// that the current user anchors.
+// AnchoringUserResponse groups an owner with the roadmaps and habits of
+// theirs that the current user anchors. Each habit's Completions are limited
+// to the requested day, so an empty completions list means "not done that
+// day".
 type AnchoringUserResponse struct {
 	User     User                       `json:"user"`
 	Roadmaps []AnchoringRoadmapResponse `json:"roadmaps"`
+	Habits   []Habit                    `json:"habits"`
 }
 
 // AnchoringResponse is the payload for GET /friends/anchoring: everyone the
