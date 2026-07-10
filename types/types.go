@@ -533,6 +533,15 @@ type Task struct {
 	Completed bool       `json:"completed"`
 	Date      *time.Time `json:"date"`
 
+	// Position path within the roadmap, for the Today-tab badge (e.g.
+	// "Phase 1 · Milestone 2 · Task 3"). 1-based; computed per-request by
+	// database.AnnotateTaskPaths, never stored. PhaseNumber is 0 (omitted)
+	// when the milestone has no phase; all three are omitted when the task
+	// has no milestone.
+	PhaseNumber     int `gorm:"-" json:"phase_number,omitempty"`
+	MilestoneNumber int `gorm:"-" json:"milestone_number,omitempty"`
+	TaskNumber      int `gorm:"-" json:"task_number,omitempty"`
+
 	Steps []Step `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps,omitempty"`
 }
 
