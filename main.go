@@ -50,6 +50,7 @@ func setupScheduler(db *gorm.DB) *cron.Cron {
 	mustRegister(c, "* * * * *", "scan_missed_tasks", jobs.ScanMissedTasks(db))
 	mustRegister(c, "*/5 * * * *", "scan_falling_behind", jobs.ScanFallingBehind(db))
 	mustRegister(c, "*/5 * * * *", "scan_at_risk_milestones", jobs.ScanAtRiskMilestones(db))
+	mustRegister(c, "*/5 * * * *", "scan_next_milestone", jobs.ScanNextMilestoneNudges(db))
 	mustRegister(c, "* * * * *", "deliver_due_digests", jobs.DeliverDueDigests(db))
 	mustRegister(c, "* * * * *", "deliver_anchor_batches", jobs.DeliverAnchorBatches(db))
 	mustRegister(c, "* * * * *", "deliver_pending", jobs.DeliverPendingNotifications(db))
