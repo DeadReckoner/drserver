@@ -115,6 +115,8 @@ func setupUserRoutes(rg *gin.RouterGroup, h *handlers.UserHandler) {
 		users.POST("/with-image", h.CreateUserWithImage)
 		users.GET("", h.GetUser)
 		users.GET("/search", h.SearchUsers)
+		// Account-page streak + rolling 30-day compliance (drmobile#151)
+		users.GET("/stats", h.GetUserStats)
 		users.PATCH("/:id", utils.ValidateUUID("id"), h.UpdateUser)
 		users.PATCH("/:id/with-image", utils.ValidateUUID("id"), h.UpdateUserWithImage)
 		users.DELETE("/:id", utils.ValidateUUID("id"), h.DeleteUser)
