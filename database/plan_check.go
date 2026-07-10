@@ -112,9 +112,10 @@ func CheckCreateHabitAnchor(userID string) (*types.PlanLimitError, error) {
 	}, nil
 }
 
-// CheckAIGeneration blocks free users at the monthly AI generation cap.
-// Does NOT increment the counter - call IncrementAIGenerations after the
-// generation actually succeeds.
+// CheckAIGeneration blocks free users at the daily AI generation cap
+// (drmobile#183: 3/day instead of a monthly allowance, so a free user is
+// never locked out for weeks). Does NOT increment the counter - call
+// IncrementAIGenerations after the generation actually succeeds.
 func CheckAIGeneration(userID string) (*types.PlanLimitError, error) {
 	ctx, err := GetUserPlanContext(userID)
 	if err != nil {
@@ -123,14 +124,14 @@ func CheckAIGeneration(userID string) (*types.PlanLimitError, error) {
 	if ctx.Entitlement.IsPaid() {
 		return nil, nil
 	}
-	limit := types.FreeLimits.AIGenerationsPerMonth
+	limit := types.FreeLimits.AIGenerationsPerDay
 	if ctx.Entitlement.AIGenerationsUsed >= limit {
 		return &types.PlanLimitError{
 			Code:    "plan_limit",
-			Feature: "ai_generations_per_month",
+			Feature: "ai_generations_per_day",
 			Limit:   limit,
 			Current: ctx.Entitlement.AIGenerationsUsed,
-			Message: "You've used your AI generations for this month. Upgrade for unlimited AI roadmaps.",
+			Message: "You've used your free AI generations for today. Upgrade for unlimited AI roadmaps, or try again tomorrow.",
 		}, nil
 	}
 	return nil, nil

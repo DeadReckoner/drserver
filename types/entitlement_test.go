@@ -61,14 +61,14 @@ func TestFreeLimits_MatchesProductSpec(t *testing.T) {
 	assert.Equal(t, 1, FreeLimits.ActiveRoadmaps)
 	assert.Equal(t, 3, FreeLimits.ActiveHabits)
 	assert.Equal(t, 1, FreeLimits.AnchorsPerRoadmap)
-	assert.Equal(t, 3, FreeLimits.AIGenerationsPerMonth)
+	assert.Equal(t, 3, FreeLimits.AIGenerationsPerDay)
 }
 
 func TestPaidLimits_AllUnlimited(t *testing.T) {
 	assert.Equal(t, -1, PaidLimits.ActiveRoadmaps)
 	assert.Equal(t, -1, PaidLimits.ActiveHabits)
 	assert.Equal(t, -1, PaidLimits.AnchorsPerRoadmap)
-	assert.Equal(t, -1, PaidLimits.AIGenerationsPerMonth)
+	assert.Equal(t, -1, PaidLimits.AIGenerationsPerDay)
 }
 
 func TestEntitlement_Limits(t *testing.T) {

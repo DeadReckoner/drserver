@@ -91,8 +91,8 @@ func applyProWhitelist(ent *types.Entitlement) {
 }
 
 // GetUserPlanContext returns an entitlement plus active counts in a single call.
-// The AI generation counter is reset lazily here when the calendar month has
-// rolled over since AIGenerationsPeriodStart.
+// The AI generation counter is reset lazily here when the UTC calendar day has
+// rolled over since AIGenerationsPeriodStart (daily cap, drmobile#183).
 func GetUserPlanContext(userID string) (*UserPlanContext, error) {
 	ent, err := GetEntitlement(userID)
 	if err != nil {
@@ -135,7 +135,7 @@ func GetUserPlanContext(userID string) (*UserPlanContext, error) {
 
 // IncrementAIGenerations atomically bumps the user's AI generation counter.
 // Callers should invoke this after a successful AI generation completes.
-// The counter is reset lazily by GetUserPlanContext when the calendar month rolls.
+// The counter is reset lazily by GetUserPlanContext when the UTC day rolls.
 func IncrementAIGenerations(userID string) error {
 	if userID == "" {
 		return errors.New("missing user_id")
@@ -150,10 +150,12 @@ func IncrementAIGenerations(userID string) error {
 		Error
 }
 
-// shouldResetAIPeriod returns true when `now` is in a different calendar month
-// (in UTC) than `periodStart`. Exposed for testing.
+// shouldResetAIPeriod returns true when `now` is on a different calendar day
+// (in UTC) than `periodStart`. The AI generation cap is per-day
+// (drmobile#183); older rows with a month-old period_start simply reset on
+// the next check. Exposed for testing.
 func shouldResetAIPeriod(periodStart, now time.Time) bool {
 	ps := periodStart.UTC()
 	n := now.UTC()
-	return ps.Year() != n.Year() || ps.Month() != n.Month()
+	return ps.Year() != n.Year() || ps.YearDay() != n.YearDay()
 }

@@ -857,18 +857,12 @@ func (h *RoadmapHandler) ResumeRoadmap(c *gin.Context) {
 	log.Info(ctx, "Roadmap resumed successfully")
 }
 
-// ArchiveRoadmap archives a roadmap
+// ArchiveRoadmap archives a roadmap. Free users may archive (drmobile#183):
+// archiving is how they swap which roadmap is active without deleting
+// history, so it must not sit behind the paywall.
 func (h *RoadmapHandler) ArchiveRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
-
-	userID := c.GetString("user_id")
-	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
-		return database.CheckPaidFeature(userID, types.FeatureArchive,
-			"Archiving roadmaps is available with Pro.")
-	}) {
-		return
-	}
 
 	err := h.service.Archive(c, roadmapID)
 	if err != nil {
@@ -885,10 +879,19 @@ func (h *RoadmapHandler) ArchiveRoadmap(c *gin.Context) {
 	log.Info(ctx, "Roadmap archived successfully")
 }
 
-// RestoreRoadmap restores an archived roadmap
+// RestoreRoadmap restores an archived roadmap. Reactivating counts against
+// the free active-roadmap cap (drmobile#183): a free user with an active
+// roadmap must archive or delete it (or upgrade) before reactivating another.
 func (h *RoadmapHandler) RestoreRoadmap(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
+
+	userID := c.GetString("user_id")
+	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
+		return database.CheckCreateRoadmap(userID)
+	}) {
+		return
+	}
 
 	var req types.RestoreRoadmapRequest
 	// Body is optional, so we don't use BindJSONOrAbort

@@ -327,14 +327,6 @@ func (h *HabitHandler) ArchiveHabit(c *gin.Context) {
 	ctx := c.Request.Context()
 	habitID := c.Param("habitid")
 
-	userID := c.GetString("user_id")
-	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
-		return database.CheckPaidFeature(userID, types.FeatureArchive,
-			"Archiving habits is available with Pro.")
-	}) {
-		return
-	}
-
 	log.Info(ctx, "ArchiveHabit: archiving habit", habitID)
 
 	err := h.service.Archive(c, habitID)

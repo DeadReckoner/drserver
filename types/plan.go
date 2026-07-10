@@ -27,28 +27,31 @@ const (
 // PlanLimits describes the numeric caps applied to a plan.
 // A value of -1 means unlimited.
 type PlanLimits struct {
-	ActiveRoadmaps        int `json:"active_roadmaps"`
-	ActiveHabits          int `json:"active_habits"`
-	AnchorsPerRoadmap     int `json:"anchors_per_roadmap"`
-	AIGenerationsPerMonth int `json:"ai_generations_per_month"`
+	ActiveRoadmaps    int `json:"active_roadmaps"`
+	ActiveHabits      int `json:"active_habits"`
+	AnchorsPerRoadmap int `json:"anchors_per_roadmap"`
+	// AIGenerationsPerDay is a daily cap (drmobile#183) so free users are
+	// never blocked for a whole month by one lifetime-ish limit; the counter
+	// resets when the UTC calendar day rolls.
+	AIGenerationsPerDay int `json:"ai_generations_per_day"`
 }
 
 // FreeLimits are the caps applied to free-plan users.
 // Paid users get unlimited (PaidLimits below).
 var FreeLimits = PlanLimits{
-	ActiveRoadmaps:        1,
-	ActiveHabits:          3,
-	AnchorsPerRoadmap:     1,
-	AIGenerationsPerMonth: 3,
+	ActiveRoadmaps:      1,
+	ActiveHabits:        3,
+	AnchorsPerRoadmap:   1,
+	AIGenerationsPerDay: 3,
 }
 
 // PaidLimits represents unlimited usage. -1 sentinel is interpreted by callers
 // as "no enforcement".
 var PaidLimits = PlanLimits{
-	ActiveRoadmaps:        -1,
-	ActiveHabits:          -1,
-	AnchorsPerRoadmap:     -1,
-	AIGenerationsPerMonth: -1,
+	ActiveRoadmaps:      -1,
+	ActiveHabits:        -1,
+	AnchorsPerRoadmap:   -1,
+	AIGenerationsPerDay: -1,
 }
 
 // LimitsForPlan returns the appropriate limit set for a plan identifier.
