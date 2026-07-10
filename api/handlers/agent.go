@@ -49,6 +49,10 @@ func (h *AgentHandler) AgentGenerate(c *gin.Context) {
 	ctx := c.Request.Context()
 	var goalReq types.GoalRequest
 
+	if !requireAIAck(c) {
+		return
+	}
+
 	if !utils.BindJSONOrAbort(c, &goalReq) {
 		return
 	}
@@ -91,6 +95,10 @@ func (h *AgentHandler) AgentGenerate(c *gin.Context) {
 func (h *AgentHandler) AgentGenerateAsync(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID := c.GetString("user_id")
+
+	if !requireAIAck(c) {
+		return
+	}
 
 	var req types.GoalRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -430,6 +438,10 @@ func (h *AgentHandler) AgentGenerateMilestone(c *gin.Context) {
 	ctx := c.Request.Context()
 	milestoneID := c.Param("milestoneid")
 
+	if !requireAIAck(c) {
+		return
+	}
+
 	// Get the existing milestone to generate tasks for
 	milestone := database.GetMilestone(c, milestoneID)
 	if milestone.MilestoneID == "" {
@@ -489,6 +501,10 @@ func (h *AgentHandler) AgentGenerateNextMilestoneAsync(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID := c.GetString("user_id")
 	milestoneID := c.Param("milestoneid")
+
+	if !requireAIAck(c) {
+		return
+	}
 
 	var req types.GenerateNextMilestoneRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -741,6 +757,10 @@ type AgentChatResponse struct {
 func (h *AgentHandler) Chat(c *gin.Context) {
 	if h.anthropicService == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Anthropic service not configured. Set ANTHROPIC_API_KEY environment variable."})
+		return
+	}
+
+	if !requireAIAck(c) {
 		return
 	}
 
