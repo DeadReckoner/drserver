@@ -447,11 +447,14 @@ func (h *RoadmapHandler) RejectAnchorRequest(c *gin.Context) {
 	go sendAnchorStatusNotification(anchorRequest, "rejected")
 }
 
+// RemoveAnchor ends the anchor relationship on a roadmap. The roadmap owner
+// or the anchor themselves may call it (drserver#93); both parties are
+// notified.
 func (h *RoadmapHandler) RemoveAnchor(c *gin.Context) {
 	ctx := c.Request.Context()
 	roadmapID := c.Param("roadmapid")
 
-	err := database.RemoveAnchor(c, roadmapID)
+	roadmap, err := database.RemoveAnchor(c, roadmapID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "roadmap not found or you don't have permission" {
@@ -468,6 +471,82 @@ func (h *RoadmapHandler) RemoveAnchor(c *gin.Context) {
 
 	utils.MessageResponse(c, http.StatusOK, "Anchor removed successfully")
 	log.Info(ctx, "Anchor removed successfully")
+
+	go sendAnchorRemovedNotifications(
+		c.GetString("user_id"),
+		roadmap.UserID, *roadmap.AnchorID,
+		types.TargetTypeRoadmap, roadmap.RoadmapID, roadmap.Goal,
+	)
+}
+
+// sendAnchorRemovedNotifications notifies both parties when an anchor
+// relationship ends (drserver#93): the actor sees a confirmation, the other
+// party is informed. Routed through notifications.Dispatch so each
+// recipient's F&A settings, mutes, and quiet hours apply. Shared by the
+// roadmap and habit removal handlers; targetID is a roadmap or habit ID
+// depending on targetType, and title is the goal/habit title for the body
+// copy.
+func sendAnchorRemovedNotifications(removedByID, ownerID, anchorID, targetType, targetID, title string) {
+	ctx := context.Background()
+
+	owner, err := database.GetUserByID(ownerID)
+	if err != nil {
+		log.Info(ctx, "Failed to get owner info for anchor-removed notification:", err)
+		return
+	}
+	anchor, err := database.GetUserByID(anchorID)
+	if err != nil {
+		log.Info(ctx, "Failed to get anchor info for anchor-removed notification:", err)
+		return
+	}
+	ownerName := strings.TrimSpace(owner.FirstName + " " + owner.LastName)
+	anchorName := strings.TrimSpace(anchor.FirstName + " " + anchor.LastName)
+
+	data := map[string]any{"target_type": targetType}
+	roadmapID := ""
+	if targetType == types.TargetTypeRoadmap {
+		data["roadmap_id"] = targetID
+		roadmapID = targetID
+	} else {
+		data["habit_id"] = targetID
+	}
+
+	var ownerBody, anchorBody string
+	if removedByID == anchorID {
+		ownerBody = anchorName + " stepped down as your anchor for \"" + title + "\""
+		anchorBody = "You stepped down as anchor for " + ownerName + "'s \"" + title + "\""
+	} else {
+		ownerBody = "You removed " + anchorName + " as your anchor for \"" + title + "\""
+		anchorBody = ownerName + " removed you as anchor for \"" + title + "\""
+	}
+
+	// Dedup per calendar day: a double-tap doesn't double-send, but the same
+	// pair re-anchoring and parting ways later still notifies.
+	day := time.Now().UTC().Format("2006-01-02")
+
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           ownerID,
+		Category:         notifications.CategoryFAndA,
+		NotificationType: "anchor_accepted_removed",
+		DedupKey:         targetID + ":anchor_removed:" + anchorID + ":" + ownerID + ":" + day,
+		FriendID:         anchorID,
+		Title:            "Anchor Removed",
+		Body:             ownerBody,
+		Data:             data,
+	})
+
+	// The anchor's own per-roadmap override (if any) applies to their copy.
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:            anchorID,
+		Category:          notifications.CategoryFAndA,
+		NotificationType:  "anchor_accepted_removed",
+		DedupKey:          targetID + ":anchor_removed:" + anchorID + ":" + anchorID + ":" + day,
+		FriendID:          ownerID,
+		AnchoredRoadmapID: roadmapID,
+		Title:             "Anchor Removed",
+		Body:              anchorBody,
+		Data:              data,
+	})
 }
 
 // sendAnchorRequestNotification sends a notification when an anchor request is created.

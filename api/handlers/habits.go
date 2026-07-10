@@ -562,7 +562,9 @@ func (h *HabitHandler) CreateHabitAnchorRequest(c *gin.Context) {
 	go sendHabitAnchorRequestNotification(anchorRequest)
 }
 
-// RemoveHabitAnchor removes an anchor from a habit
+// RemoveHabitAnchor ends the anchor relationship on a habit. The habit owner
+// or the anchor themselves may call it (drserver#93); both parties are
+// notified.
 // DELETE /api/v1/habits/:habitid/anchor
 func (h *HabitHandler) RemoveHabitAnchor(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -570,7 +572,7 @@ func (h *HabitHandler) RemoveHabitAnchor(c *gin.Context) {
 
 	log.Info(ctx, "RemoveHabitAnchor: removing anchor from habit", habitID)
 
-	err := database.RemoveHabitAnchor(c, habitID)
+	habit, err := database.RemoveHabitAnchor(c, habitID)
 	if err != nil {
 		errMsg := err.Error()
 		if errMsg == "habit not found or you don't have permission" {
@@ -587,6 +589,12 @@ func (h *HabitHandler) RemoveHabitAnchor(c *gin.Context) {
 
 	utils.MessageResponse(c, http.StatusOK, "Anchor removed successfully")
 	log.Info(ctx, "RemoveHabitAnchor: anchor removed successfully")
+
+	go sendAnchorRemovedNotifications(
+		c.GetString("user_id"),
+		habit.UserID, *habit.AnchorID,
+		types.TargetTypeHabit, habit.HabitID, habit.Title,
+	)
 }
 
 // sendHabitAnchorRequestNotification sends a notification when a habit anchor request is created
