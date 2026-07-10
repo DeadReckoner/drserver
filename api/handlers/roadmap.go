@@ -6,6 +6,7 @@ import (
 	"dr/server/log"
 	"dr/server/notifications"
 	"dr/server/types"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -112,6 +113,28 @@ func (h *RoadmapHandler) GetRoadmap(c *gin.Context) {
 	utils.DataResponse(c, http.StatusOK, roadmapWithAnchorResponse{
 		Roadmap: roadmap,
 		Anchor:  anchor,
+	})
+}
+
+// GetMissedTasks handles GET /roadmaps/:roadmapid/missed-tasks (drserver#48).
+// A task is "missed" when its date is before today and it is not completed.
+// 404s when the roadmap doesn't exist or isn't owned by the caller.
+func (h *RoadmapHandler) GetMissedTasks(c *gin.Context) {
+	roadmapID := c.Param("roadmapid")
+
+	tasks, err := database.GetMissedTasks(c, roadmapID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			utils.NotFoundResponse(c, "Roadmap")
+			return
+		}
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	utils.DataResponse(c, http.StatusOK, types.MissedTasksResponse{
+		RoadmapID:   roadmapID,
+		MissedTasks: tasks,
 	})
 }
 

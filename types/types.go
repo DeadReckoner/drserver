@@ -545,6 +545,14 @@ type Task struct {
 	Steps []Step `gorm:"foreignKey:TaskID;constraint:OnDelete:CASCADE;" json:"steps,omitempty"`
 }
 
+// MissedTasksResponse is the payload for GET /roadmaps/:roadmapid/missed-tasks
+// (drserver#48): the overdue, incomplete tasks of one roadmap, for the
+// missed-task recovery flow. MissedTasks is always an array, never null.
+type MissedTasksResponse struct {
+	RoadmapID   string `json:"roadmap_id"`
+	MissedTasks []Task `json:"missed_tasks"`
+}
+
 // isDateBeforeTodayInLocation reports whether date's calendar day is before
 // today's calendar day, with "today" observed in loc. The task date is read as
 // its UTC calendar day (matching how dates are stored and how the notification

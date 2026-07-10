@@ -150,6 +150,9 @@ func setupRoadmapRoutes(rg *gin.RouterGroup, h *handlers.RoadmapHandler, nudge *
 		roadmaps.PATCH("/:roadmapid", utils.ValidateUUID("roadmapid"), h.UpdateRoadmap)
 		roadmaps.DELETE("/:roadmapid", utils.ValidateUUID("roadmapid"), h.DeleteRoadmap)
 
+		// Missed-task recovery flow (drserver#48)
+		roadmaps.GET("/:roadmapid/missed-tasks", utils.ValidateUUID("roadmapid"), h.GetMissedTasks)
+
 		// Milestone routes
 		roadmaps.GET("/:roadmapid/milestones", utils.ValidateUUID("roadmapid"), h.GetMilestonesByRoadmap)
 		roadmaps.POST("/:roadmapid/milestones", utils.ValidateUUID("roadmapid"), h.CreateMilestone)
