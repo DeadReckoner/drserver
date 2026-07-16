@@ -43,6 +43,7 @@ func (s *StorageClient) Upload(ctx context.Context, bucket, path, contentType st
 	req.Header.Set("apikey", s.apiKey)
 	req.Header.Set("Authorization", "Bearer "+s.apiKey)
 	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("x-upsert", "true")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
