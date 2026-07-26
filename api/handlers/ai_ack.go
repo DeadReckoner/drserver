@@ -75,10 +75,33 @@ func (h *AgentHandler) AcceptAIAcknowledgment(c *gin.Context) {
 	log.Info(ctx, "AI acknowledgment accepted", "version", types.CurrentAIAckVersion)
 }
 
+// aiAckEnforced controls whether requireAIAck actually blocks generation.
+//
+// Currently OFF: the mobile client tracks acceptance itself and gates the
+// acknowledgment UI, so server-side enforcement only blocked users from
+// creating roadmaps. The gate below is kept wired into every generation
+// handler so we can harden it server-side later (drserver#65) by flipping
+// this to true — at which point clients that never call
+// POST /agent/acknowledgment will start getting 403 ai_ack_required.
+var aiAckEnforced = false
+
+// SetAIAckEnforcedForTest toggles the acknowledgment gate and returns a
+// cleanup hook that restores the previous value. ONLY for tests, so the
+// gate's behavior stays covered while it is disabled in production.
+func SetAIAckEnforcedForTest(enforced bool) func() {
+	orig := aiAckEnforced
+	aiAckEnforced = enforced
+	return func() { aiAckEnforced = orig }
+}
+
 // requireAIAck gates AI generation behind the acknowledgment (drserver#65).
 // Returns true when the caller may proceed; otherwise writes a 403 with a
 // machine-readable code so the client can present the acknowledgment flow.
 func requireAIAck(c *gin.Context) bool {
+	if !aiAckEnforced {
+		return true
+	}
+
 	userID := c.GetString("user_id")
 
 	accepted, err := database.HasAcceptedAIAck(userID, types.CurrentAIAckVersion)

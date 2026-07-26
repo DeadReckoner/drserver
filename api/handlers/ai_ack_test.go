@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"dr/server/api/handlers"
 	"dr/server/database"
 	"dr/server/internal/testutil"
 	"dr/server/types"
@@ -109,7 +110,12 @@ func TestAcceptAIAcknowledgment_RecordsAcceptance(t *testing.T) {
 	assert.Equal(t, "1.4.0", ack.AppVersion)
 }
 
+// TestAgentGenerateAsync_BlockedWithoutAck covers the gate as it behaves when
+// enforced. Enforcement is off in production for now (see aiAckEnforced), so
+// the test enables it explicitly to keep the hardened path from rotting.
 func TestAgentGenerateAsync_BlockedWithoutAck(t *testing.T) {
+	t.Cleanup(handlers.SetAIAckEnforcedForTest(true))
+
 	db, mock := testutil.NewSqlmockDBRegex(t)
 	t.Cleanup(database.SetDBForTest(db))
 
@@ -131,7 +137,10 @@ func TestAgentChat_BlockedWithoutAck(t *testing.T) {
 	// gate runs; without it the handler 503s, which is fine — the async
 	// generate test above covers the 403 path. This test documents that a
 	// missing ack never lets a generation request through: whichever guard
-	// fires, the request must not reach generation.
+	// fires, the request must not reach generation. Enforced explicitly, as
+	// the gate is disabled in production for now.
+	t.Cleanup(handlers.SetAIAckEnforcedForTest(true))
+
 	db, _ := testutil.NewSqlmockDBRegex(t)
 	t.Cleanup(database.SetDBForTest(db))
 
