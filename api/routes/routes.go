@@ -265,6 +265,11 @@ func setupAgentRoutes(rg *gin.RouterGroup, h *handlers.AgentHandler) {
 		agent.POST("/generate-async", h.AgentGenerateAsync)
 		agent.POST("/generate-next-milestone-async/:milestoneid", utils.ValidateUUID("milestoneid"), h.AgentGenerateNextMilestoneAsync)
 
+		// Plan import: multipart PDF upload of a plan the user already has,
+		// transposed onto the roadmap model by Claude. Anthropic-only (PDF
+		// input), async, progress over the same /ws/agent/:jobid socket.
+		agent.POST("/import-plan", h.ImportPlan)
+
 		// Anthropic-based conversational chat endpoint
 		// Multi-turn conversation with tool use for roadmap generation, editing, and coaching
 		agent.POST("/chat", h.Chat)
