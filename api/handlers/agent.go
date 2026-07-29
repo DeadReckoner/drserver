@@ -26,13 +26,19 @@ type AgentHandler struct {
 	db               *gorm.DB
 	provider         agent.Provider
 	anthropicService *anthropic.Service
+	// importer serves /agent/import-plan. Always Anthropic regardless of
+	// AI_PROVIDER: transposing an uploaded plan needs PDF input, which the
+	// OpenAI path doesn't implement. Nil when ANTHROPIC_API_KEY is unset.
+	importer *anthropic.Provider
 }
 
 func NewAgentHandler(db *gorm.DB) *AgentHandler {
 	// Initialize Anthropic service if API key is available
 	var anthropicSvc *anthropic.Service
+	var importer *anthropic.Provider
 	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
 		anthropicSvc = anthropic.NewService(apiKey)
+		importer = anthropic.NewProvider()
 	}
 
 	return &AgentHandler{
@@ -42,6 +48,7 @@ func NewAgentHandler(db *gorm.DB) *AgentHandler {
 		// process lifetime.
 		provider:         agent.DefaultProvider(),
 		anthropicService: anthropicSvc,
+		importer:         importer,
 	}
 }
 

@@ -648,6 +648,39 @@ type GoalRequest struct {
 	AdditionalContext    string `json:"additionalContext"`
 }
 
+// PlanImportContext is the optional metadata a client can send alongside an
+// uploaded plan document (POST /agent/import-plan). Every field is optional:
+// the document itself is the source of truth, and these only disambiguate what
+// the document leaves unsaid (e.g. a plan with no dates gets scheduled against
+// TargetCompletionDate and WeeklyTimeCommitment).
+type PlanImportContext struct {
+	GoalName             string `json:"goalName"`
+	TargetCompletionDate string `json:"targetCompletionDate"`
+	WeeklyTimeCommitment string `json:"weeklyTimeCommitment"`
+	WorkFrequency        string `json:"workFrequency"`
+	CurrentSkillLevel    string `json:"currentSkillLevel"`
+	Constraints          string `json:"constraints"`
+	AdditionalContext    string `json:"additionalContext"`
+}
+
+// PlanImportNotes is the AI's own account of how faithfully the uploaded
+// document survived transposition. Surfaced to the user so they can see what
+// came from their plan versus what the model had to invent to satisfy the
+// roadmap model (which requires dates, durations, and tasks the source may
+// not have had).
+type PlanImportNotes struct {
+	// SourceSummary describes what the document appeared to be.
+	SourceSummary string `json:"source_summary"`
+	// Fidelity is "high", "medium", or "low": how much of the roadmap came
+	// straight from the document rather than being inferred.
+	Fidelity string `json:"fidelity"`
+	// Inferred lists the specific gaps the model filled in (e.g. "no dates in
+	// the source; sequenced milestones at 2 weeks each").
+	Inferred []string `json:"inferred"`
+	// Dropped lists source content that did not map onto the roadmap model.
+	Dropped []string `json:"dropped"`
+}
+
 // MilestoneReviewAnswers captures the user's answers to the 7 hardcoded review
 // questions shown in the mobile UI when completing a milestone. All fields are
 // free-form strings; empty strings are allowed (user skipped that question).
@@ -1044,6 +1077,7 @@ type JobType string
 const (
 	JobTypeRoadmap   JobType = "roadmap_generation"
 	JobTypeMilestone JobType = "milestone_generation"
+	JobTypeImport    JobType = "roadmap_import"
 )
 
 /******************************************************************************
