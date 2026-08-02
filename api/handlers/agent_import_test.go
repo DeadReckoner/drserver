@@ -5,6 +5,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"dr/server/api/handlers"
@@ -109,17 +110,27 @@ func TestImportPlan_RejectsMalformedContext(t *testing.T) {
 // TestImportPlan_RejectsOversizedUpload covers both size guards: the file-size
 // check, and the request-body cap that keeps net/http from buffering a much
 // larger body in memory before the handler ever sees it.
+//
+// The cap is pinned via PLAN_IMPORT_MAX_BYTES so the test is independent of the
+// default and doesn't have to allocate megabytes to trip it.
 func TestImportPlan_RejectsOversizedUpload(t *testing.T) {
+	const limit = 64 << 10
+
 	tests := []struct {
 		name string
 		size int
 	}{
-		{name: "over the file cap", size: 11 << 20},
-		{name: "over the whole-body cap", size: 13 << 20},
+		// Over the file cap but within the 1MB body slack: caught by the
+		// size check, which reports the actual size.
+		{name: "over the file cap", size: limit + (16 << 10)},
+		// Past the body slack too: caught by MaxBytesReader before the
+		// multipart form is ever parsed.
+		{name: "over the whole-body cap", size: 2 << 20},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PLAN_IMPORT_MAX_BYTES", strconv.Itoa(limit))
 			router, _ := newImportRouter(t)
 
 			pdf := make([]byte, tt.size)
@@ -128,8 +139,26 @@ func TestImportPlan_RejectsOversizedUpload(t *testing.T) {
 			w := postPlanImport(t, router, pdf, "")
 			require.Equal(t, http.StatusRequestEntityTooLarge, w.Code, w.Body.String())
 			assert.Contains(t, w.Body.String(), "too large")
+			assert.Contains(t, w.Body.String(), strconv.Itoa(limit),
+				"the message must quote the effective limit, not the default")
 		})
 	}
+}
+
+// TestImportPlan_AcceptsRaisedLimit is the other half: a PDF over the default
+// goes through when PLAN_IMPORT_MAX_BYTES allows it. It gets past validation
+// and fails later at the plan-limit check, which is far enough to prove the
+// size guards let it by.
+func TestImportPlan_AcceptsRaisedLimit(t *testing.T) {
+	t.Setenv("PLAN_IMPORT_MAX_BYTES", strconv.Itoa(12<<20))
+	router, _ := newImportRouter(t)
+
+	pdf := make([]byte, 11<<20)
+	copy(pdf, "%PDF-1.7")
+
+	w := postPlanImport(t, router, pdf, "")
+	assert.NotEqual(t, http.StatusRequestEntityTooLarge, w.Code,
+		"an 11MB PDF must be accepted when the limit is raised to 12MB")
 }
 
 // TestImportPlan_RequiresAIAck confirms the import path is gated by the same
