@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -39,14 +40,22 @@ func RestartRoadmap(c *gin.Context, roadmapID string) (types.Roadmap, error) {
 		return types.Roadmap{}, errors.New("roadmap has not been started")
 	}
 
+	// Anchor the restart to the owner's calendar day, not the server's UTC day —
+	// a user restarting on their evening is still restarting today. Resolved
+	// before the transaction opens so the lookup isn't a read inside it.
+	loc := resolveUserLocation(roadmap.UserID)
+	startDate := types.ScheduleDayIn(types.Now(), loc)
+
+	// Day is an offset from the start day, so rebase onto the plan's earliest
+	// day; otherwise a plan numbered from day 1 restarts tomorrow. Read from the
+	// preloaded roadmap, which carries every milestone and task.
+	dayZero := roadmap.MinScheduledDay()
+
 	// Begin transaction
 	tx := db.Begin()
 	if tx.Error != nil {
 		return types.Roadmap{}, tx.Error
 	}
-
-	now := time.Now()
-	startDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
 	// Reset roadmap
 	if err := tx.Model(&types.Roadmap{}).Where("roadmap_id = ?", roadmapID).Updates(map[string]interface{}{
@@ -94,7 +103,7 @@ func RestartRoadmap(c *gin.Context, roadmapID string) (types.Roadmap, error) {
 	var milestones []types.Milestone
 	tx.Where("roadmap_id = ?", roadmapID).Find(&milestones)
 	for _, m := range milestones {
-		newDate := startDate.AddDate(0, 0, m.Day)
+		newDate := startDate.AddDate(0, 0, types.ScheduleOffset(m.Day, dayZero))
 		tx.Model(&types.Milestone{}).Where("milestone_id = ?", m.MilestoneID).Update("date", newDate)
 	}
 
@@ -102,7 +111,7 @@ func RestartRoadmap(c *gin.Context, roadmapID string) (types.Roadmap, error) {
 	var tasks []types.Task
 	tx.Where("roadmap_id = ?", roadmapID).Find(&tasks)
 	for _, t := range tasks {
-		newDate := startDate.AddDate(0, 0, t.Day)
+		newDate := startDate.AddDate(0, 0, types.ScheduleOffset(t.Day, dayZero))
 		tx.Model(&types.Task{}).Where("task_id = ?", t.TaskID).Update("date", newDate)
 	}
 
@@ -519,6 +528,14 @@ func copyMilestone(original types.Milestone, roadmapID, userID string, phaseID *
 // is scheduled for today + offsetDays. Only affects incomplete tasks and their
 // associated milestones. Completed tasks retain their original dates.
 //
+// "Today" is the owner's calendar day, not the server's UTC day, so realigning
+// in the evening doesn't land the first task on tomorrow.
+//
+// Shifted dates are re-anchored to types.ScheduleAnchorHour in the owner's
+// timezone. That happens even when the shift is zero, which heals rows written
+// before dates were anchored — they carry whatever wall-clock time the roadmap
+// was started at, which can read as the neighbouring day on the client.
+//
 // offsetDays: 0 = first task due today, 2 = first task due in 2 days, etc.
 func RealignRoadmapDates(c *gin.Context, roadmapID string, offsetDays int) (types.Roadmap, int, error) {
 	userID, exists := c.Get("user_id")
@@ -553,17 +570,11 @@ func RealignRoadmapDates(c *gin.Context, roadmapID string, offsetDays int) (type
 		return types.Roadmap{}, 0, result.Error
 	}
 
-	// Calculate target date and days to shift
-	now := time.Now()
-	targetDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, offsetDays)
-	firstTaskDate := time.Date(firstTask.Date.Year(), firstTask.Date.Month(), firstTask.Date.Day(), 0, 0, 0, 0, time.UTC)
-	daysToShift := int(targetDate.Sub(firstTaskDate).Hours() / 24)
-
-	if daysToShift == 0 {
-		// Already aligned, just return the roadmap
-		rm, err := GetRoadmapFullByID(roadmapID)
-		return rm, 0, err
-	}
+	// Calculate days to shift, counting calendar days in the owner's timezone so
+	// the boundary is their local midnight rather than the server's.
+	loc := resolveUserLocation(roadmap.UserID)
+	targetDate := types.ScheduleDayIn(types.Now(), loc).AddDate(0, 0, offsetDays)
+	daysToShift := types.CalendarDaysBetween(*firstTask.Date, targetDate, loc)
 
 	// Begin transaction
 	tx := db.Begin()
@@ -571,10 +582,20 @@ func RealignRoadmapDates(c *gin.Context, roadmapID string, offsetDays int) (type
 		return types.Roadmap{}, 0, tx.Error
 	}
 
+	// Shift by whole days in the owner's local wall time, then re-anchor to the
+	// scheduling hour. Converting out of timestamptz first keeps a DST boundary
+	// inside the shifted range from dragging dates onto a neighbouring day, and
+	// the re-anchor normalizes any legacy time-of-day.
+	shiftExpr := fmt.Sprintf(
+		"(date_trunc('day', (date AT TIME ZONE ?) + (? * INTERVAL '1 day')) + INTERVAL '%d hours') AT TIME ZONE ?",
+		types.ScheduleAnchorHour,
+	)
+	tz := loc.String()
+
 	// Shift only incomplete task dates
 	if err := tx.Exec(
-		"UPDATE tasks SET date = date + INTERVAL '1 day' * ? WHERE roadmap_id = ? AND completed = false AND date IS NOT NULL",
-		daysToShift, roadmapID,
+		"UPDATE tasks SET date = "+shiftExpr+" WHERE roadmap_id = ? AND completed = false AND date IS NOT NULL",
+		tz, daysToShift, tz, roadmapID,
 	).Error; err != nil {
 		tx.Rollback()
 		return types.Roadmap{}, 0, err
@@ -593,8 +614,8 @@ func RealignRoadmapDates(c *gin.Context, roadmapID string, offsetDays int) (type
 
 	if len(milestoneIDs) > 0 {
 		if err := tx.Exec(
-			"UPDATE milestones SET date = date + INTERVAL '1 day' * ? WHERE milestone_id IN ? AND date IS NOT NULL",
-			daysToShift, milestoneIDs,
+			"UPDATE milestones SET date = "+shiftExpr+" WHERE milestone_id IN ? AND date IS NOT NULL",
+			tz, daysToShift, tz, milestoneIDs,
 		).Error; err != nil {
 			tx.Rollback()
 			return types.Roadmap{}, 0, err

@@ -839,6 +839,9 @@ func SaveNextMilestone(
 		return err
 	}
 
+	// Resolved before the transaction opens so the lookup isn't a read inside it.
+	loc := resolveUserLocation(existing.UserID)
+
 	err := db.Transaction(func(tx *gorm.DB) error {
 		// 1. Apply milestone adjustments (if any)
 		if adjustments != nil && adjustments.Adjusted {
@@ -920,18 +923,24 @@ func SaveNextMilestone(
 		//
 		// Anchor = later of milestone.Date or today — this respects the original
 		// plan when the user is on schedule, but avoids placing tasks in the past
-		// if they've fallen behind. Normalized to midnight UTC for day precision.
-		nowUTC := time.Now().UTC()
-		todayAnchor := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+		// if they've fallen behind. Both sides are taken as calendar days in the
+		// owner's timezone, so a user generating tasks on their evening still
+		// gets the first one dated today.
+		todayAnchor := types.ScheduleDayIn(types.Now(), loc)
 		anchor := todayAnchor
 		if existing.Date != nil {
-			milestoneAnchor := time.Date(existing.Date.Year(), existing.Date.Month(), existing.Date.Day(), 0, 0, 0, 0, time.UTC)
+			milestoneAnchor := types.ScheduleDayIn(*existing.Date, loc)
 			if milestoneAnchor.After(todayAnchor) {
 				anchor = milestoneAnchor
 			}
 		}
 
 		// 4. Assign IDs/foreign keys + dates, then insert new tasks with nested steps.
+		//
+		// Days are rebased onto the lowest one the model returned, which puts the
+		// first task on the anchor whether it numbered from 0, from 1, or from the
+		// milestone's global day.
+		dayZero := minTaskDay(tasks)
 		var earliestTaskDate *time.Time
 		if len(tasks) > 0 {
 			for i := range tasks {
@@ -943,13 +952,7 @@ func SaveNextMilestone(
 					tasks[i].Status = string(types.StatusNotStarted)
 				}
 
-				// task.Day is milestone-relative (1-14 per the AI prompt).
-				// Map Day=1 to the anchor date so tasks start immediately.
-				offset := tasks[i].Day - 1
-				if offset < 0 {
-					offset = 0
-				}
-				taskDate := anchor.AddDate(0, 0, offset)
+				taskDate := anchor.AddDate(0, 0, types.ScheduleOffset(tasks[i].Day, dayZero))
 				tasks[i].Date = &taskDate
 				if earliestTaskDate == nil || taskDate.Before(*earliestTaskDate) {
 					td := taskDate
@@ -989,4 +992,18 @@ func SaveNextMilestone(
 	}
 
 	return nil
+}
+
+// minTaskDay returns the lowest Day in tasks, or 0 when there are none.
+func minTaskDay(tasks []types.Task) int {
+	if len(tasks) == 0 {
+		return 0
+	}
+	minDay := tasks[0].Day
+	for i := range tasks {
+		if tasks[i].Day < minDay {
+			minDay = tasks[i].Day
+		}
+	}
+	return minDay
 }

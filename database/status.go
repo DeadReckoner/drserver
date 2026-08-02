@@ -27,6 +27,13 @@ func resolveUserLocation(userID string) *time.Location {
 	return types.LocationOrUTC(tz)
 }
 
+// UserLocation exposes resolveUserLocation to callers outside this package, so
+// handlers that schedule dates can anchor them to the user's calendar day the
+// same way status computation judges the overdue boundary.
+func UserLocation(userID string) *time.Location {
+	return resolveUserLocation(userID)
+}
+
 // RecomputeAndSaveStatuses loads a roadmap with all nested data, recomputes all statuses
 // using Roadmap.ComputeAllStatuses(), and saves all statuses to the database.
 // This is the single entry point for status recomputation.

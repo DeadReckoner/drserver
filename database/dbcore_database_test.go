@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"dr/server/types"
+
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -62,12 +64,27 @@ func dbcoreCtxWithQuery(userID, rawQuery string) *gin.Context {
 }
 
 // dbcoreMidnightUTC mirrors the "today at midnight UTC" normalization used by
-// RestartRoadmap / RealignRoadmapDates / GetOverdueTasks. Those functions call
-// time.Now() directly, so the test recomputes the same expression; only a run
-// spanning midnight UTC could disagree.
+// GetOverdueTasks. It calls time.Now() directly, so the test recomputes the
+// same expression; only a run spanning midnight UTC could disagree.
 func dbcoreMidnightUTC() time.Time {
 	now := time.Now()
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// dbcoreScheduleAnchor is today's scheduling anchor for the mock user, who
+// resolves to UTC: dbcoreExpectUserTimezone stubs an empty timezone, and tests
+// that don't stub it at all get the same fallback from the failed lookup.
+func dbcoreScheduleAnchor() time.Time {
+	return types.ScheduleDayIn(time.Now(), time.UTC)
+}
+
+// dbcoreExpectUserTimezone stubs the users.timezone lookup that the scheduling
+// paths make to anchor dates on the owner's calendar day. An empty value keeps
+// the mock user in UTC.
+func dbcoreExpectUserTimezone(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(`SELECT "timezone" FROM "users" WHERE user_id = \$1`).
+		WithArgs(dbcoreUserID).
+		WillReturnRows(sqlmock.NewRows([]string{"timezone"}).AddRow(""))
 }
 
 // dbcoreCountRows builds the single-column result for a COUNT query.

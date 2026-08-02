@@ -12,8 +12,11 @@ package database
 // all the writes happened.
 
 import (
+	"strconv"
 	"testing"
 	"time"
+
+	"dr/server/types"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
@@ -317,7 +320,7 @@ func TestRestartRoadmap_NotStarted(t *testing.T) {
 func TestRestartRoadmap_ResetsStateAndRecalculatesDates(t *testing.T) {
 	mock := withMockDB(t)
 	oldStart := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	today := dbcoreMidnightUTC()
+	today := dbcoreScheduleAnchor()
 
 	// Initial preloaded fetch: one milestone (Day=5) with one task (Day=2).
 	mock.ExpectQuery(`SELECT \* FROM "roadmaps" WHERE user_id = \$1 AND roadmap_id = \$2`).
@@ -338,6 +341,7 @@ func TestRestartRoadmap_ResetsStateAndRecalculatesDates(t *testing.T) {
 	mock.ExpectQuery(`SELECT \* FROM "phases" WHERE "phases"\."roadmap_id" = \$1`).
 		WithArgs(dbcoreRoadmapID).
 		WillReturnRows(sqlmock.NewRows([]string{"phase_id"}))
+	dbcoreExpectUserTimezone(mock)
 
 	mock.ExpectBegin()
 	// Roadmap reset (map keys sorted: completed, paused_at, start_date).
@@ -358,20 +362,21 @@ func TestRestartRoadmap_ResetsStateAndRecalculatesDates(t *testing.T) {
 	mock.ExpectExec(`UPDATE "steps" SET "completed"=\$1,"status"=\$2 WHERE task_id IN \(\$3\)`).
 		WithArgs(false, "incomplete", dbcoreTaskID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	// Date recalculation: milestone Day=5 -> today+5, task Day=2 -> today+2.
+	// Date recalculation rebases onto the plan's earliest day (the task's Day=2),
+	// so milestone Day=5 -> today+3 and task Day=2 -> today.
 	mock.ExpectQuery(`SELECT \* FROM "milestones" WHERE roadmap_id = \$1`).
 		WithArgs(dbcoreRoadmapID).
 		WillReturnRows(sqlmock.NewRows([]string{"milestone_id", "roadmap_id", "day"}).
 			AddRow(dbcoreMilestoneID, dbcoreRoadmapID, 5))
 	mock.ExpectExec(`UPDATE "milestones" SET "date"=\$1 WHERE milestone_id = \$2`).
-		WithArgs(today.AddDate(0, 0, 5), dbcoreMilestoneID).
+		WithArgs(today.AddDate(0, 0, 3), dbcoreMilestoneID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT \* FROM "tasks" WHERE roadmap_id = \$1`).
 		WithArgs(dbcoreRoadmapID).
 		WillReturnRows(sqlmock.NewRows([]string{"task_id", "roadmap_id", "day"}).
 			AddRow(dbcoreTaskID, dbcoreRoadmapID, 2))
 	mock.ExpectExec(`UPDATE "tasks" SET "date"=\$1 WHERE task_id = \$2`).
-		WithArgs(today.AddDate(0, 0, 2), dbcoreTaskID).
+		WithArgs(today, dbcoreTaskID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE "phases" SET "status"=\$1 WHERE roadmap_id = \$2`).
 		WithArgs("not_started", dbcoreRoadmapID).
@@ -471,6 +476,16 @@ func TestRealignRoadmapDates_NotFound(t *testing.T) {
 	assert.Equal(t, "roadmap not found", err.Error())
 }
 
+// dbcoreRealignShiftSQL builds the regex for RealignRoadmapDates' shift, whose
+// SET clause is identical for tasks and milestones and differs only in the
+// WHERE. Placeholders: $1/$3 timezone, $2 days, $4 the row selector.
+func dbcoreRealignShiftSQL(table, where string) string {
+	return `UPDATE ` + table +
+		` SET date = \(date_trunc\('day', \(date AT TIME ZONE \$1\) \+ \(\$2 \* INTERVAL '1 day'\)\) \+ INTERVAL '` +
+		strconv.Itoa(types.ScheduleAnchorHour) +
+		` hours'\) AT TIME ZONE \$3 WHERE ` + where + ` AND date IS NOT NULL`
+}
+
 func TestRealignRoadmapDates_NotStarted(t *testing.T) {
 	mock := withMockDB(t)
 	dbcoreExpectRoadmapOwnedFetch(mock, nil, nil, false)
@@ -496,7 +511,7 @@ func TestRealignRoadmapDates_NoIncompleteTasks(t *testing.T) {
 func TestRealignRoadmapDates_ShiftsIncompleteWork(t *testing.T) {
 	mock := withMockDB(t)
 	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	today := dbcoreMidnightUTC()
+	today := dbcoreScheduleAnchor()
 	// First incomplete task is 3 days behind; offsetDays=2 -> shift 5.
 	firstTaskDate := today.AddDate(0, 0, -3)
 
@@ -505,17 +520,20 @@ func TestRealignRoadmapDates_ShiftsIncompleteWork(t *testing.T) {
 		WithArgs(dbcoreRoadmapID, false, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"task_id", "roadmap_id", "milestone_id", "completed", "date"}).
 			AddRow(dbcoreTaskID, dbcoreRoadmapID, dbcoreMilestoneID, false, firstTaskDate))
+	dbcoreExpectUserTimezone(mock)
 
+	// Dates shift in the owner's local wall time, then re-anchor to the
+	// scheduling hour: "UTC" is the mock user's fallback timezone.
 	mock.ExpectBegin()
-	mock.ExpectExec(`UPDATE tasks SET date = date \+ INTERVAL '1 day' \* \$1 WHERE roadmap_id = \$2 AND completed = false AND date IS NOT NULL`).
-		WithArgs(5, dbcoreRoadmapID).
+	mock.ExpectExec(dbcoreRealignShiftSQL(`tasks`, `roadmap_id = \$4 AND completed = false`)).
+		WithArgs("UTC", 5, "UTC", dbcoreRoadmapID).
 		WillReturnResult(sqlmock.NewResult(0, 4))
 	// Milestone IDs plucked only for milestones that still have incomplete tasks.
 	mock.ExpectQuery(`SELECT DISTINCT "milestone_id" FROM "tasks" WHERE roadmap_id = \$1 AND completed = false`).
 		WithArgs(dbcoreRoadmapID).
 		WillReturnRows(sqlmock.NewRows([]string{"milestone_id"}).AddRow(dbcoreMilestoneID))
-	mock.ExpectExec(`UPDATE milestones SET date = date \+ INTERVAL '1 day' \* \$1 WHERE milestone_id IN \(\$2\) AND date IS NOT NULL`).
-		WithArgs(5, dbcoreMilestoneID).
+	mock.ExpectExec(dbcoreRealignShiftSQL(`milestones`, `milestone_id IN \(\$4\)`)).
+		WithArgs("UTC", 5, "UTC", dbcoreMilestoneID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
@@ -527,19 +545,32 @@ func TestRealignRoadmapDates_ShiftsIncompleteWork(t *testing.T) {
 	require.ErrorIs(t, err, dbcoreErrDB)
 }
 
-func TestRealignRoadmapDates_AlreadyAligned_NoTransaction(t *testing.T) {
+func TestRealignRoadmapDates_AlreadyAligned_StillReanchors(t *testing.T) {
 	mock := withMockDB(t)
 	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	today := dbcoreMidnightUTC()
+	// Already on today's calendar day, but at an arbitrary wall-clock time —
+	// the shape of rows written before dates were anchored.
+	firstTaskDate := dbcoreScheduleAnchor().Add(-5 * time.Hour)
 
 	dbcoreExpectRoadmapOwnedFetch(mock, start, nil, false)
-	// First incomplete task already lands on today+0 -> daysToShift == 0.
 	mock.ExpectQuery(`SELECT \* FROM "tasks" WHERE \(roadmap_id = \$1 AND completed = \$2\) AND date IS NOT NULL ORDER BY date ASC`).
 		WithArgs(dbcoreRoadmapID, false, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"task_id", "roadmap_id", "completed", "date"}).
-			AddRow(dbcoreTaskID, dbcoreRoadmapID, false, today))
+			AddRow(dbcoreTaskID, dbcoreRoadmapID, false, firstTaskDate))
+	dbcoreExpectUserTimezone(mock)
 
-	// No Begin expected: straight to the reload (trimmed with an error).
+	// daysToShift == 0, but the update still runs so the stray time-of-day is
+	// normalized to the scheduling anchor.
+	mock.ExpectBegin()
+	mock.ExpectExec(dbcoreRealignShiftSQL(`tasks`, `roadmap_id = \$4 AND completed = false`)).
+		WithArgs("UTC", 0, "UTC", dbcoreRoadmapID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT DISTINCT "milestone_id" FROM "tasks" WHERE roadmap_id = \$1 AND completed = false`).
+		WithArgs(dbcoreRoadmapID).
+		WillReturnRows(sqlmock.NewRows([]string{"milestone_id"}))
+	mock.ExpectCommit()
+
+	dbcoreExpectRecomputeSwallowed(mock)
 	dbcoreExpectFullReloadFails(mock)
 
 	_, daysShifted, err := RealignRoadmapDates(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID, 0)

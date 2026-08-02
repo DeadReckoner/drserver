@@ -240,6 +240,58 @@ type Roadmap struct {
 	Milestones []Milestone `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"milestones,omitempty"`
 }
 
+// MinScheduledDay returns the smallest Day across every milestone and task in
+// the roadmap, or 0 when it carries neither.
+//
+// Day is an offset from the start day, so the earliest item is meant to sit on
+// day 0. Generated plans routinely number from 1 instead (and the AI can ignore
+// the instruction outright), which would push the whole roadmap a day past the
+// day the user pressed start. Scheduling relative to this minimum rebases the
+// plan onto the start day whatever numbering the model used, and is a no-op for
+// plans that already start at 0 — which is what the document-import path
+// normalizes them to.
+//
+// Requires milestones and tasks to be loaded; an unpopulated roadmap yields 0,
+// which leaves scheduling unshifted.
+func (r *Roadmap) MinScheduledDay() int {
+	minDay := 0
+	found := false
+	consider := func(day int) {
+		if !found || day < minDay {
+			minDay = day
+			found = true
+		}
+	}
+
+	visit := func(milestones []Milestone) {
+		for i := range milestones {
+			consider(milestones[i].Day)
+			for j := range milestones[i].Tasks {
+				consider(milestones[i].Tasks[j].Day)
+			}
+		}
+	}
+	for i := range r.Phases {
+		visit(r.Phases[i].Milestones)
+	}
+	visit(r.Milestones)
+
+	if !found || minDay < 0 {
+		return 0
+	}
+	return minDay
+}
+
+// ScheduleOffset rebases a Day onto the start day, given the plan's earliest
+// day from MinScheduledDay. It never returns a negative offset, so a stray low
+// day can't schedule work before the roadmap starts.
+func ScheduleOffset(day, dayZero int) int {
+	if offset := day - dayZero; offset > 0 {
+		return offset
+	}
+	return 0
+}
+
 // ComputeAllStatuses computes statuses for all tasks, milestones, and phases in this roadmap.
 // This is the single source of truth for status computation.
 //
@@ -593,6 +645,46 @@ func LocationOrUTC(tz string) *time.Location {
 		return time.UTC
 	}
 	return loc
+}
+
+// ScheduleAnchorHour is the local hour that milestone and task dates are
+// pinned to. These dates are calendar days, not appointments, but they live in
+// a timestamptz column that two different readers interpret:
+//
+//   - the mobile client renders the instant in the device's local timezone, so
+//     the instant must land inside the user's intended local day;
+//   - the notification jobs and stats queries compare `t.date::date` in a UTC
+//     session, so the instant must also land on the matching UTC day.
+//
+// Midday local satisfies both for every UTC offset within ±12h. Local midnight
+// would not: east of Greenwich it falls on the previous UTC day, which would
+// make tasks read as overdue a day early.
+const ScheduleAnchorHour = 12
+
+// ScheduleDayIn returns the anchor instant for the calendar day that t falls on
+// when observed in loc. A nil loc is treated as UTC. See ScheduleAnchorHour for
+// why the anchor is midday rather than midnight.
+func ScheduleDayIn(t time.Time, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	local := t.In(loc)
+	return time.Date(local.Year(), local.Month(), local.Day(), ScheduleAnchorHour, 0, 0, 0, loc)
+}
+
+// CalendarDaysBetween returns the signed number of calendar days from `from` to
+// `to`, both observed in loc. A nil loc is treated as UTC. Counting whole days
+// — rather than dividing an elapsed duration by 24h — keeps the result exact
+// across DST transitions, where a local day can be 23 or 25 hours long.
+func CalendarDaysBetween(from, to time.Time, loc *time.Location) int {
+	if loc == nil {
+		loc = time.UTC
+	}
+	f := from.In(loc)
+	t := to.In(loc)
+	fDay := time.Date(f.Year(), f.Month(), f.Day(), 0, 0, 0, 0, time.UTC)
+	tDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	return int(tDay.Sub(fDay).Hours() / 24)
 }
 
 type Step struct {

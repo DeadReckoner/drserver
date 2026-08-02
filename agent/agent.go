@@ -271,7 +271,7 @@ func generateStrategicRoadmap(ctx context.Context, userPrompt string) ([]byte, e
 										"type": "integer", // Order within the phase
 									},
 									"day": map[string]interface{}{
-										"type": "integer", // Day this milestone starts
+										"type": "integer", // Offset from the roadmap's start day; 0 is the start day
 									},
 									"resources_forecast": map[string]interface{}{
 										"type": "string", // JSON string of needed resources
@@ -344,7 +344,7 @@ func generateStrategicRoadmap(ctx context.Context, userPrompt string) ([]byte, e
 				- description: Informative but not overly descriptive
 				- acceptance_test: Clear acceptance test (how to know it's complete)
 				- duration_days_min/max: Duration estimates (min/max days, accounting for learning curves)
-				- day: The day number when this milestone should start (sequential across the whole roadmap)
+				- day: When this milestone starts, as a whole-number offset from the day the user starts the roadmap. Day 0 is the start day, so the FIRST milestone must be day 0. Offsets are GLOBAL across the roadmap and must never decrease as the plan progresses.
 				- resources_forecast: Resources forecast (tools, materials, courses needed as JSON string)
 				- spikes: Time-boxed investigations for unknowns (use empty array if none needed)
 				- risks: Potential obstacles with severity level (use empty array if no significant risks)
@@ -496,7 +496,7 @@ func generateMilestoneTasks(ctx context.Context, userPrompt string, milestone *t
 									- Estimated minutes: Realistic time estimate (account for learning curve)
 									- Dependencies: JSON array of prerequisite task titles (e.g., ["Task 1 Title"] or [] for none)
 									- Confidence: Your confidence in the estimate (low/medium/high)
-									- Day: Which day in the milestone this task should be done (spread across 7-14 days)
+									- Day: When this task happens, as a whole-number offset from the milestone's first day. Day 0 is the milestone's first day, so the EARLIEST task must be day 0. Spread the rest across 7-14 days.
 									- 2-4 detailed steps: Granular instructions that remove ambiguity
 
 									TASK DESIGN PRINCIPLES:
@@ -509,7 +509,7 @@ func generateMilestoneTasks(ctx context.Context, userPrompt string, milestone *t
 
 									FORMATTING:
 									- Set all 'completed' fields to false
-									- Day numbers should be sequential starting from day 1
+									- Day numbers must be non-decreasing and start at day 0
 									- Dependencies should be exact task titles from earlier tasks in the list`, milestoneContext, reviewSection)
 
 	reqBody := AIRequest{

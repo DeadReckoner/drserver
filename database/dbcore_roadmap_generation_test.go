@@ -90,17 +90,9 @@ func TestUpdateRoadmapWithGeneration_WiresEntitiesAndReturnsSaveError(t *testing
 
 // --- SaveNextMilestone ---
 
-// dbcoreUTCMidnight mirrors SaveNextMilestone's anchor normalization: it
-// derives "today" from time.Now().UTC(), unlike RestartRoadmap/
-// RealignRoadmapDates/GetOverdueTasks which use the server's LOCAL date
-// pinned to UTC (see dbcoreMidnightUTC). The two disagree by a day whenever
-// the server's local date differs from the UTC date (e.g. every evening in
-// US timezones) — a production inconsistency this test suite documents by
-// needing two helpers.
-func dbcoreUTCMidnight() time.Time {
-	now := time.Now().UTC()
-	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-}
+// SaveNextMilestone anchors task dates with types.ScheduleDayIn in the owner's
+// timezone, the same normalization RestartRoadmap and RealignRoadmapDates use;
+// dbcoreScheduleAnchor recomputes it for the mock's UTC user.
 
 // dbcoreExpectNextMilestoneFetch stubs the opening milestone load.
 func dbcoreExpectNextMilestoneFetch(mock sqlmock.Sqlmock, date any) {
@@ -133,15 +125,17 @@ func TestSaveNextMilestone_FetchErrorReturnedBeforeTransaction(t *testing.T) {
 
 func TestSaveNextMilestone_PastMilestone_AnchorsTasksAtToday(t *testing.T) {
 	mock := withMockDB(t)
-	today := dbcoreUTCMidnight()
+	today := dbcoreScheduleAnchor()
 	// Milestone planned 5 days ago -> anchor snaps forward to today.
 	dbcoreExpectNextMilestoneFetch(mock, today.AddDate(0, 0, -5))
+	dbcoreExpectUserTimezone(mock)
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM "tasks" WHERE milestone_id = \$1`).
 		WithArgs(dbcoreMilestoneID).
 		WillReturnResult(sqlmock.NewResult(0, 2))
-	// Day=1 -> today; Day=3 -> today+2d. Batch insert: 14 args per row.
+	// Days rebase onto the lowest one returned (1), so Day=1 -> today and
+	// Day=3 -> today+2d. Batch insert: 14 args per row.
 	args := append(dbcoreTaskInsertArgs("first", 1, today), dbcoreTaskInsertArgs("second", 3, today.AddDate(0, 0, 2))...)
 	mock.ExpectQuery(`INSERT INTO "tasks"`).
 		WithArgs(args...).
@@ -162,17 +156,18 @@ func TestSaveNextMilestone_PastMilestone_AnchorsTasksAtToday(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestSaveNextMilestone_FutureMilestone_AnchorsAtMilestoneDate_ClampsNonPositiveDay(t *testing.T) {
+func TestSaveNextMilestone_FutureMilestone_AnchorsAtMilestoneDate(t *testing.T) {
 	mock := withMockDB(t)
-	future := dbcoreUTCMidnight().AddDate(0, 0, 5)
+	future := dbcoreScheduleAnchor().AddDate(0, 0, 5)
 	dbcoreExpectNextMilestoneFetch(mock, future)
+	dbcoreExpectUserTimezone(mock)
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM "tasks" WHERE milestone_id = \$1`).
 		WithArgs(dbcoreMilestoneID).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	// Day=0 clamps the offset to 0 -> the task lands exactly on the future
-	// milestone date.
+	// The lone task is its own day zero -> offset 0 -> it lands exactly on the
+	// future milestone date.
 	mock.ExpectQuery(`INSERT INTO "tasks"`).
 		WithArgs(dbcoreTaskInsertArgs("only", 0, future)...).
 		WillReturnRows(sqlmock.NewRows([]string{"task_id"}).AddRow(dbcoreTaskID))
@@ -190,6 +185,7 @@ func TestSaveNextMilestone_FutureMilestone_AnchorsAtMilestoneDate_ClampsNonPosit
 func TestSaveNextMilestone_AdjustmentsSubGoalOnly_SparseUpdateMap(t *testing.T) {
 	mock := withMockDB(t)
 	dbcoreExpectNextMilestoneFetch(mock, nil)
+	dbcoreExpectUserTimezone(mock)
 
 	mock.ExpectBegin()
 	// Only sub_goal is set; sentinel-empty fields are excluded from the map.
@@ -213,6 +209,7 @@ func TestSaveNextMilestone_AdjustmentsSubGoalOnly_SparseUpdateMap(t *testing.T) 
 func TestSaveNextMilestone_ReplacesSpikesAndRisks(t *testing.T) {
 	mock := withMockDB(t)
 	dbcoreExpectNextMilestoneFetch(mock, nil)
+	dbcoreExpectUserTimezone(mock)
 
 	mock.ExpectBegin()
 	// No scalar overrides -> no milestone UPDATE. Non-empty arrays replace:
@@ -247,6 +244,7 @@ func TestSaveNextMilestone_ReplacesSpikesAndRisks(t *testing.T) {
 func TestSaveNextMilestone_MidTransactionErrorRollsBack(t *testing.T) {
 	mock := withMockDB(t)
 	dbcoreExpectNextMilestoneFetch(mock, nil)
+	dbcoreExpectUserTimezone(mock)
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM "tasks" WHERE milestone_id = \$1`).
