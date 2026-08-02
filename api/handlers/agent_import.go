@@ -10,6 +10,9 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"dr/server/agent/anthropic"
@@ -25,10 +28,21 @@ import (
 )
 
 const (
-	// maxPlanUploadBytes caps the uploaded PDF. The Messages API accepts a 32MB
-	// request and base64 inflates the file by 4/3, so 10MB leaves comfortable
-	// room for the prompt while still covering any realistic plan document.
-	maxPlanUploadBytes = 10 << 20
+	// planUploadEnvVar overrides the upload cap per environment, in bytes.
+	planUploadEnvVar = "PLAN_IMPORT_MAX_BYTES"
+
+	// defaultPlanUploadBytes is the cap when PLAN_IMPORT_MAX_BYTES is unset:
+	// enough for any realistic plan document while keeping request size and
+	// per-import token spend modest.
+	defaultPlanUploadBytes = 10 << 20
+
+	// planUploadCeilingBytes is the largest cap we accept, whatever the env
+	// says. The Messages API rejects a request over 32MB and base64 inflates
+	// the PDF by 4/3, putting the theoretical maximum near 24MB; 20MB leaves
+	// room for the prompt. A larger configured value is clamped to this rather
+	// than honored, so a misconfiguration surfaces as a 413 we control instead
+	// of a 400 from the API mid-job.
+	planUploadCeilingBytes = 20 << 20
 
 	// planUploadSlackBytes is headroom over the file cap for multipart framing
 	// and the context field, so the body limit rejects only genuinely oversized
@@ -43,6 +57,34 @@ const (
 // pdfMagic is the header every PDF starts with. Checked in addition to the
 // declared content type, which the client controls and can get wrong.
 var pdfMagic = []byte("%PDF-")
+
+// planUploadLimit resolves the upload cap from PLAN_IMPORT_MAX_BYTES, falling
+// back to the default when unset and clamping to what the Messages API can
+// actually accept. Resolved per request rather than at startup: env is fixed
+// for the process lifetime either way, and one Getenv is nothing next to a
+// multi-megabyte upload followed by a model call.
+//
+// A junk or out-of-range value warns and falls back rather than failing the
+// request — a typo in one environment's config shouldn't take plan import down.
+func planUploadLimit(ctx context.Context) int64 {
+	raw := strings.TrimSpace(os.Getenv(planUploadEnvVar))
+	if raw == "" {
+		return defaultPlanUploadBytes
+	}
+
+	limit, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || limit <= 0 {
+		log.Warn(ctx, "invalid "+planUploadEnvVar+"; using default",
+			fmt.Sprintf("value=%q, default=%d", raw, int64(defaultPlanUploadBytes)))
+		return defaultPlanUploadBytes
+	}
+	if limit > planUploadCeilingBytes {
+		log.Warn(ctx, planUploadEnvVar+" exceeds what the Messages API accepts; clamping",
+			fmt.Sprintf("value=%d, ceiling=%d", limit, int64(planUploadCeilingBytes)))
+		return planUploadCeilingBytes
+	}
+	return limit
+}
 
 // ImportPlan handles POST /api/v1/agent/import-plan: the user uploads a plan or
 // roadmap they already have as a PDF, and Claude transposes it onto the
@@ -169,14 +211,15 @@ func parsePlanImportContext(c *gin.Context) (types.PlanImportContext, bool) {
 // form in memory before any handler code runs, so without MaxBytesReader an
 // oversized upload would be fully buffered only to be rejected afterwards.
 func readPlanUpload(c *gin.Context) ([]byte, string, bool) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxPlanUploadBytes+planUploadSlackBytes)
+	limit := planUploadLimit(c.Request.Context())
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit+planUploadSlackBytes)
 
 	file, header, err := c.Request.FormFile(planFileField)
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			utils.ErrorResponse(c, http.StatusRequestEntityTooLarge,
-				fmt.Sprintf("PDF is too large; the limit is %d bytes", int64(maxPlanUploadBytes)))
+				fmt.Sprintf("PDF is too large; the limit is %d bytes", limit))
 			return nil, "", false
 		}
 		utils.BadRequestResponse(c, "a PDF file is required in the \"file\" field")
@@ -184,17 +227,17 @@ func readPlanUpload(c *gin.Context) ([]byte, string, bool) {
 	}
 	defer func() { _ = file.Close() }()
 
-	if header.Size > maxPlanUploadBytes {
+	if header.Size > limit {
 		utils.ErrorResponse(c, http.StatusRequestEntityTooLarge,
-			fmt.Sprintf("PDF is too large (%d bytes); the limit is %d bytes", header.Size, int64(maxPlanUploadBytes)))
+			fmt.Sprintf("PDF is too large (%d bytes); the limit is %d bytes", header.Size, limit))
 		return nil, "", false
 	}
 
-	data, err := readCappedUpload(file, maxPlanUploadBytes)
+	data, err := readCappedUpload(file, limit)
 	if err != nil {
 		if errors.Is(err, errUploadTooLarge) {
 			utils.ErrorResponse(c, http.StatusRequestEntityTooLarge,
-				fmt.Sprintf("PDF is too large; the limit is %d bytes", int64(maxPlanUploadBytes)))
+				fmt.Sprintf("PDF is too large; the limit is %d bytes", limit))
 			return nil, "", false
 		}
 		utils.InternalErrorResponse(c, err)

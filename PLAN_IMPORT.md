@@ -37,7 +37,7 @@ Content-Type: multipart/form-data
 
 | Field     | Required | Description                                                        |
 | --------- | -------- | ------------------------------------------------------------------ |
-| `file`    | yes      | The PDF. Max 10 MB. Validated by magic number, not by filename.    |
+| `file`    | yes      | The PDF. Max 10 MB by default (see below). Validated by magic number, not by filename. |
 | `context` | no       | JSON string of optional hints (below).                             |
 
 `context` fields (all optional, all strings):
@@ -58,6 +58,20 @@ These only resolve what the document leaves open (pacing, timing, an unstated
 goal). Where a hint conflicts with the document, **the document wins** — the
 model is told so explicitly. Sending no `context` at all is fine and is the
 expected path for a self-contained plan.
+
+### Upload size limit
+
+The 10 MB default is overridable per environment with `PLAN_IMPORT_MAX_BYTES`
+(in bytes). Values above **20 MB are clamped**, not honored: the Messages API
+rejects a request over 32 MB and base64 inflates the PDF by 4/3, putting the
+real ceiling near 24 MB. An unset, malformed, or non-positive value falls back
+to the default and logs a warning, so a typo in one environment's config can't
+take plan import down.
+
+Raising it has a cost beyond request size — a PDF that large is usually scanned
+pages, which bills image tokens per page and feeds OCR-quality text into the
+transposition. Very large documents can also exhaust the 32K output budget and
+come back as the "too long to import in one go" failure.
 
 ### Response — `202 Accepted`
 
@@ -81,7 +95,7 @@ it immediately; it fills in when the job completes.
 | `400`  | No file, the file isn't a PDF, or `context` isn't valid JSON          |
 | `403`  | AI acknowledgment not accepted (`code: "ai_ack_required"`)            |
 | `402`  | Daily AI generation cap reached (`code: "plan_limit"`) — same paywall trigger as the generation endpoints |
-| `413`  | PDF is over 10 MB                                                     |
+| `413`  | PDF is over the upload limit (10 MB by default)                       |
 | `503`  | `ANTHROPIC_API_KEY` not configured on the server                      |
 
 The daily AI cap is the same pool the generation endpoints draw from, and — as

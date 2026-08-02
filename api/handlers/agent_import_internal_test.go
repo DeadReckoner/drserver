@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"mime/multipart"
 	"strings"
@@ -19,6 +20,32 @@ func TestIsPDF(t *testing.T) {
 	assert.False(t, isPDF([]byte("{\"not\": \"a pdf\"}")))
 	assert.False(t, isPDF(nil))
 	assert.False(t, isPDF([]byte("%PDF")), "a truncated magic number is not enough")
+}
+
+func TestPlanUploadLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want int64
+	}{
+		{name: "unset falls back to the default", env: "", want: defaultPlanUploadBytes},
+		{name: "honors a valid override", env: "15728640", want: 15 << 20},
+		// Above the ceiling the Messages API would reject the request outright,
+		// so we clamp rather than honor it.
+		{name: "clamps above the ceiling", env: "104857600", want: planUploadCeilingBytes},
+		// A typo in one environment's config must not take plan import down.
+		{name: "junk falls back to the default", env: "20MB", want: defaultPlanUploadBytes},
+		{name: "zero falls back to the default", env: "0", want: defaultPlanUploadBytes},
+		{name: "negative falls back to the default", env: "-1", want: defaultPlanUploadBytes},
+		{name: "whitespace is trimmed", env: "  2097152  ", want: 2 << 20},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(planUploadEnvVar, tt.env)
+			assert.Equal(t, tt.want, planUploadLimit(context.Background()))
+		})
+	}
 }
 
 func TestReadCappedUpload(t *testing.T) {
