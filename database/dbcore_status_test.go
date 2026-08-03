@@ -99,12 +99,90 @@ func TestRecomputeAndSaveStatuses_PersistsComputedStatuses(t *testing.T) {
 	dbcoreExpectRecomputeLoad(mock)
 
 	// The first incomplete, not-overdue task becomes in_progress, and its
-	// milestone follows; both computed statuses must be persisted.
+	// milestone follows; both computed statuses must be persisted. Writes are
+	// grouped by target status, so each lands as an IN-list update.
 	mock.ExpectBegin()
-	mock.ExpectExec(`UPDATE "tasks" SET "status"=\$1 WHERE task_id = \$2`).
+	mock.ExpectExec(`UPDATE "tasks" SET "status"=\$1 WHERE task_id IN \(\$2\)`).
 		WithArgs("in_progress", dbcoreTaskID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE "milestones" SET "status"=\$1 WHERE milestone_id = \$2`).
+	mock.ExpectExec(`UPDATE "milestones" SET "status"=\$1 WHERE milestone_id IN \(\$2\)`).
+		WithArgs("in_progress", dbcoreMilestoneID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	require.NoError(t, RecomputeAndSaveStatuses(dbcoreRoadmapID))
+}
+
+// Rows whose computed status already matches what's stored must not be
+// written at all — that's what keeps a step completion from costing one round
+// trip per task in the roadmap. With no changes there is no transaction either.
+func TestRecomputeAndSaveStatuses_UnchangedStatuses_NoWrites(t *testing.T) {
+	mock := withMockDB(t)
+	start := dbcoreMidnightUTC().AddDate(0, 0, -1)
+	tomorrow := dbcoreMidnightUTC().AddDate(0, 0, 1)
+
+	mock.ExpectQuery(`SELECT \* FROM "roadmaps" WHERE roadmap_id = \$1`).
+		WithArgs(dbcoreRoadmapID, 1).
+		WillReturnRows(sqlmock.NewRows(dbcoreStatusRoadmapCols).
+			AddRow(dbcoreRoadmapID, dbcoreUserID, "g", false, start))
+	// Stored statuses already equal what ComputeAllStatuses will produce.
+	mock.ExpectQuery(`SELECT \* FROM "milestones" WHERE "milestones"\."roadmap_id" = \$1 ORDER BY day ASC`).
+		WithArgs(dbcoreRoadmapID).
+		WillReturnRows(sqlmock.NewRows([]string{"milestone_id", "roadmap_id", "day", "reached", "phase_id", "status"}).
+			AddRow(dbcoreMilestoneID, dbcoreRoadmapID, 1, false, nil, "in_progress"))
+	mock.ExpectQuery(`SELECT \* FROM "tasks" WHERE "tasks"\."milestone_id" = \$1 ORDER BY day ASC`).
+		WithArgs(dbcoreMilestoneID).
+		WillReturnRows(sqlmock.NewRows([]string{"task_id", "roadmap_id", "milestone_id", "day", "completed", "date", "status"}).
+			AddRow(dbcoreTaskID, dbcoreRoadmapID, dbcoreMilestoneID, 1, false, tomorrow, "in_progress"))
+	mock.ExpectQuery(`SELECT \* FROM "phases" WHERE "phases"\."roadmap_id" = \$1 ORDER BY order_index ASC`).
+		WithArgs(dbcoreRoadmapID).
+		WillReturnRows(sqlmock.NewRows([]string{"phase_id"}))
+	dbcoreExpectTimezonePluck(mock, "UTC")
+
+	// No ExpectBegin: any UPDATE (or even an empty transaction) fails the run.
+	require.NoError(t, RecomputeAndSaveStatuses(dbcoreRoadmapID))
+}
+
+// Tasks landing on the same status share a single UPDATE rather than one per
+// row, which is what bounds the statement count on a large roadmap.
+func TestRecomputeAndSaveStatuses_SameStatusRowsShareOneUpdate(t *testing.T) {
+	mock := withMockDB(t)
+	start := dbcoreMidnightUTC().AddDate(0, 0, -1)
+	tomorrow := dbcoreMidnightUTC().AddDate(0, 0, 1)
+	const secondTaskID = "77777777-0000-0000-0000-000000000002"
+	const thirdTaskID = "77777777-0000-0000-0000-000000000003"
+
+	mock.ExpectQuery(`SELECT \* FROM "roadmaps" WHERE roadmap_id = \$1`).
+		WithArgs(dbcoreRoadmapID, 1).
+		WillReturnRows(sqlmock.NewRows(dbcoreStatusRoadmapCols).
+			AddRow(dbcoreRoadmapID, dbcoreUserID, "g", false, start))
+	mock.ExpectQuery(`SELECT \* FROM "milestones" WHERE "milestones"\."roadmap_id" = \$1 ORDER BY day ASC`).
+		WithArgs(dbcoreRoadmapID).
+		WillReturnRows(sqlmock.NewRows([]string{"milestone_id", "roadmap_id", "day", "reached", "phase_id"}).
+			AddRow(dbcoreMilestoneID, dbcoreRoadmapID, 1, false, nil))
+	// First task is the current one (in_progress); the two behind it are both
+	// not_started and must collapse into one statement.
+	mock.ExpectQuery(`SELECT \* FROM "tasks" WHERE "tasks"\."milestone_id" = \$1 ORDER BY day ASC`).
+		WithArgs(dbcoreMilestoneID).
+		WillReturnRows(sqlmock.NewRows([]string{"task_id", "roadmap_id", "milestone_id", "day", "completed", "date"}).
+			AddRow(dbcoreTaskID, dbcoreRoadmapID, dbcoreMilestoneID, 1, false, tomorrow).
+			AddRow(secondTaskID, dbcoreRoadmapID, dbcoreMilestoneID, 2, false, tomorrow).
+			AddRow(thirdTaskID, dbcoreRoadmapID, dbcoreMilestoneID, 3, false, tomorrow))
+	mock.ExpectQuery(`SELECT \* FROM "phases" WHERE "phases"\."roadmap_id" = \$1 ORDER BY order_index ASC`).
+		WithArgs(dbcoreRoadmapID).
+		WillReturnRows(sqlmock.NewRows([]string{"phase_id"}))
+	dbcoreExpectTimezonePluck(mock, "UTC")
+
+	// Two task statements for three tasks, ordered by status name
+	// ("in_progress" before "not_started").
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "tasks" SET "status"=\$1 WHERE task_id IN \(\$2\)`).
+		WithArgs("in_progress", dbcoreTaskID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE "tasks" SET "status"=\$1 WHERE task_id IN \(\$2,\$3\)`).
+		WithArgs("not_started", secondTaskID, thirdTaskID).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectExec(`UPDATE "milestones" SET "status"=\$1 WHERE milestone_id IN \(\$2\)`).
 		WithArgs("in_progress", dbcoreMilestoneID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
@@ -117,7 +195,7 @@ func TestRecomputeAndSaveStatuses_UpdateErrorRollsBack(t *testing.T) {
 	dbcoreExpectRecomputeLoad(mock)
 
 	mock.ExpectBegin()
-	mock.ExpectExec(`UPDATE "tasks" SET "status"=\$1 WHERE task_id = \$2`).
+	mock.ExpectExec(`UPDATE "tasks" SET "status"=\$1 WHERE task_id IN \(\$2\)`).
 		WillReturnError(dbcoreErrDB)
 	mock.ExpectRollback()
 
@@ -155,13 +233,14 @@ func TestRecomputeAndSaveStatuses_PhaseOwnedMilestoneNotSavedTwice(t *testing.T)
 	dbcoreExpectTimezonePluck(mock, "UTC")
 
 	// Exactly ONE milestone status UPDATE (under its phase) plus the phase
-	// UPDATE. The top-level loop must skip the phase-owned milestone; a
-	// duplicate UPDATE would fail ExpectationsWereMet / ordered matching.
+	// UPDATE, and the milestone id appears exactly once in the IN list. The
+	// top-level loop must skip the phase-owned milestone; collecting it twice
+	// would widen the IN list and fail the arg match.
 	mock.ExpectBegin()
-	mock.ExpectExec(`UPDATE "milestones" SET "status"=\$1 WHERE milestone_id = \$2`).
+	mock.ExpectExec(`UPDATE "milestones" SET "status"=\$1 WHERE milestone_id IN \(\$2\)`).
 		WithArgs(sqlmock.AnyArg(), dbcoreMilestoneID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`UPDATE "phases" SET "status"=\$1 WHERE phase_id = \$2`).
+	mock.ExpectExec(`UPDATE "phases" SET "status"=\$1 WHERE phase_id IN \(\$2\)`).
 		WithArgs(sqlmock.AnyArg(), dbcorePhaseID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()

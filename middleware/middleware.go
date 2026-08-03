@@ -11,9 +11,11 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 )
@@ -95,9 +97,91 @@ func AuthMiddleware() gin.HandlerFunc {
 // context (parseToken fires before the request ID middleware can tag one).
 var authLog = log.NewLogger("auth")
 
-func parseToken(accessToken string) string {
-	_ = godotenv.Load(".env")
+// envOnce guards loading .env. This used to run on every call to parseToken,
+// which meant opening and parsing a file on the hot path of every
+// authenticated request.
+var envOnce sync.Once
 
+// authHTTPClient is shared so TLS connections to Supabase are pooled across
+// requests, and carries a timeout: the previous zero-value http.Client had
+// none, so a Supabase auth endpoint that accepted the connection and then
+// stalled would hang the request — and the user's app — indefinitely.
+var authHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
+// supabaseClaims is the subset of a Supabase access token we act on.
+type supabaseClaims struct {
+	Role string `json:"role"`
+	jwt.RegisteredClaims
+}
+
+// supabaseJWTSecret returns the project's JWT signing secret, or empty when
+// it isn't configured. SUPABASE_JWT_SECRET is the preferred name; JWT_secret
+// matches the key already used in the local .env.
+func supabaseJWTSecret() string {
+	if s := os.Getenv("SUPABASE_JWT_SECRET"); s != "" {
+		return s
+	}
+	return os.Getenv("JWT_secret")
+}
+
+// parseToken resolves an access token to a user id, or "" if the token isn't
+// valid.
+//
+// Supabase signs access tokens with HS256 using the project's JWT secret, so
+// when that secret is configured we verify the signature in-process and skip
+// the network entirely. Without it we fall back to asking Supabase to validate
+// the token — which is a full HTTPS round trip on *every* authenticated
+// request, and was previously the only path.
+//
+// The fallback is what makes this safe to deploy before the secret is set:
+// nothing changes until SUPABASE_JWT_SECRET lands in the environment.
+func parseToken(accessToken string) string {
+	envOnce.Do(func() { _ = godotenv.Load(".env") })
+
+	if secret := supabaseJWTSecret(); secret != "" {
+		return verifyTokenLocally(accessToken, secret)
+	}
+	return verifyTokenWithSupabase(accessToken)
+}
+
+// verifyTokenLocally checks the token's signature and expiry against the
+// project secret and returns its subject.
+//
+// The role check is load-bearing: a Supabase project's anon and service_role
+// API keys are themselves JWTs signed with this same secret. The anon key is
+// public — it ships in the mobile app — so without requiring
+// role == "authenticated" anyone could present it as a bearer token. It
+// carries no subject, so the empty-sub check catches it too; both are here
+// deliberately.
+func verifyTokenLocally(accessToken, secret string) string {
+	var claims supabaseClaims
+	_, err := jwt.ParseWithClaims(accessToken, &claims,
+		func(*jwt.Token) (interface{}, error) { return []byte(secret), nil },
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+	)
+	if err != nil {
+		// Expired and malformed tokens are routine — clients retry with a
+		// refreshed token — so this is a warning, not an error.
+		authLog.Warn("supabase auth: token rejected", err.Error())
+		return ""
+	}
+
+	if claims.Role != "authenticated" {
+		authLog.Warn("supabase auth: token is not a user token", "role", claims.Role)
+		return ""
+	}
+	if claims.Subject == "" {
+		authLog.Warn("supabase auth: token has no subject")
+		return ""
+	}
+
+	return claims.Subject
+}
+
+// verifyTokenWithSupabase asks the Supabase auth API to validate the token and
+// returns the user id from the response. Used when no JWT secret is
+// configured; see parseToken.
+func verifyTokenWithSupabase(accessToken string) string {
 	supabaseKey := os.Getenv("anon_key")
 	supabaseApi := os.Getenv("API_URL")
 
@@ -109,9 +193,7 @@ func parseToken(accessToken string) string {
 	req.Header.Add("apiKey", supabaseKey)
 	req.Header.Add("Authorization", "Bearer "+accessToken)
 
-	client := &http.Client{}
-
-	resp, err := client.Do(req)
+	resp, err := authHTTPClient.Do(req)
 	if err != nil {
 		authLog.Error("supabase auth: error sending request", err.Error())
 		return ""
