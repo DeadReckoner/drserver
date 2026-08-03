@@ -1234,6 +1234,7 @@ type Feedback struct {
 	FeedbackID string    `gorm:"type:uuid;primaryKey;default:gen_random_uuid();column:feedback_id" json:"feedback_id"`
 	UserID     string    `gorm:"type:uuid;column:user_id;not null" json:"user_id"`
 	Category   string    `gorm:"column:category;not null" json:"category"`
+	Subject    string    `gorm:"column:subject" json:"subject"`
 	Message    string    `gorm:"column:message;not null" json:"message"`
 	AppVersion string    `gorm:"column:app_version" json:"app_version"`
 	OS         string    `gorm:"column:os" json:"os"`
@@ -1245,8 +1246,12 @@ func (Feedback) TableName() string {
 	return "feedback"
 }
 
+// CreateFeedbackRequest covers every inbound user-contact channel in the app.
+// "support" is the Contact Support screen, which is the only category that
+// carries a Subject; the rest come from the Send Feedback screen.
 type CreateFeedbackRequest struct {
-	Category   string `json:"category" binding:"required,oneof=bug feature general"`
+	Category   string `json:"category" binding:"required,oneof=bug feature general support"`
+	Subject    string `json:"subject" binding:"max=200"`
 	Message    string `json:"message" binding:"required,min=10"`
 	AppVersion string `json:"app_version"`
 	OS         string `json:"os"`

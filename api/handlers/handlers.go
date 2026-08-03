@@ -43,7 +43,7 @@ func NewHandlers(db *gorm.DB, storageClient *storage.StorageClient, appleClient 
 		Notification:         NewNotificationHandler(db),
 		NotificationSettings: NewNotificationSettingsHandler(db),
 		Message:              NewMessageHandler(db),
-		Feedback:             NewFeedbackHandler(db),
+		Feedback:             NewFeedbackHandler(db, mailer),
 		Nudge:                NewNudgeHandler(db),
 		Billing:              NewBillingHandler(db),
 		Admin:                NewAdminHandler(db),

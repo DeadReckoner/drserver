@@ -1,0 +1,38 @@
+{{define "subject"}}{{if eq .FeedbackCategory "support"}}Support request{{else if eq .FeedbackCategory "bug"}}Bug report{{else if eq .FeedbackCategory "feature"}}Feature request{{else}}Feedback{{end}}: {{if .FeedbackSubject}}{{.FeedbackSubject}}{{else}}{{.SubmitterName}}{{end}}{{end}}
+
+{{define "body"}}
+<h1>New {{if eq .FeedbackCategory "support"}}support request{{else if eq .FeedbackCategory "bug"}}bug report{{else if eq .FeedbackCategory "feature"}}feature request{{else}}feedback{{end}}</h1>
+
+<p>
+  Submitted{{if .FeedbackCreatedAt}} on {{.FeedbackCreatedAt}}{{end}}.
+</p>
+
+<p>
+  <strong>Feedback ID:</strong> {{.FeedbackID}}<br>
+  <strong>Category:</strong> {{.FeedbackCategory}}
+  {{if .FeedbackSubject}}<br><strong>Subject:</strong> {{.FeedbackSubject}}{{end}}
+</p>
+
+<p>
+  <strong>From:</strong> {{if .SubmitterName}}{{.SubmitterName}} {{end}}({{.SubmitterID}}){{if .SubmitterEmail}}<br><strong>Email:</strong> <a href="mailto:{{.SubmitterEmail}}">{{.SubmitterEmail}}</a>{{end}}
+</p>
+
+<p>
+  <strong>Message:</strong>
+</p>
+<pre style="white-space: pre-wrap; word-break: break-word; background: #f1f1f1; padding: 12px; border-radius: 6px; font-size: 13px;">{{.FeedbackMessage}}</pre>
+
+{{if or .FeedbackAppVer .FeedbackOS .FeedbackDevice}}
+<p>
+  {{if .FeedbackAppVer}}<strong>App version:</strong> {{.FeedbackAppVer}}<br>{{end}}
+  {{if .FeedbackOS}}<strong>OS:</strong> {{.FeedbackOS}}<br>{{end}}
+  {{if .FeedbackDevice}}<strong>Device:</strong> {{.FeedbackDevice}}{{end}}
+</p>
+{{end}}
+
+<p>
+  Reply to this email to respond directly to {{if .SubmitterName}}{{.SubmitterName}}{{else}}the user{{end}}.
+</p>
+{{end}}
+
+{{template "layout" .}}

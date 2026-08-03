@@ -127,6 +127,15 @@ func (d *Dispatcher) Send(ctx context.Context, userID string, kind EmailKind, va
 // reporter, not the recipient). Callers fire-and-forget; the report row in the
 // database is the durable artifact, so a send failure here is logged, not fatal.
 func (d *Dispatcher) SendToAddress(ctx context.Context, to, attributedUserID string, kind EmailKind, vars Vars, dedupeKey string) error {
+	return d.SendToAddressWithReplyTo(ctx, to, "", attributedUserID, kind, vars, dedupeKey)
+}
+
+// SendToAddressWithReplyTo is SendToAddress with an explicit Reply-To header.
+// Inbound support notifications (reports, feedback, support requests) set this
+// to the address of the user who wrote in, so anyone on the team can reply
+// straight from their mail client instead of the reply bouncing off noreply@.
+// An empty replyTo omits the header entirely.
+func (d *Dispatcher) SendToAddressWithReplyTo(ctx context.Context, to, replyTo, attributedUserID string, kind EmailKind, vars Vars, dedupeKey string) error {
 	if to == "" {
 		return errors.New("email: recipient address required")
 	}
@@ -149,12 +158,16 @@ func (d *Dispatcher) SendToAddress(ctx context.Context, to, attributedUserID str
 		return fmt.Errorf("email: render: %w", err)
 	}
 
-	id, sendErr := d.Client.Send(ctx, SendRequest{
+	req := SendRequest{
 		From:    d.Client.From,
 		To:      []string{to},
 		Subject: subject,
 		HTML:    htmlBody,
-	})
+	}
+	if replyTo != "" {
+		req.ReplyTo = []string{replyTo}
+	}
+	id, sendErr := d.Client.Send(ctx, req)
 
 	row := &types.EmailLog{
 		ID:        uuid.NewString(),

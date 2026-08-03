@@ -73,11 +73,17 @@ func NewResendClient() *ResendClient {
 var ErrNotConfigured = errors.New("email: RESEND_API_KEY not configured")
 
 // SendRequest is the payload we POST to Resend.
+//
+// ReplyTo is omitted when empty so the vast majority of sends (transactional
+// mail from noreply@) keep their existing shape. It is set on the inbound
+// support notifications, where the recipient is our own team and replying
+// should reach the user who wrote in.
 type SendRequest struct {
 	From    string   `json:"from"`
 	To      []string `json:"to"`
 	Subject string   `json:"subject"`
 	HTML    string   `json:"html"`
+	ReplyTo []string `json:"reply_to,omitempty"`
 }
 
 // SendResponse is the field of Resend's reply we care about: the message ID

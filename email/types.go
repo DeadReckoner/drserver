@@ -54,6 +54,12 @@ const (
 	// own goals."
 	KindAnchorDailySummary EmailKind = "anchor_daily_summary"
 
+	// KindFeedbackReceived - sent to the support inbox (not the user) when a
+	// user submits in-app feedback: a bug report, a feature request, general
+	// feedback, or a support request. Shares an inbox with KindReportReceived
+	// so every inbound user-contact channel lands in one place.
+	KindFeedbackReceived EmailKind = "feedback_received"
+
 	// KindReportReceived - sent to the support inbox (not the user) when a
 	// member files a report against another user or against AI-generated
 	// content. The template branches on the report type in the body.
@@ -71,6 +77,7 @@ var AllKinds = []EmailKind{
 	KindDailyDigest,
 	KindWeeklyDigest,
 	KindAnchorDailySummary,
+	KindFeedbackReceived,
 	KindReportReceived,
 }
 
@@ -105,6 +112,8 @@ func (k EmailKind) SubjectFallback() string {
 		return "Your weekly Dead Reckoner digest"
 	case KindAnchorDailySummary:
 		return "Daily anchor update from Dead Reckoner"
+	case KindFeedbackReceived:
+		return "New feedback submitted"
 	case KindReportReceived:
 		return "New report submitted"
 	}
