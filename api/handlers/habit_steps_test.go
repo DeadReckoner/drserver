@@ -380,3 +380,45 @@ func TestSetHabitStepStateRequest_Resolve(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool    { return &b }
+
+// The mobile client formats every date as YYYY-MM-DD (DateUtils), and the
+// occurrence GET already accepts that via ?date=. The toggle body must accept
+// it too -- a plain *time.Time would only take RFC3339 and reject exactly what
+// the app sends, which is how this surfaced: a 400 on every step toggle.
+func TestSetHabitStepStateRequest_DateFormats(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr bool
+		wantDay string
+	}{
+		{"YYYY-MM-DD (what the app sends)", `{"date":"2026-08-03","status":"completed"}`, false, "2026-08-03"},
+		{"RFC3339 still accepted", `{"date":"2026-08-03T00:00:00Z","status":"completed"}`, false, "2026-08-03"},
+		{"omitted date is allowed", `{"status":"completed"}`, false, ""},
+		{"garbage rejected", `{"date":"03/08/2026","status":"completed"}`, true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var req types.SetHabitStepStateRequest
+			err := json.Unmarshal([]byte(tc.body), &req)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("want unmarshal error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if tc.wantDay == "" {
+				if req.Date != nil && !req.Date.IsZero() {
+					t.Errorf("want no date, got %v", req.Date)
+				}
+				return
+			}
+			if req.Date == nil || req.Date.Format("2006-01-02") != tc.wantDay {
+				t.Errorf("got %v, want %s", req.Date, tc.wantDay)
+			}
+		})
+	}
+}

@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 /******************************************************************************
  * HABIT STEPS (multi-step recurring habits/tasks)
@@ -127,6 +130,30 @@ type UpdateHabitStepRequest struct {
 	Number      *int    `json:"number"`
 }
 
+// OccurrenceDate is a date that unmarshals from either "2006-01-02" or a full
+// RFC3339 timestamp.
+//
+// An occurrence is identified by a calendar day, and every client in this
+// codebase formats those as "2006-01-02" (see the mobile DateUtils usage and
+// the ?date= query parameter on the occurrence endpoints). Plain *time.Time
+// would only accept RFC3339 and reject exactly the format the app sends, so
+// the type accepts both and normalises to a UTC midnight.
+type OccurrenceDate struct{ time.Time }
+
+func (d *OccurrenceDate) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	if s == "" || s == "null" {
+		return nil
+	}
+	for _, layout := range []string{"2006-01-02", time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			d.Time = t
+			return nil
+		}
+	}
+	return ErrInvalidOccurrenceDate
+}
+
 // SetHabitStepStateRequest toggles one step on one occurrence.
 //
 // Either Status ("incomplete"/"completed"/"skipped") or the legacy Completed
@@ -134,9 +161,9 @@ type UpdateHabitStepRequest struct {
 // dual accepted by the roadmap step endpoint.
 type SetHabitStepStateRequest struct {
 	// Date selects the occurrence; defaults to today when omitted.
-	Date      *time.Time `json:"date"`
-	Status    *string    `json:"status"`
-	Completed *bool      `json:"completed"`
+	Date      *OccurrenceDate `json:"date"`
+	Status    *string         `json:"status"`
+	Completed *bool           `json:"completed"`
 }
 
 // Resolve collapses Status/Completed into a single status value.
@@ -165,7 +192,8 @@ type ReorderHabitStepsRequest struct {
 }
 
 var (
-	ErrHabitStepNotFound = HabitError{"habit step not found"}
-	ErrInvalidStepStatus = HabitError{"invalid step status"}
-	ErrStepStateRequired = HabitError{"status or completed is required"}
+	ErrHabitStepNotFound     = HabitError{"habit step not found"}
+	ErrInvalidOccurrenceDate = HabitError{"invalid date, use YYYY-MM-DD"}
+	ErrInvalidStepStatus     = HabitError{"invalid step status"}
+	ErrStepStateRequired     = HabitError{"status or completed is required"}
 )

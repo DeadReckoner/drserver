@@ -46,7 +46,7 @@ func respondHabitStepError(c *gin.Context, err error) {
 		utils.NotFoundResponse(c, "Habit")
 	case types.ErrHabitStepNotFound:
 		utils.NotFoundResponse(c, "Step")
-	case types.ErrInvalidStepStatus, types.ErrStepStateRequired:
+	case types.ErrInvalidStepStatus, types.ErrStepStateRequired, types.ErrInvalidOccurrenceDate:
 		utils.BadRequestResponse(c, err.Error())
 	default:
 		utils.InternalErrorResponse(c, err)
@@ -175,8 +175,8 @@ func (h *HabitHandler) SetHabitStepState(c *gin.Context) {
 	}
 
 	date := time.Now()
-	if req.Date != nil {
-		date = *req.Date
+	if req.Date != nil && !req.Date.IsZero() {
+		date = req.Date.Time
 	}
 
 	result, err := h.service.SetStepState(c, habitID, stepID, date, status)
