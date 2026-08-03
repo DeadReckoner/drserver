@@ -646,6 +646,11 @@ type GoalRequest struct {
 	Constraints          string `json:"constraints"`
 	CurrentSkillLevel    string `json:"currentSkillLevel"`
 	AdditionalContext    string `json:"additionalContext"`
+
+	// Source records which creation path produced this request, e.g.
+	// GoalDiscoverySource. Additive and omitempty: every existing client omits
+	// it and every existing code path treats "" as the known-goal flow.
+	Source string `json:"source,omitempty"`
 }
 
 // PlanImportContext is the optional metadata a client can send alongside an
@@ -1094,6 +1099,10 @@ const (
 	JobTypeRoadmap   JobType = "roadmap_generation"
 	JobTypeMilestone JobType = "milestone_generation"
 	JobTypeImport    JobType = "roadmap_import"
+	// JobTypeGoalDiscovery generates the three candidate goals for the
+	// form-based goal discovery flow. The roadmap it eventually produces is a
+	// normal JobTypeRoadmap job — this type covers only the options step.
+	JobTypeGoalDiscovery JobType = "goal_discovery"
 )
 
 /******************************************************************************
@@ -1369,9 +1378,13 @@ func (p MyGoalsPrefs) Lookup(notificationType string) (NotificationTypePref, boo
 		return p.FollowOnMilestoneReady, true
 	case "goal_milestone_completed":
 		return p.GoalMilestoneCompleted, true
-	// All four agent-generation outcomes share the single agent_updates toggle.
+	// Every agent-generation outcome shares the single agent_updates toggle,
+	// including goal discovery's option-generation results. Adding the two
+	// goal_options_* types here rather than as new fields keeps the user's
+	// notification settings screen unchanged.
 	case "agent_updates", "roadmap_complete", "roadmap_failed",
-		"next_milestone_complete", "next_milestone_failed":
+		"next_milestone_complete", "next_milestone_failed",
+		"goal_options_complete", "goal_options_failed":
 		return p.AgentUpdates, true
 	}
 	return NotificationTypePref{}, false

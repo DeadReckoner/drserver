@@ -41,12 +41,17 @@ func NewAgentHandler(db *gorm.DB) *AgentHandler {
 		importer = anthropic.NewProvider()
 	}
 
+	// Selects the structured-generation backend from the AI_PROVIDER env var
+	// (anthropic vs. openai). Resolved once at startup; env is fixed for the
+	// process lifetime.
+	provider := agent.DefaultProvider()
+	// Logged at startup because "which AI backend is this process using?" is
+	// otherwise only discoverable from a generation that already went wrong.
+	log.Info(context.Background(), "AI provider configured", provider.Name())
+
 	return &AgentHandler{
-		db: db,
-		// Selects the structured-generation backend from the AI_PROVIDER env var
-		// (anthropic vs. openai). Resolved once at startup; env is fixed for the
-		// process lifetime.
-		provider:         agent.DefaultProvider(),
+		db:               db,
+		provider:         provider,
 		anthropicService: anthropicSvc,
 		importer:         importer,
 	}

@@ -276,6 +276,17 @@ func setupAgentRoutes(rg *gin.RouterGroup, h *handlers.AgentHandler) {
 		agent.POST("/generate-async", h.AgentGenerateAsync)
 		agent.POST("/generate-next-milestone-async/:milestoneid", utils.ValidateUUID("milestoneid"), h.AgentGenerateNextMilestoneAsync)
 
+		// Form-based goal discovery (drmobile/drserver goal discovery): for
+		// users who want to change something but don't know which goal to
+		// pursue. Stage 1 generates three ranked options as a background job;
+		// stage 2 feeds the chosen option into the existing roadmap generator.
+		// Status/result for both come from the generic GET /jobs/:jobid/status.
+		goalDiscovery := agent.Group("/goal-discovery")
+		{
+			goalDiscovery.POST("/options", h.CreateGoalOptions)
+			goalDiscovery.POST("/roadmap", h.CreateGoalDiscoveryRoadmap)
+		}
+
 		// Plan import: multipart PDF upload of a plan the user already has,
 		// transposed onto the roadmap model by Claude. Anthropic-only (PDF
 		// input), async, progress over the same /ws/agent/:jobid socket.

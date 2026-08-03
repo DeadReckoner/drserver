@@ -117,6 +117,13 @@ func (p *hfinAgFakeProvider) GenerateNextMilestoneFromReview(_ context.Context, 
 	return p.adjustments, p.nextTasks, p.nextErr
 }
 
+// GenerateGoalOptions is part of agent.Provider but unused by the roadmap and
+// next-milestone paths these tests cover; goal-discovery generation is covered
+// in the agent package against its own fake.
+func (p *hfinAgFakeProvider) GenerateGoalOptions(_ context.Context, _ types.GoalOptionsInput) (*types.GoalOptionsOutput, error) {
+	return nil, errors.New("hfin-fake: goal options not used in these tests")
+}
+
 // --- getProgressMessage ------------------------------------------------------
 
 func TestGetProgressMessage_AllBands(t *testing.T) {

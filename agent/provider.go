@@ -24,6 +24,12 @@ type Provider interface {
 
 	// GenerateNextMilestoneFromReview generates the next milestone based on user review
 	GenerateNextMilestoneFromReview(ctx context.Context, goalReq types.GoalRequest, milestone *types.Milestone, review types.MilestoneReviewAnswers) (*types.MilestoneAdjustments, []types.Task, error)
+
+	// GenerateGoalOptions produces candidate goals for a user who does not yet
+	// know what to pursue (form-based goal discovery). The raw result is not
+	// trusted: callers go through GenerateValidatedGoalOptions, which enforces
+	// the structural and coherence rules and bounds the repair retries.
+	GenerateGoalOptions(ctx context.Context, in types.GoalOptionsInput) (*types.GoalOptionsOutput, error)
 }
 
 // ProviderType identifies which AI provider to use
@@ -32,6 +38,9 @@ type ProviderType string
 const (
 	ProviderOpenAI    ProviderType = "openai"
 	ProviderAnthropic ProviderType = "anthropic"
+	// ProviderMock is the deterministic offline backend. Local development and
+	// tests only — DefaultProvider refuses it on a hosted runtime.
+	ProviderMock ProviderType = "mock"
 )
 
 // OpenAIProvider wraps the existing OpenAI functions to implement Provider
@@ -61,6 +70,8 @@ func GetProvider(providerType ProviderType) Provider {
 	switch providerType {
 	case ProviderAnthropic:
 		return anthropic.NewProvider()
+	case ProviderMock:
+		return NewMockProvider()
 	case ProviderOpenAI:
 		fallthrough
 	default:
@@ -70,9 +81,21 @@ func GetProvider(providerType ProviderType) Provider {
 
 // DefaultProvider returns the default provider based on environment configuration.
 // Set AI_PROVIDER=anthropic to use Anthropic, otherwise defaults to OpenAI.
+//
+// AI_PROVIDER=mock selects the deterministic offline backend for local
+// development. That value is refused on a hosted runtime: a deploy configured
+// with it panics during router construction rather than silently serving
+// fabricated plans to real users.
 func DefaultProvider() Provider {
-	if os.Getenv("AI_PROVIDER") == "anthropic" {
+	switch ProviderType(os.Getenv("AI_PROVIDER")) {
+	case ProviderAnthropic:
 		return anthropic.NewProvider()
+	case ProviderMock:
+		if isHostedRuntime() {
+			panic("AI_PROVIDER=mock is refused on a hosted runtime: the mock backend returns fabricated plans and must never serve real users")
+		}
+		return NewMockProvider()
+	default:
+		return NewOpenAIProvider()
 	}
-	return NewOpenAIProvider()
 }
