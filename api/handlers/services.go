@@ -139,10 +139,44 @@ type HabitService interface {
 	Streak(c *gin.Context, habitID string) (int, error)
 	CompletionRate(c *gin.Context, habitID string, days int) (float64, error)
 	TotalCompletions(c *gin.Context, habitID string) (int64, error)
+
+	// Multi-step recurring items. Template definitions and per-occurrence
+	// state are deliberately separate calls: the first edits the recurring
+	// item, the second edits one dated occurrence of it.
+	Steps(c *gin.Context, habitID string) ([]types.HabitStep, error)
+	CreateStep(c *gin.Context, habitID string, req types.CreateHabitStepRequest) (types.HabitStep, error)
+	UpdateStep(c *gin.Context, habitID, stepID string, req types.UpdateHabitStepRequest) (types.HabitStep, error)
+	DeleteStep(c *gin.Context, habitID, stepID string) error
+	ReorderSteps(c *gin.Context, habitID string, stepIDs []string) ([]types.HabitStep, error)
+
+	OccurrenceSteps(c *gin.Context, habitID string, date time.Time) (types.HabitOccurrenceSteps, error)
+	SetStepState(c *gin.Context, habitID, stepID string, date time.Time, status string) (types.HabitOccurrenceSteps, error)
 }
 
 // DBHabitService is the production implementation: a stateless adapter.
 type DBHabitService struct{}
+
+func (DBHabitService) Steps(c *gin.Context, habitID string) ([]types.HabitStep, error) {
+	return database.GetHabitSteps(c, habitID)
+}
+func (DBHabitService) CreateStep(c *gin.Context, habitID string, req types.CreateHabitStepRequest) (types.HabitStep, error) {
+	return database.CreateHabitStep(c, habitID, req)
+}
+func (DBHabitService) UpdateStep(c *gin.Context, habitID, stepID string, req types.UpdateHabitStepRequest) (types.HabitStep, error) {
+	return database.UpdateHabitStep(c, habitID, stepID, req)
+}
+func (DBHabitService) DeleteStep(c *gin.Context, habitID, stepID string) error {
+	return database.DeleteHabitStep(c, habitID, stepID)
+}
+func (DBHabitService) ReorderSteps(c *gin.Context, habitID string, stepIDs []string) ([]types.HabitStep, error) {
+	return database.ReorderHabitSteps(c, habitID, stepIDs)
+}
+func (DBHabitService) OccurrenceSteps(c *gin.Context, habitID string, date time.Time) (types.HabitOccurrenceSteps, error) {
+	return database.GetOccurrenceSteps(c, habitID, date)
+}
+func (DBHabitService) SetStepState(c *gin.Context, habitID, stepID string, date time.Time, status string) (types.HabitOccurrenceSteps, error) {
+	return database.SetHabitStepState(c, habitID, stepID, date, status)
+}
 
 func (DBHabitService) Create(c *gin.Context, h types.Habit) (types.Habit, error) {
 	return database.CreateHabit(c, h)

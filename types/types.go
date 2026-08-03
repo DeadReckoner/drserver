@@ -826,6 +826,11 @@ type Habit struct {
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 
 	Completions []HabitCompletion `gorm:"foreignKey:HabitID" json:"completions,omitempty"`
+
+	// Steps are the step DEFINITIONS on this template (multi-step recurring
+	// items). Omitted entirely when the item has none, so existing clients and
+	// existing habits see exactly the payload they saw before.
+	Steps []HabitStep `gorm:"foreignKey:HabitID;constraint:OnDelete:CASCADE;" json:"steps,omitempty"`
 }
 
 func (Habit) TableName() string {
@@ -949,6 +954,17 @@ type HabitWithStatus struct {
 	Habit
 	IsCompleted bool       `json:"is_completed"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+
+	// Per-occurrence step progress for the date this status was computed for.
+	// StepsTotal is 0 for items without steps, which is every habit that
+	// existed before multi-step support -- so older clients that ignore these
+	// fields keep behaving exactly as they did.
+	StepsTotal     int `json:"steps_total"`
+	StepsCompleted int `json:"steps_completed"`
+	// OccurrenceSteps is populated only for single-date reads (today / by
+	// date), where the client renders the checklist. Range reads leave it nil
+	// and rely on the two counters to avoid an N-occurrence fan-out.
+	OccurrenceSteps []HabitOccurrenceStep `json:"occurrence_steps,omitempty"`
 }
 
 type HabitStatsResponse struct {

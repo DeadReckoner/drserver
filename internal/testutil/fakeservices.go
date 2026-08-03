@@ -183,6 +183,58 @@ type FakeHabitService struct {
 	StreakFunc           func(c *gin.Context, habitID string) (int, error)
 	CompletionRateFunc   func(c *gin.Context, habitID string, days int) (float64, error)
 	TotalCompletionsFunc func(c *gin.Context, habitID string) (int64, error)
+
+	// Multi-step recurring items.
+	StepsFunc           func(c *gin.Context, habitID string) ([]types.HabitStep, error)
+	CreateStepFunc      func(c *gin.Context, habitID string, req types.CreateHabitStepRequest) (types.HabitStep, error)
+	UpdateStepFunc      func(c *gin.Context, habitID, stepID string, req types.UpdateHabitStepRequest) (types.HabitStep, error)
+	DeleteStepFunc      func(c *gin.Context, habitID, stepID string) error
+	ReorderStepsFunc    func(c *gin.Context, habitID string, stepIDs []string) ([]types.HabitStep, error)
+	OccurrenceStepsFunc func(c *gin.Context, habitID string, date time.Time) (types.HabitOccurrenceSteps, error)
+	SetStepStateFunc    func(c *gin.Context, habitID, stepID string, date time.Time, status string) (types.HabitOccurrenceSteps, error)
+}
+
+func (f *FakeHabitService) Steps(c *gin.Context, habitID string) ([]types.HabitStep, error) {
+	if f.StepsFunc == nil {
+		panic("FakeHabitService.StepsFunc not set")
+	}
+	return f.StepsFunc(c, habitID)
+}
+func (f *FakeHabitService) CreateStep(c *gin.Context, habitID string, req types.CreateHabitStepRequest) (types.HabitStep, error) {
+	if f.CreateStepFunc == nil {
+		panic("FakeHabitService.CreateStepFunc not set")
+	}
+	return f.CreateStepFunc(c, habitID, req)
+}
+func (f *FakeHabitService) UpdateStep(c *gin.Context, habitID, stepID string, req types.UpdateHabitStepRequest) (types.HabitStep, error) {
+	if f.UpdateStepFunc == nil {
+		panic("FakeHabitService.UpdateStepFunc not set")
+	}
+	return f.UpdateStepFunc(c, habitID, stepID, req)
+}
+func (f *FakeHabitService) DeleteStep(c *gin.Context, habitID, stepID string) error {
+	if f.DeleteStepFunc == nil {
+		panic("FakeHabitService.DeleteStepFunc not set")
+	}
+	return f.DeleteStepFunc(c, habitID, stepID)
+}
+func (f *FakeHabitService) ReorderSteps(c *gin.Context, habitID string, stepIDs []string) ([]types.HabitStep, error) {
+	if f.ReorderStepsFunc == nil {
+		panic("FakeHabitService.ReorderStepsFunc not set")
+	}
+	return f.ReorderStepsFunc(c, habitID, stepIDs)
+}
+func (f *FakeHabitService) OccurrenceSteps(c *gin.Context, habitID string, date time.Time) (types.HabitOccurrenceSteps, error) {
+	if f.OccurrenceStepsFunc == nil {
+		panic("FakeHabitService.OccurrenceStepsFunc not set")
+	}
+	return f.OccurrenceStepsFunc(c, habitID, date)
+}
+func (f *FakeHabitService) SetStepState(c *gin.Context, habitID, stepID string, date time.Time, status string) (types.HabitOccurrenceSteps, error) {
+	if f.SetStepStateFunc == nil {
+		panic("FakeHabitService.SetStepStateFunc not set")
+	}
+	return f.SetStepStateFunc(c, habitID, stepID, date, status)
 }
 
 var _ handlers.HabitService = (*FakeHabitService)(nil)

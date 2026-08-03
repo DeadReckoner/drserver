@@ -94,6 +94,37 @@ create table if not exists public.roadmaps (
   archived   boolean not null default false,
   paused_at  timestamptz
 );
+
+-- Recurring items. The full habits migration is another Supabase-flavoured
+-- dump, so (following the strategy above) we bootstrap just the columns the
+-- habit-step code touches and then apply the REAL habit-steps migration on top.
+create table if not exists public.habits (
+  habit_id        uuid primary key default gen_random_uuid(),
+  user_id         uuid not null references public.users(user_id) on delete cascade,
+  title           text not null default '',
+  description     text not null default '',
+  recurrence_type varchar(20) not null default 'none',
+  days_of_week    integer default 0,
+  day_of_month    integer,
+  due_date        timestamptz,
+  start_date      timestamptz not null default now(),
+  end_date        timestamptz,
+  archived        boolean not null default false,
+  anchor_id       uuid,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create table if not exists public.habit_completions (
+  completion_id uuid primary key default gen_random_uuid(),
+  habit_id      uuid not null references public.habits(habit_id) on delete cascade,
+  user_id       uuid not null references public.users(user_id) on delete cascade,
+  completed_at  timestamptz not null default now(),
+  date          date not null,
+  notes         text,
+  created_at    timestamptz not null default now(),
+  constraint habit_completions_unique_habit_date unique (habit_id, date)
+);
 `
 
 // migrationFiles are applied, in order, after the bootstrap. These are the
@@ -105,6 +136,10 @@ var migrationFiles = []string{
 	"20260602000000_create_pending_notifications.sql",
 	"20260603000000_create_digest_items.sql",
 	"20260614000000_add_carryover_notification_prefs.sql",
+	// Multi-step recurring habits/tasks: applied verbatim, so the constraints
+	// the step logic leans on (the per-occurrence unique index, the status
+	// CHECK, ON DELETE SET NULL) are the production ones.
+	"20260802000000_add_habit_steps.sql",
 }
 
 func TestMain(m *testing.M) {

@@ -303,6 +303,11 @@ func TestCompleteHabit_NormalizesDateAndCreates(t *testing.T) {
 	utcMidnight := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
 
 	mock := withMockDB(t)
+	// Ownership is proven before anything is written: completion used to trust
+	// the habit_id alone.
+	mock.ExpectQuery(`SELECT \* FROM "habits" WHERE habit_id = \$1 AND user_id = \$2`).
+		WithArgs(dbnotifHabitID, testUserID, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"habit_id", "user_id"}).AddRow(dbnotifHabitID, testUserID))
 	mock.ExpectQuery(`SELECT \* FROM "habit_completions" WHERE habit_id = \$1 AND date = \$2`).
 		WithArgs(dbnotifHabitID, utcMidnight, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"completion_id"})) // not yet completed
@@ -323,6 +328,9 @@ func TestCompleteHabit_NormalizesDateAndCreates(t *testing.T) {
 func TestCompleteHabit_AlreadyCompleted_NoInsert(t *testing.T) {
 	utcMidnight := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
 	mock := withMockDB(t)
+	mock.ExpectQuery(`SELECT \* FROM "habits" WHERE habit_id = \$1 AND user_id = \$2`).
+		WithArgs(dbnotifHabitID, testUserID, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"habit_id", "user_id"}).AddRow(dbnotifHabitID, testUserID))
 	mock.ExpectQuery(`SELECT \* FROM "habit_completions" WHERE habit_id = \$1 AND date = \$2`).
 		WithArgs(dbnotifHabitID, utcMidnight, 1).
 		WillReturnRows(sqlmock.NewRows([]string{"completion_id", "habit_id"}).AddRow(dbnotifRowID, dbnotifHabitID))
@@ -332,8 +340,26 @@ func TestCompleteHabit_AlreadyCompleted_NoInsert(t *testing.T) {
 	assert.Nil(t, completion)
 }
 
+// Completing a habit the caller does not own must be rejected outright, with
+// no dedup lookup and no insert.
+func TestCompleteHabit_NotOwned_Rejected(t *testing.T) {
+	mock := withMockDB(t)
+	mock.ExpectQuery(`SELECT \* FROM "habits" WHERE habit_id = \$1 AND user_id = \$2`).
+		WithArgs(dbnotifHabitID, testUserID, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"habit_id"})) // no such habit for this user
+
+	completion, err := CompleteHabit(dbnotifCtx(testUserID), dbnotifHabitID,
+		time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC), "")
+
+	assert.ErrorIs(t, err, types.ErrHabitNotFound)
+	assert.Nil(t, completion)
+}
+
 func TestCompleteHabit_InsertError(t *testing.T) {
 	mock := withMockDB(t)
+	mock.ExpectQuery(`SELECT \* FROM "habits" WHERE habit_id = \$1 AND user_id = \$2`).
+		WithArgs(dbnotifHabitID, testUserID, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"habit_id", "user_id"}).AddRow(dbnotifHabitID, testUserID))
 	mock.ExpectQuery(`SELECT \* FROM "habit_completions"`).
 		WillReturnRows(sqlmock.NewRows([]string{"completion_id"}))
 	mock.ExpectBegin()

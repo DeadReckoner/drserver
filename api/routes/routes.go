@@ -236,6 +236,17 @@ func setupHabitRoutes(rg *gin.RouterGroup, h *handlers.HabitHandler, nudge *hand
 		habits.DELETE("/:habitid/complete", utils.ValidateUUID("habitid"), h.UncompleteHabit)
 		habits.GET("/:habitid/completions", utils.ValidateUUID("habitid"), h.GetCompletions)
 
+		// Step DEFINITIONS on the recurring template (multi-step habits/tasks).
+		habits.GET("/:habitid/steps", utils.ValidateUUID("habitid"), h.GetHabitSteps)
+		habits.POST("/:habitid/steps", utils.ValidateUUID("habitid"), h.CreateHabitStep)
+		habits.POST("/:habitid/steps/reorder", utils.ValidateUUID("habitid"), h.ReorderHabitSteps)
+		habits.PATCH("/:habitid/steps/:stepid", utils.ValidateUUID("habitid"), utils.ValidateUUID("stepid"), h.UpdateHabitStep)
+		habits.DELETE("/:habitid/steps/:stepid", utils.ValidateUUID("habitid"), utils.ValidateUUID("stepid"), h.DeleteHabitStep)
+
+		// Step STATE for one dated occurrence of the template.
+		habits.GET("/:habitid/occurrence/steps", utils.ValidateUUID("habitid"), h.GetHabitOccurrenceSteps)
+		habits.PATCH("/:habitid/occurrence/steps/:stepid", utils.ValidateUUID("habitid"), utils.ValidateUUID("stepid"), h.SetHabitStepState)
+
 		// Statistics
 		habits.GET("/:habitid/stats", utils.ValidateUUID("habitid"), h.GetHabitStats)
 

@@ -253,6 +253,23 @@ func GetHabitsForDate(c *gin.Context, date time.Time) ([]types.HabitWithStatus, 
 		})
 	}
 
+	// Decorate with per-occurrence step progress. Two extra queries total, not
+	// one per habit. Items without steps get zeroes, which is exactly what
+	// pre-existing habits report, so older clients see no change.
+	if len(results) > 0 {
+		ids := make([]string, 0, len(results))
+		for _, r := range results {
+			ids = append(ids, r.HabitID)
+		}
+		progress := OccurrenceProgressFor(ids, dateOnly)
+		for i := range results {
+			if p, ok := progress[results[i].HabitID]; ok {
+				results[i].StepsTotal = p.Total
+				results[i].StepsCompleted = p.Completed
+			}
+		}
+	}
+
 	log.Info(ctx, "Found habits due on date", len(results))
 	return results, nil
 }
@@ -350,6 +367,15 @@ func CompleteHabit(c *gin.Context, habitID string, date time.Time, notes string)
 
 	log.Info(ctx, "Completing habit", habitID, "for date", dateOnly.Format("2006-01-02"))
 
+	// Ownership check. Completion previously trusted the habit_id alone, so a
+	// caller who knew another user's habit UUID could write a completion
+	// against it (the row would even be stamped with the caller's user_id).
+	habit, _, ownErr := habitForUser(c, habitID)
+	if ownErr != nil {
+		log.Warn(ctx, "CompleteHabit: habit not found or not owned by caller", habitID)
+		return nil, ownErr
+	}
+
 	// Check if already completed
 	var existing types.HabitCompletion
 	err := db.Where("habit_id = ? AND date = ?", habitID, dateOnly).First(&existing).Error
@@ -371,6 +397,16 @@ func CompleteHabit(c *gin.Context, habitID string, date time.Time, notes string)
 	if err != nil {
 		log.Error(ctx, "CompleteHabit: failed to create completion", err)
 		return nil, err
+	}
+
+	// For a stepped item, completing the parent directly brings its checklist
+	// with it, so the occurrence never shows "done" over unchecked steps.
+	// Roadmap does the same via CompleteAllSteps. Items with no steps skip this
+	// entirely and behave exactly as they always have.
+	if HabitHasSteps(habitID) {
+		if err := MarkOccurrenceStepsComplete(habit, dateOnly); err != nil {
+			log.Error(ctx, "CompleteHabit: failed to complete occurrence steps", err)
+		}
 	}
 
 	log.Info(ctx, "Habit completion created successfully", completion.CompletionID)
@@ -399,6 +435,14 @@ func UncompleteHabit(c *gin.Context, habitID string, date time.Time) error {
 	if result.Error != nil {
 		log.Error(ctx, "UncompleteHabit: database error", result.Error)
 		return result.Error
+	}
+
+	// Reopening the parent reopens its checklist, mirroring the roadmap reverse
+	// cascade where un-completing a task leaves no step still claiming done.
+	if HabitHasSteps(habitID) {
+		if err := ResetOccurrenceSteps(habitID, dateOnly); err != nil {
+			log.Error(ctx, "UncompleteHabit: failed to reset occurrence steps", err)
+		}
 	}
 
 	log.Info(ctx, "Habit uncompleted successfully", habitID)
