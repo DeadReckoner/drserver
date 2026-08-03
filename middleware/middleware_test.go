@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"dr/server/log"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -125,6 +127,121 @@ func TestAuthMiddleware_MalformedUserJSON(t *testing.T) {
 	// Unmarshal fails, user.ID stays empty → treated as invalid token.
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	assert.JSONEq(t, `{"error":"Invalid token or user ID not found"}`, w.Body.String())
+}
+
+// --- local JWT verification (parseToken's fast path) ---
+
+const umwTestSecret = "super-secret-jwt-signing-key-for-tests"
+
+// umwSignToken mints an HS256 token the way Supabase does, so tests can
+// exercise verifyTokenLocally without a live project.
+func umwSignToken(t *testing.T, secret string, claims jwt.Claims) string {
+	t.Helper()
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+	require.NoError(t, err)
+	return signed
+}
+
+// umwUserClaims builds claims for a normal signed-in user.
+func umwUserClaims(sub string, expiry time.Time) supabaseClaims {
+	return supabaseClaims{
+		Role: "authenticated",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   sub,
+			ExpiresAt: jwt.NewNumericDate(expiry),
+		},
+	}
+}
+
+func TestAuthMiddleware_LocalVerification_HappyPathSkipsNetwork(t *testing.T) {
+	// Point the fallback at a fake server and assert it is never reached: with
+	// a secret configured, authenticating must cost zero network round trips.
+	captured := umwStartSupabaseFake(t, http.StatusOK, `{"id":"should-not-be-used"}`)
+	t.Setenv("JWT_secret", umwTestSecret)
+
+	const sub = "11111111-1111-1111-1111-111111111111"
+	token := umwSignToken(t, umwTestSecret, umwUserClaims(sub, time.Now().Add(time.Hour)))
+
+	engine := umwAuthEngine()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	engine.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"user_id":"`+sub+`"}`, w.Body.String())
+	assert.Empty(t, captured.path, "Supabase auth endpoint must not be called when the JWT secret is set")
+}
+
+func TestVerifyTokenLocally_Rejects(t *testing.T) {
+	umwQuietLogs(t, log.LevelError+1) // every case logs an expected warn line
+
+	anonClaims := supabaseClaims{
+		Role:             "anon",
+		RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))},
+	}
+	serviceClaims := supabaseClaims{
+		Role:             "service_role",
+		RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))},
+	}
+
+	tests := []struct {
+		name  string
+		token string
+	}{
+		{"wrong signing secret", umwSignToken(t, "a-different-secret",
+			umwUserClaims("11111111-1111-1111-1111-111111111111", time.Now().Add(time.Hour)))},
+		{"expired token", umwSignToken(t, umwTestSecret,
+			umwUserClaims("11111111-1111-1111-1111-111111111111", time.Now().Add(-time.Minute)))},
+		// The anon key is public — it ships inside the mobile app — and is
+		// signed with this same secret, so it must not authenticate anyone.
+		{"anon api key", umwSignToken(t, umwTestSecret, anonClaims)},
+		{"service_role api key", umwSignToken(t, umwTestSecret, serviceClaims)},
+		{"no subject", umwSignToken(t, umwTestSecret, supabaseClaims{
+			Role:             "authenticated",
+			RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour))},
+		})},
+		{"not a jwt", "garbage"},
+		{"empty", ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Empty(t, verifyTokenLocally(tc.token, umwTestSecret))
+		})
+	}
+}
+
+// A token signed with "alg":"none" must not be accepted just because it parses.
+func TestVerifyTokenLocally_RejectsUnsignedToken(t *testing.T) {
+	umwQuietLogs(t, log.LevelError+1)
+
+	unsigned, err := jwt.NewWithClaims(jwt.SigningMethodNone,
+		umwUserClaims("11111111-1111-1111-1111-111111111111", time.Now().Add(time.Hour)),
+	).SignedString(jwt.UnsafeAllowNoneSignatureType)
+	require.NoError(t, err)
+
+	assert.Empty(t, verifyTokenLocally(unsigned, umwTestSecret))
+}
+
+// SUPABASE_JWT_SECRET is the documented name; JWT_secret is what the local
+// .env already uses. Both must switch parseToken onto the local path.
+func TestParseToken_EitherSecretNameEnablesLocalPath(t *testing.T) {
+	const sub = "11111111-1111-1111-1111-111111111111"
+	token := umwSignToken(t, umwTestSecret, umwUserClaims(sub, time.Now().Add(time.Hour)))
+
+	for _, name := range []string{"SUPABASE_JWT_SECRET", "JWT_secret"} {
+		t.Run(name, func(t *testing.T) {
+			// Fallback would hit a dead port, so a non-empty result proves the
+			// local path ran.
+			t.Setenv("API_URL", "http://127.0.0.1:1")
+			t.Setenv("SUPABASE_JWT_SECRET", "")
+			t.Setenv("JWT_secret", "")
+			t.Setenv(name, umwTestSecret)
+
+			assert.Equal(t, sub, parseToken(token))
+		})
+	}
 }
 
 func TestParseToken_TransportError(t *testing.T) {
