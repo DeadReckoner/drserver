@@ -57,6 +57,22 @@ type Vars struct {
 	ReportJobID      string
 	ReportContext    string
 	ReportCreatedAt  string
+
+	// Feedback variables (KindFeedbackReceived). FeedbackCategory is one of
+	// bug/feature/general/support; FeedbackSubject is only populated for
+	// support requests, which are the one category that collects one.
+	// The App/OS/Device trio comes from the client and may be empty.
+	FeedbackID        string
+	FeedbackCategory  string
+	FeedbackSubject   string
+	FeedbackMessage   string
+	FeedbackAppVer    string
+	FeedbackOS        string
+	FeedbackDevice    string
+	FeedbackCreatedAt string
+	SubmitterID       string
+	SubmitterName     string
+	SubmitterEmail    string
 }
 
 // DigestItemVar is one row in the user's own-goals digest. Title + Body are

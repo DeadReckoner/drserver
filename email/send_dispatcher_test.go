@@ -265,6 +265,51 @@ func TestDispatcherSendToAddress_HappyPath_AttributesUser(t *testing.T) {
 	assert.EqualValues(t, 1, atomic.LoadInt32(calls))
 }
 
+// tleCaptureBody records the raw request body the dispatcher POSTs to Resend
+// so tests can assert on wire-level fields like reply_to.
+func tleCaptureBody(dst *[]byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		*dst = b
+		tleOKHandler(w, r)
+	}
+}
+
+func TestDispatcherSendToAddressWithReplyTo_SetsReplyToOnWire(t *testing.T) {
+	var body []byte
+	d, mock, calls := tleDispatcher(t, tleCaptureBody(&body))
+
+	tleExpectDedupeCount(mock, tleUserID, "feedback_received", "fb-1", 0)
+	tleExpectEmailLogInsert(mock,
+		sqlmock.AnyArg(), tleUserID, "feedback_received", "info@deadreckoner.io",
+		"sent", "prov-123", "", "fb-1", sqlmock.AnyArg())
+
+	err := d.SendToAddressWithReplyTo(context.Background(), "info@deadreckoner.io",
+		"user@example.com", tleUserID, KindFeedbackReceived,
+		Vars{FeedbackID: "fb-1", FeedbackCategory: "support", FeedbackMessage: "help"}, "fb-1")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, atomic.LoadInt32(calls))
+	assert.Contains(t, string(body), `"reply_to":["user@example.com"]`)
+}
+
+func TestDispatcherSendToAddress_EmptyReplyTo_OmitsField(t *testing.T) {
+	var body []byte
+	d, mock, calls := tleDispatcher(t, tleCaptureBody(&body))
+
+	tleExpectDedupeCount(mock, tleUserID, "report_received", "dk-rt", 0)
+	tleExpectEmailLogInsert(mock,
+		sqlmock.AnyArg(), tleUserID, "report_received", "info@deadreckoner.io",
+		"sent", "prov-123", "", "dk-rt", sqlmock.AnyArg())
+
+	// SendToAddress delegates with an empty replyTo; omitempty keeps the
+	// payload identical to what Resend received before Reply-To existed.
+	err := d.SendToAddress(context.Background(), "info@deadreckoner.io", tleUserID,
+		KindReportReceived, Vars{ReportID: "r1"}, "dk-rt")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, atomic.LoadInt32(calls))
+	assert.NotContains(t, string(body), "reply_to")
+}
+
 func TestDispatcherSendToAddress_NoAttributedUser_SkipsDedupeAndSends(t *testing.T) {
 	d, mock, calls := tleDispatcher(t, tleOKHandler)
 

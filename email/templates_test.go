@@ -113,6 +113,45 @@ func TestRender_ReportReceived_AI(t *testing.T) {
 	assert.Contains(t, body, "AI suggested an unsafe fasting plan")
 }
 
+func TestRender_FeedbackReceived_Support(t *testing.T) {
+	subject, body, err := Render(KindFeedbackReceived, Vars{
+		FeedbackID:       "fb-1",
+		FeedbackCategory: "support",
+		FeedbackSubject:  "Cannot sync my roadmap",
+		FeedbackMessage:  "The sync spinner never stops on the goals tab.",
+		SubmitterName:    "Sam Submitter",
+		SubmitterID:      "user-1",
+		SubmitterEmail:   "sam@example.com",
+		FeedbackAppVer:   "1.4.2",
+		FeedbackOS:       "iOS 18.2",
+		FeedbackDevice:   "iPhone 16 Pro",
+	})
+	require.NoError(t, err)
+	assert.Contains(t, subject, "Support request")
+	assert.Contains(t, subject, "Cannot sync my roadmap")
+	assert.Contains(t, body, "The sync spinner never stops on the goals tab.")
+	assert.Contains(t, body, "sam@example.com")
+	assert.Contains(t, body, "iPhone 16 Pro")
+	assert.Contains(t, body, "<!DOCTYPE html>", "layout should be applied")
+}
+
+func TestRender_FeedbackReceived_BugWithoutSubject(t *testing.T) {
+	subject, body, err := Render(KindFeedbackReceived, Vars{
+		FeedbackID:       "fb-2",
+		FeedbackCategory: "bug",
+		FeedbackMessage:  "Crash on opening settings.",
+		SubmitterName:    "Sam Submitter",
+		SubmitterID:      "user-1",
+	})
+	require.NoError(t, err)
+	// No subject line collected for non-support categories, so the submitter
+	// name carries the subject instead of leaving it dangling.
+	assert.Contains(t, subject, "Bug report")
+	assert.Contains(t, subject, "Sam Submitter")
+	assert.Contains(t, body, "Crash on opening settings.")
+	assert.NotContains(t, body, "<strong>Subject:</strong>")
+}
+
 func TestRender_UnknownKind(t *testing.T) {
 	_, _, err := Render("nope", Vars{})
 	require.Error(t, err)

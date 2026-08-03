@@ -22,8 +22,19 @@ import (
 // rolling hour, to blunt spam/abuse of the endpoint.
 const maxReportsPerHour = 10
 
-// defaultSupportEmail is where reports are routed when SUPPORT_EMAIL is unset.
+// defaultSupportEmail is where inbound user contact is routed when
+// SUPPORT_EMAIL is unset.
 const defaultSupportEmail = "info@deadreckoner.io"
+
+// supportInbox is the single destination for every inbound user-contact
+// channel: reports, feedback, and support requests. Colocating them is
+// deliberate - the team triages all of it from one mailbox.
+func supportInbox() string {
+	if to := os.Getenv("SUPPORT_EMAIL"); to != "" {
+		return to
+	}
+	return defaultSupportEmail
+}
 
 type ReportHandler struct {
 	db     *gorm.DB
@@ -110,10 +121,7 @@ func (h *ReportHandler) CreateReport(c *gin.Context) {
 func (h *ReportHandler) dispatchReportEmail(report types.Report) {
 	ctx := log.WithLogger(context.Background(), log.NewLogger(report.ReporterID))
 
-	to := os.Getenv("SUPPORT_EMAIL")
-	if to == "" {
-		to = defaultSupportEmail
-	}
+	to := supportInbox()
 
 	vars := email.Vars{
 		ReportID:        report.ReportID,
@@ -160,7 +168,9 @@ func (h *ReportHandler) dispatchReportEmail(report types.Report) {
 	}
 
 	// dedupeKey = report_id so a client retry never double-notifies support.
-	if err := h.mailer.SendToAddress(ctx, to, report.ReporterID, email.KindReportReceived, vars, report.ReportID); err != nil {
+	// Reply-To is the reporter (when we resolved one) so the team can respond
+	// from their mail client without digging the address out of the body.
+	if err := h.mailer.SendToAddressWithReplyTo(ctx, to, vars.ReporterEmail, report.ReporterID, email.KindReportReceived, vars, report.ReportID); err != nil {
 		log.Error(ctx, "failed to send report email", err)
 	}
 }
