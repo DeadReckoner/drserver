@@ -137,6 +137,33 @@ func CheckAIGeneration(userID string) (*types.PlanLimitError, error) {
 	return nil, nil
 }
 
+// GoalOptionsLimitsFor returns the option-generation budget for a user.
+//
+// Goal-option generation is deliberately NOT charged to the roadmap counter
+// (CheckAIGeneration / IncrementAIGenerations). Charging both to one 3-a-day
+// allowance meant a free user who generated options and regenerated once had
+// nothing left to actually build the roadmap those options existed to produce —
+// the flow could sell you a goal it would then refuse to plan.
+//
+// Cost is still bounded, on two independent axes:
+//   - per user per UTC day, so the total spend a single account can cause is
+//     capped whether or not they are paying;
+//   - per discovery draft, so "show me different options" cannot be tapped
+//     indefinitely against one set of answers.
+//
+// Both are enforced inside the admission transaction (see AdmitGoalOptionsJob),
+// never on the client.
+func GoalOptionsLimitsFor(userID string) (daily, perDraft int, err error) {
+	ent, err := GetEntitlement(userID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if ent.IsPaid() {
+		return types.GoalOptionsPaidDailyLimit, types.GoalOptionsPerDraftLimit, nil
+	}
+	return types.GoalOptionsFreeDailyLimit, types.GoalOptionsPerDraftLimit, nil
+}
+
 // CheckPaidFeature blocks free users from a boolean-gated paid feature. Use
 // this for features that have no numeric limit (custom reminders, archive,
 // weekly review, etc).

@@ -578,3 +578,65 @@ func TestDecodeGoalOptionsPayload_IgnoresModelSuppliedID(t *testing.T) {
 		t.Fatalf("model-supplied id leaked through decoding: %q", out.Options[0].ID)
 	}
 }
+
+// ─── notification type registration ──────────────────────────────────────────
+
+// Every notification type the goal discovery flow dispatches must resolve in
+// MyGoalsPrefs.Lookup. The resolver DROPS unknown types (ReasonUnknownType), so
+// an unregistered name means the notification is silently never delivered —
+// a failure mode that no amount of asserting on a database row would catch.
+func TestMyGoalsPrefs_ResolvesEveryGoalDiscoveryNotificationType(t *testing.T) {
+	var prefs MyGoalsPrefs
+	prefs.AgentUpdates = NotificationTypePref{Enabled: true, Delivery: DeliveryImmediate}
+
+	for _, notificationType := range []string{
+		"goal_options_complete",
+		"goal_options_failed",
+		// A safety-blocked result is its own type so it never borrows the
+		// "your options are ready, choose one" copy.
+		"goal_options_unavailable",
+	} {
+		t.Run(notificationType, func(t *testing.T) {
+			pref, ok := prefs.Lookup(notificationType)
+			if !ok {
+				t.Fatalf("%s is not a known my-goals notification type; the resolver would drop it", notificationType)
+			}
+			// They share the single agent_updates toggle, so the user's
+			// notification settings screen needs no new row.
+			if pref != prefs.AgentUpdates {
+				t.Fatalf("%s must map to the shared agent_updates toggle", notificationType)
+			}
+		})
+	}
+}
+
+// The expiry reason is deliberately distinct from a generation failure so the
+// client (and a support log) can tell "the server lost this" from "the model
+// could not do it".
+func TestJobExpiredError_IsDistinctAndActionable(t *testing.T) {
+	if JobExpiredError == "" {
+		t.Fatal("an expired job needs a typed, user-facing reason")
+	}
+	if !strings.Contains(JobExpiredError, "try again") {
+		t.Fatal("an expired job must tell the user what to do next")
+	}
+	if !strings.Contains(JobExpiredError, "saved") {
+		t.Fatal("an expired job must reassure the user their answers survived")
+	}
+}
+
+func TestStaleAfterForJobType(t *testing.T) {
+	// Every window must be far longer than a real generation so expiry can
+	// never race work that is genuinely still running.
+	if got := StaleAfterForJobType(JobTypeGoalDiscovery); got != 15*time.Minute {
+		t.Fatalf("goal discovery window = %v", got)
+	}
+	if got := StaleAfterForJobType(JobTypeRoadmap); got != 30*time.Minute {
+		t.Fatalf("roadmap window = %v", got)
+	}
+	// An unknown type is more likely a slow new generation than an orphan, so
+	// the safe default is to wait longer.
+	if got := StaleAfterForJobType(JobType("something_new")); got != DefaultJobStaleAfter {
+		t.Fatalf("default window = %v", got)
+	}
+}

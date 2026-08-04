@@ -42,14 +42,23 @@ func UpdateBackgroundJob(ctx context.Context, job *types.BackgroundJob) error {
 		updates["completed_at"] = job.CompletedAt
 	}
 	if job.Result != nil {
-		// Manually serialize to JSON for JSONB column since Updates() doesn't use serializer tags
-		resultJSON, err := json.Marshal(job.Result)
+		resultJSON, err := marshalJSONB(job.Result)
 		if err != nil {
-			return fmt.Errorf("failed to marshal result: %w", err)
+			return err
 		}
-		// Use gorm.Expr to tell PostgreSQL to cast the JSON string to JSONB type
-		updates["result"] = gorm.Expr("?::jsonb", string(resultJSON))
+		updates["result"] = resultJSON
 	}
 	updates["updated_at"] = time.Now()
 	return db.Model(&types.BackgroundJob{}).Where("job_id = ?", job.JobID).Updates(updates).Error
+}
+
+// marshalJSONB prepares a value for a JSONB column in an Updates() map.
+// Updates() bypasses GORM's serializer tags, so the value is marshalled by hand
+// and wrapped in an explicit ::jsonb cast for PostgreSQL.
+func marshalJSONB(v any) (any, error) {
+	encoded, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal result: %w", err)
+	}
+	return gorm.Expr("?::jsonb", string(encoded)), nil
 }

@@ -130,6 +130,12 @@ create table if not exists public.habit_completions (
 // migrationFiles are applied, in order, after the bootstrap. These are the
 // real production migrations for the notification subsystem.
 var migrationFiles = []string{
+	// Async job infrastructure, applied verbatim so the goal-discovery
+	// concurrency tests run against the production background_jobs shape
+	// (the job_type/job_status enums, the JSONB payload/result columns, and
+	// the user_id ON DELETE CASCADE that account deletion relies on).
+	"20251127000000_add_async_processing.sql",
+	"20260803000000_add_goal_discovery_job_type.sql",
 	"20260518000000_add_timezone_to_users.sql",
 	"20260518000001_add_notification_settings_tables.sql",
 	"20260601000000_create_email_log.sql",

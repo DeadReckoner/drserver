@@ -225,6 +225,21 @@ func (h *AgentHandler) GetJobStatus(c *gin.Context) {
 		return
 	}
 
+	// Reads apply the SAME abandonment rule as job creation. Generation runs in
+	// an in-process goroutine with no durable queue behind it, so a deploy or a
+	// crash mid-generation leaves the row 'processing' with nobody left to
+	// finish it — and a client polling this endpoint would wait on it forever.
+	// Expiring it here turns that into an ordinary terminal failure, which the
+	// clients already know how to recover from (answers preserved, retry
+	// offered). See types.StaleAfterForJobType for the per-type windows, all of
+	// which are far longer than a real generation.
+	if expired, err := database.ExpireJobIfStale(job, time.Now()); err != nil {
+		log.Error(c, "GetJobStatus: failed to expire stale job", err)
+	} else if expired {
+		log.Info(c, "Expired abandoned job on status read",
+			fmt.Sprintf("job_id=%s type=%s", job.JobID, job.Type))
+	}
+
 	response := gin.H{
 		"job_id":     job.JobID,
 		"status":     job.Status,

@@ -99,6 +99,19 @@ func hgdRoadmapBody() map[string]any {
 }
 
 // ─── sqlmock stubs ───────────────────────────────────────────────────────────
+//
+// Admission (idempotency → in-flight → cooldown → caps → insert) now happens
+// inside ONE transaction held under a per-user advisory lock, so these stubs
+// model that transaction rather than a sequence of independent statements. See
+// database.AdmitGoalOptionsJob for why the checks cannot be separate reads.
+
+// hgdBeginAdmission opens the admission transaction: the advisory lock, then
+// the stale-job sweep that runs before every guard.
+func hgdBeginAdmission(mock sqlmock.Sqlmock) {
+	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`UPDATE "background_jobs" SET`).WillReturnResult(sqlmock.NewResult(0, 0))
+}
 
 // hgdExpectIdempotencyMiss stubs the idempotency lookup finding nothing.
 func hgdExpectIdempotencyMiss(mock sqlmock.Sqlmock) {
@@ -121,13 +134,73 @@ func hgdExpectLastJobAt(mock sqlmock.Sqlmock, at time.Time) {
 		WillReturnRows(sqlmock.NewRows([]string{"created_at"}).AddRow(at))
 }
 
-// hgdExpectJobInsert stubs the job insert. GORM appends RETURNING, so the
-// insert arrives as a Query rather than an Exec.
+// hgdExpectDailyCount stubs the per-user-per-day option-generation cap lookup.
+func hgdExpectDailyCount(mock sqlmock.Sqlmock, count int) {
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "background_jobs"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(count))
+}
+
+// hgdExpectChainCount stubs the per-draft regeneration cap lookup. Only issued
+// when the request inherits a chain, i.e. on a regeneration.
+func hgdExpectChainCount(mock sqlmock.Sqlmock, count int) {
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "background_jobs"`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(count))
+}
+
+// hgdExpectJobInsert stubs the insert and commit that close a successful
+// admission. GORM appends RETURNING, so the insert arrives as a Query.
 func hgdExpectJobInsert(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(`INSERT INTO "background_jobs"`).
+		WillReturnRows(sqlmock.NewRows([]string{"job_id"}).AddRow(hgdJobID))
+	mock.ExpectCommit()
+}
+
+// hgdExpectRejectedAdmission closes a transaction that reached a rejection: the
+// decision is recorded by rolling back nothing, but the transaction still
+// commits because no error was returned from the callback.
+func hgdExpectRejectedAdmission(mock sqlmock.Sqlmock) {
+	mock.ExpectCommit()
+}
+
+// hgdExpectPlainJobInsert stubs database.CreateJob, which stage 2 uses. Stage 2
+// creates a roadmap_generation job, not a goal_discovery one, so it does not go
+// through the goal-options admission transaction and GORM opens its own.
+func hgdExpectPlainJobInsert(mock sqlmock.Sqlmock) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(`INSERT INTO "background_jobs"`).
 		WillReturnRows(sqlmock.NewRows([]string{"job_id"}).AddRow(hgdJobID))
 	mock.ExpectCommit()
+}
+
+// hgdExpectEntitlementLookup stubs the single GetEntitlement read behind
+// GoalOptionsLimitsFor. The pro-whitelist email lookup soft-fails against the
+// mock without consuming an expectation, matching the other handler tests.
+func hgdExpectEntitlementLookup(mock sqlmock.Sqlmock, plan string) {
+	mock.ExpectQuery(`SELECT \* FROM "entitlements" WHERE user_id = \$1`).
+		WithArgs(hgdUserID, 1).
+		WillReturnRows(sqlmock.NewRows(
+			[]string{"user_id", "plan", "ai_generations_used", "ai_generations_period_start"}).
+			AddRow(hgdUserID, plan, 0, time.Now().UTC()))
+}
+
+// hgdExpectAIGenerationAllowed stubs CheckAIGeneration passing: the option step
+// verifies the user could still build a roadmap today, without consuming that
+// allowance.
+func hgdExpectAIGenerationAllowed(mock sqlmock.Sqlmock) {
+	hgdExpectEntitlementLookup(mock, "free")
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "roadmaps" WHERE user_id = \$1 AND archived = \$2`).
+		WithArgs(hgdUserID, false).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "habits" WHERE user_id = \$1 AND archived = \$2`).
+		WithArgs(hgdUserID, false).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+}
+
+// hgdExpectAdmissionPreamble stubs everything before the admission transaction
+// for the common "gating off" case: no entitlement enforcement, just the
+// limits lookup.
+func hgdExpectAdmissionPreamble(mock sqlmock.Sqlmock) {
+	hgdExpectEntitlementLookup(mock, "free")
 }
 
 // hgdExpectDraftRoadmapInsert stubs CreateDraftRoadmap, which first ensures the
@@ -236,12 +309,11 @@ func TestGoalOptions_BlockedWithoutAIAcknowledgment(t *testing.T) {
 
 // Entitlement parity: a free user at the daily AI cap is blocked here exactly as
 // they are on /agent/generate-async.
+// The check runs BEFORE any generation is started and does not consume the
+// allowance — see TestGoalOptions_DoesNotConsumeRoadmapAllowance.
 func TestGoalOptions_FreeUserAtDailyCapIsBlocked(t *testing.T) {
 	router, mock, _ := hgdRouter(t, true)
 
-	hgdExpectIdempotencyMiss(mock)
-	hgdExpectActiveJobCount(mock, 0)
-	hgdExpectLastJobAt(mock, time.Time{})
 	hgdExpectFreeCapReached(mock)
 
 	w := testutil.Do(t, router, http.MethodPost, hgdOptionsPath, hgdUserID, hgdOptionsBody())
@@ -258,9 +330,12 @@ func TestGoalOptions_FreeUserAtDailyCapIsBlocked(t *testing.T) {
 func TestGoalOptions_ValidPayloadCreatesOneJob(t *testing.T) {
 	router, mock, _ := hgdRouter(t, false)
 
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
 	hgdExpectIdempotencyMiss(mock)
 	hgdExpectActiveJobCount(mock, 0)
 	hgdExpectLastJobAt(mock, time.Time{})
+	hgdExpectDailyCount(mock, 0)
 	hgdExpectJobInsert(mock)
 
 	w := testutil.Do(t, router, http.MethodPost, hgdOptionsPath, hgdUserID, hgdOptionsBody())
@@ -318,9 +393,12 @@ func TestGoalOptions_RejectsFourthAreaViaCustomField(t *testing.T) {
 func TestGoalOptions_AcceptsTwoAreasPlusCustomArea(t *testing.T) {
 	router, mock, _ := hgdRouter(t, false)
 
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
 	hgdExpectIdempotencyMiss(mock)
 	hgdExpectActiveJobCount(mock, 0)
 	hgdExpectLastJobAt(mock, time.Time{})
+	hgdExpectDailyCount(mock, 0)
 	hgdExpectJobInsert(mock)
 
 	body := hgdOptionsBody()
@@ -367,9 +445,12 @@ func TestGoalOptions_RejectsUnsupportedSchemaVersion(t *testing.T) {
 func TestGoalOptions_IdempotentRepeatReturnsExistingJob(t *testing.T) {
 	router, mock, _ := hgdRouter(t, false)
 
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
 	mock.ExpectQuery(`SELECT \* FROM "background_jobs"`).
 		WillReturnRows(sqlmock.NewRows([]string{"job_id", "user_id", "type", "status"}).
 			AddRow(hgdJobID, hgdUserID, string(types.JobTypeGoalDiscovery), string(types.JobStatusProcessing)))
+	hgdExpectRejectedAdmission(mock)
 
 	body := hgdOptionsBody()
 	body["idempotency_key"] = "client-key-1"
@@ -388,11 +469,14 @@ func TestGoalOptions_IdempotentRepeatReturnsExistingJob(t *testing.T) {
 func TestGoalOptions_IdempotencyLookupIsUserScoped(t *testing.T) {
 	router, mock, _ := hgdRouter(t, false)
 
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
 	mock.ExpectQuery(`SELECT \* FROM "background_jobs"`).
 		WithArgs(hgdUserID, string(types.JobTypeGoalDiscovery), "shared-key", 1).
 		WillReturnError(gorm.ErrRecordNotFound)
 	hgdExpectActiveJobCount(mock, 0)
 	hgdExpectLastJobAt(mock, time.Time{})
+	hgdExpectDailyCount(mock, 0)
 	hgdExpectJobInsert(mock)
 
 	body := hgdOptionsBody()
@@ -405,8 +489,11 @@ func TestGoalOptions_IdempotencyLookupIsUserScoped(t *testing.T) {
 func TestGoalOptions_RefusesConcurrentGeneration(t *testing.T) {
 	router, mock, _ := hgdRouter(t, false)
 
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
 	hgdExpectIdempotencyMiss(mock)
 	hgdExpectActiveJobCount(mock, 1)
+	hgdExpectRejectedAdmission(mock)
 
 	w := testutil.Do(t, router, http.MethodPost, hgdOptionsPath, hgdUserID, hgdOptionsBody())
 
@@ -417,17 +504,23 @@ func TestGoalOptions_RefusesConcurrentGeneration(t *testing.T) {
 }
 
 // A worker that dies mid-generation leaves its job 'processing' forever. The
-// concurrency check only counts recent jobs, so one crash cannot permanently
-// lock the user out of the feature.
+// admission transaction retires those rows before it counts anything, so one
+// crash cannot permanently lock the user out of the feature.
 func TestGoalOptions_AbandonedJobDoesNotBlockForever(t *testing.T) {
 	router, mock, _ := hgdRouter(t, false)
 
+	hgdExpectAdmissionPreamble(mock)
+	mock.ExpectBegin()
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WillReturnResult(sqlmock.NewResult(0, 0))
+	// The sweep marks the orphan failed. One row affected: the abandoned job.
+	mock.ExpectExec(`UPDATE "background_jobs" SET`).WillReturnResult(sqlmock.NewResult(0, 1))
 	hgdExpectIdempotencyMiss(mock)
-	// The count query carries a created_at floor; an old orphan falls outside it
-	// and is therefore not counted.
+	// The count query carries a created_at floor; the orphan is now terminal AND
+	// falls outside the floor, so it is not counted either way.
 	mock.ExpectQuery(`SELECT count\(\*\) FROM "background_jobs" WHERE user_id = \$1 AND type = \$2 AND status IN \(\$3,\$4\) AND created_at > \$5`).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	hgdExpectLastJobAt(mock, time.Now().Add(-time.Hour))
+	hgdExpectDailyCount(mock, 0)
 	hgdExpectJobInsert(mock)
 
 	w := testutil.Do(t, router, http.MethodPost, hgdOptionsPath, hgdUserID, hgdOptionsBody())
@@ -439,9 +532,12 @@ func TestGoalOptions_AbandonedJobDoesNotBlockForever(t *testing.T) {
 func TestGoalOptions_RateLimitsRapidRegeneration(t *testing.T) {
 	router, mock, _ := hgdRouter(t, false)
 
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
 	hgdExpectIdempotencyMiss(mock)
 	hgdExpectActiveJobCount(mock, 0)
 	hgdExpectLastJobAt(mock, time.Now())
+	hgdExpectRejectedAdmission(mock)
 
 	w := testutil.Do(t, router, http.MethodPost, hgdOptionsPath, hgdUserID, hgdOptionsBody())
 
@@ -449,6 +545,7 @@ func TestGoalOptions_RateLimitsRapidRegeneration(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, "rate_limited", resp["code"])
+	assert.NotEmpty(t, w.Header().Get("Retry-After"), "a rate limit must tell the client when to try again")
 }
 
 // ─── regeneration & ownership ────────────────────────────────────────────────
@@ -459,11 +556,15 @@ func TestGoalOptions_RateLimitsRapidRegeneration(t *testing.T) {
 func TestGoalOptions_RegenerationPassesPriorOptionExclusions(t *testing.T) {
 	router, mock, capture := hgdRouter(t, false)
 
+	hgdExpectDiscoveryJobLookup(mock, string(types.JobStatusCompleted),
+		hgdOptionsResultJSON(hgdOptionID, "Launch a paid landing page"))
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
 	hgdExpectIdempotencyMiss(mock)
 	hgdExpectActiveJobCount(mock, 0)
 	hgdExpectLastJobAt(mock, time.Time{})
-	hgdExpectDiscoveryJobLookup(mock, string(types.JobStatusCompleted),
-		hgdOptionsResultJSON(hgdOptionID, "Launch a paid landing page"))
+	hgdExpectDailyCount(mock, 0)
+	hgdExpectChainCount(mock, 1)
 	hgdExpectJobInsert(mock)
 
 	body := hgdOptionsBody()
@@ -482,11 +583,15 @@ func TestGoalOptions_RegenerationPassesPriorOptionExclusions(t *testing.T) {
 func TestGoalOptions_ExclusionsComeFromTheStoredResultNotTheClient(t *testing.T) {
 	router, mock, capture := hgdRouter(t, false)
 
+	hgdExpectDiscoveryJobLookup(mock, string(types.JobStatusCompleted),
+		hgdOptionsResultJSON(hgdOptionID, "Launch a paid landing page"))
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
 	hgdExpectIdempotencyMiss(mock)
 	hgdExpectActiveJobCount(mock, 0)
 	hgdExpectLastJobAt(mock, time.Time{})
-	hgdExpectDiscoveryJobLookup(mock, string(types.JobStatusCompleted),
-		hgdOptionsResultJSON(hgdOptionID, "Launch a paid landing page"))
+	hgdExpectDailyCount(mock, 0)
+	hgdExpectChainCount(mock, 1)
 	hgdExpectJobInsert(mock)
 
 	body := hgdOptionsBody()
@@ -507,10 +612,8 @@ func TestGoalOptions_ExclusionsComeFromTheStoredResultNotTheClient(t *testing.T)
 func TestGoalOptions_RejectsAnotherUsersPreviousJob(t *testing.T) {
 	router, mock, _ := hgdRouter(t, false)
 
-	hgdExpectIdempotencyMiss(mock)
-	hgdExpectActiveJobCount(mock, 0)
-	hgdExpectLastJobAt(mock, time.Time{})
-	// The user-scoped lookup finds nothing because the job belongs to someone else.
+	// The user-scoped lookup finds nothing because the job belongs to someone
+	// else, and it runs before any admission work — nothing is inserted.
 	mock.ExpectQuery(`SELECT \* FROM "background_jobs"`).
 		WithArgs(hgdJobID, hgdUserID, string(types.JobTypeGoalDiscovery), 1).
 		WillReturnError(gorm.ErrRecordNotFound)
@@ -532,7 +635,7 @@ func TestGoalDiscoveryRoadmap_ValidPayloadCreatesRoadmapJobAndDraft(t *testing.T
 	hgdExpectIdempotencyMiss(mock)
 	hgdExpectDiscoveryJobLookup(mock, string(types.JobStatusCompleted),
 		hgdOptionsResultJSON(hgdOptionID, "Launch a paid landing page"))
-	hgdExpectJobInsert(mock)
+	hgdExpectPlainJobInsert(mock)
 	hgdExpectDraftRoadmapInsert(mock)
 
 	w := testutil.Do(t, router, http.MethodPost, hgdRoadmapPath, hgdUserID, hgdRoadmapBody())
@@ -789,4 +892,153 @@ func TestGoalOptionsUserFacingError_NeverLeaksProviderDetail(t *testing.T) {
 			"user-facing failure text leaked %q", leak)
 	}
 	assert.Contains(t, msg, "try again")
+}
+
+// ─── entitlement accounting ──────────────────────────────────────────────────
+//
+// The product invariant these cases exist for: once the server has returned a
+// valid Stage 1 option set, the option-generation step must not have consumed
+// the entitlement the user needs to submit exactly one final roadmap from that
+// draft.
+//
+// The fix is structural rather than arithmetic — option generation is metered
+// on its own budget and never touches ai_generations_used — so what has to be
+// proven is that no option-generation path increments that counter, and that
+// the roadmap allowance is still there afterwards.
+
+// A free user two generations into their daily roadmap allowance can still run
+// goal discovery AND still has the third generation left for the roadmap it
+// produces. Under the previous design the option step and one regeneration
+// consumed generations 2 and 3, and the final submission was refused.
+func TestGoalOptions_DoesNotConsumeRoadmapAllowance(t *testing.T) {
+	router, mock, _ := hgdRouter(t, true)
+
+	// CheckAIGeneration: free, 2 of 3 used today — allowed, and untouched.
+	mock.ExpectQuery(`SELECT \* FROM "entitlements" WHERE user_id = \$1`).
+		WithArgs(hgdUserID, 1).
+		WillReturnRows(sqlmock.NewRows(
+			[]string{"user_id", "plan", "ai_generations_used", "ai_generations_period_start"}).
+			AddRow(hgdUserID, "free", 2, time.Now().UTC()))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "roadmaps" WHERE user_id = \$1 AND archived = \$2`).
+		WithArgs(hgdUserID, false).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "habits" WHERE user_id = \$1 AND archived = \$2`).
+		WithArgs(hgdUserID, false).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	hgdExpectEntitlementLookup(mock, "free")
+	hgdBeginAdmission(mock)
+	hgdExpectIdempotencyMiss(mock)
+	hgdExpectActiveJobCount(mock, 0)
+	hgdExpectLastJobAt(mock, time.Time{})
+	hgdExpectDailyCount(mock, 0)
+	hgdExpectJobInsert(mock)
+
+	w := testutil.Do(t, router, http.MethodPost, hgdOptionsPath, hgdUserID, hgdOptionsBody())
+
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+	// No UPDATE of ai_generations_used was expected anywhere in this flow; the
+	// sqlmock cleanup fails the test if one had been issued.
+}
+
+// The option step refuses UP FRONT when the roadmap allowance is already gone,
+// rather than generating options for a roadmap it would then decline to build.
+func TestGoalOptions_RefusedWhenRoadmapAllowanceIsExhausted(t *testing.T) {
+	router, mock, _ := hgdRouter(t, true)
+
+	hgdExpectFreeCapReached(mock)
+
+	w := testutil.Do(t, router, http.MethodPost, hgdOptionsPath, hgdUserID, hgdOptionsBody())
+
+	require.Equal(t, http.StatusPaymentRequired, w.Code, w.Body.String())
+	// Nothing was inserted: the user is told before filling in anything else.
+}
+
+// ─── option-generation cost caps ─────────────────────────────────────────────
+
+func TestGoalOptions_DailyOptionCapIsEnforcedServerSide(t *testing.T) {
+	router, mock, _ := hgdRouter(t, false)
+
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
+	hgdExpectIdempotencyMiss(mock)
+	hgdExpectActiveJobCount(mock, 0)
+	hgdExpectLastJobAt(mock, time.Time{})
+	hgdExpectDailyCount(mock, types.GoalOptionsFreeDailyLimit)
+	hgdExpectRejectedAdmission(mock)
+
+	w := testutil.Do(t, router, http.MethodPost, hgdOptionsPath, hgdUserID, hgdOptionsBody())
+
+	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "goal_options_daily_limit", resp["code"])
+	// The limit is surfaced, not hidden: the UI can say what the bound is.
+	assert.EqualValues(t, types.GoalOptionsFreeDailyLimit, resp["limit"])
+	assert.Contains(t, resp["message"], "daily limit")
+}
+
+// Regenerations against ONE set of answers are capped per draft, so "show me
+// different options" cannot be tapped indefinitely. The chain is read from the
+// server's own stored payload, never from the request.
+func TestGoalOptions_PerDraftRegenerationCapIsEnforcedServerSide(t *testing.T) {
+	router, mock, _ := hgdRouter(t, false)
+
+	hgdExpectDiscoveryJobLookup(mock, string(types.JobStatusCompleted),
+		hgdOptionsResultJSON(hgdOptionID, "Launch a paid landing page"))
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
+	hgdExpectIdempotencyMiss(mock)
+	hgdExpectActiveJobCount(mock, 0)
+	hgdExpectLastJobAt(mock, time.Time{})
+	hgdExpectDailyCount(mock, 0)
+	hgdExpectChainCount(mock, types.GoalOptionsPerDraftLimit)
+	hgdExpectRejectedAdmission(mock)
+
+	body := hgdOptionsBody()
+	body["previous_job_id"] = hgdJobID
+
+	w := testutil.Do(t, router, http.MethodPost, hgdOptionsPath, hgdUserID, body)
+
+	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "goal_options_regeneration_limit", resp["code"])
+	assert.EqualValues(t, types.GoalOptionsPerDraftLimit, resp["limit"])
+	// The way out is stated, and it is not "upgrade".
+	assert.Contains(t, resp["message"], "edit your answers")
+}
+
+// The per-draft cap must survive a client that omits or forges provenance: the
+// chain id is taken from the previous job the SERVER loaded, so a regeneration
+// always lands in the chain it is replacing.
+func TestGoalOptions_ChainIDComesFromTheStoredJobNotTheClient(t *testing.T) {
+	router, mock, _ := hgdRouter(t, false)
+
+	// The stored previous job already belongs to a chain.
+	rows := sqlmock.NewRows([]string{"job_id", "user_id", "type", "status", "payload", "result"}).
+		AddRow(hgdJobID, hgdUserID, string(types.JobTypeGoalDiscovery), string(types.JobStatusCompleted),
+			[]byte(`{"chain_id":"chain-from-server"}`),
+			hgdOptionsResultJSON(hgdOptionID, "Launch a paid landing page"))
+	mock.ExpectQuery(`SELECT \* FROM "background_jobs"`).WillReturnRows(rows)
+
+	hgdExpectAdmissionPreamble(mock)
+	hgdBeginAdmission(mock)
+	hgdExpectIdempotencyMiss(mock)
+	hgdExpectActiveJobCount(mock, 0)
+	hgdExpectLastJobAt(mock, time.Time{})
+	hgdExpectDailyCount(mock, 0)
+	// The cap query must be issued against the SERVER's chain id.
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "background_jobs"`).
+		WithArgs(hgdUserID, string(types.JobTypeGoalDiscovery), "chain-from-server").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	hgdExpectJobInsert(mock)
+
+	body := hgdOptionsBody()
+	body["previous_job_id"] = hgdJobID
+	// A client-supplied chain is not part of the contract and must be ignored.
+	body["chain_id"] = "chain-invented-by-client"
+
+	w := testutil.Do(t, router, http.MethodPost, hgdOptionsPath, hgdUserID, body)
+	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
 }

@@ -54,6 +54,31 @@ var PaidLimits = PlanLimits{
 	AIGenerationsPerDay: -1,
 }
 
+// Goal-option generation budget.
+//
+// These are cost bounds, not a plan feature gate: the option step is a cheap
+// generation whose whole purpose is to lead into a roadmap, so it is metered
+// separately from AIGenerationsPerDay rather than competing with it. See
+// database.GoalOptionsLimitsFor for why.
+//
+// Every value is enforced server-side inside the admission transaction, so a
+// modified client cannot exceed them.
+const (
+	// GoalOptionsPerDraftLimit bounds generations against ONE set of stage-1
+	// answers: the first run plus two "show me different options". Applies to
+	// free and paid alike — it bounds abuse, not entitlement.
+	GoalOptionsPerDraftLimit = 3
+
+	// GoalOptionsFreeDailyLimit bounds a free user's option generations per UTC
+	// day. Two full drafts' worth, so abandoning one set of answers and
+	// starting over is possible without unbounded spend.
+	GoalOptionsFreeDailyLimit = 6
+
+	// GoalOptionsPaidDailyLimit is the same bound for paid users. Not
+	// unlimited: a compromised or scripted paid account is still real money.
+	GoalOptionsPaidDailyLimit = 30
+)
+
 // LimitsForPlan returns the appropriate limit set for a plan identifier.
 func LimitsForPlan(plan string) PlanLimits {
 	if plan == PlanPaid {

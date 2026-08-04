@@ -1105,6 +1105,43 @@ const (
 	JobTypeGoalDiscovery JobType = "goal_discovery"
 )
 
+// JobExpiredError is the user-facing text stored on a job that was abandoned
+// rather than one that genuinely failed. Kept distinct from a generation
+// failure so the client can tell "the server lost this" from "the model could
+// not do it", and so a support log can tell the two apart after the fact.
+const JobExpiredError = "This generation was interrupted and did not finish. Your answers were saved — please try again."
+
+// staleAfterByJobType bounds how long a job may sit pending/processing before
+// it is treated as abandoned.
+//
+// Background generation runs in an in-process goroutine, not a durable queue:
+// a deploy, a crash, or a Fly machine restart mid-generation leaves the row
+// 'processing' with nobody left to finish it. Without a bound, the client polls
+// that row forever and (for goal discovery) the per-user concurrency guard
+// locks the user out of the feature permanently.
+//
+// Every window is deliberately far longer than a real generation so this can
+// never race work that is genuinely still running.
+var staleAfterByJobType = map[JobType]time.Duration{
+	JobTypeGoalDiscovery: 15 * time.Minute,
+	JobTypeRoadmap:       30 * time.Minute,
+	JobTypeMilestone:     30 * time.Minute,
+	JobTypeImport:        30 * time.Minute,
+}
+
+// DefaultJobStaleAfter applies to any job type not listed above. Generous on
+// purpose: an unknown type is more likely to be a slow new generation than an
+// orphan, so the safe default is to wait longer rather than expire early.
+const DefaultJobStaleAfter = 60 * time.Minute
+
+// StaleAfterForJobType returns the abandonment window for a job type.
+func StaleAfterForJobType(jobType JobType) time.Duration {
+	if d, ok := staleAfterByJobType[jobType]; ok {
+		return d
+	}
+	return DefaultJobStaleAfter
+}
+
 /******************************************************************************
  * NOTIFICATIONS
  ******************************************************************************/
@@ -1384,7 +1421,10 @@ func (p MyGoalsPrefs) Lookup(notificationType string) (NotificationTypePref, boo
 	// notification settings screen unchanged.
 	case "agent_updates", "roadmap_complete", "roadmap_failed",
 		"next_milestone_complete", "next_milestone_failed",
-		"goal_options_complete", "goal_options_failed":
+		"goal_options_complete", "goal_options_failed",
+		// A safety-blocked discovery result is its own type so it never
+		// borrows the "your options are ready, choose one" copy.
+		"goal_options_unavailable":
 		return p.AgentUpdates, true
 	}
 	return NotificationTypePref{}, false

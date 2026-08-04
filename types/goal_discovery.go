@@ -834,11 +834,18 @@ func dateOnly(t time.Time) time.Time {
 // background_jobs.payload is already JSONB and Postgres can index/filter on
 // payload->>'idempotency_key' — no schema change needed.
 type GoalDiscoveryJobPayload struct {
-	Answers        GoalDiscoveryAnswers `json:"answers"`
-	ExcludeTitles  []string             `json:"exclude_titles,omitempty"`
-	PreviousJobID  string               `json:"previous_job_id,omitempty"`
-	IdempotencyKey string               `json:"idempotency_key,omitempty"`
-	PromptVersion  string               `json:"prompt_version"`
+	Answers       GoalDiscoveryAnswers `json:"answers"`
+	ExcludeTitles []string             `json:"exclude_titles,omitempty"`
+	PreviousJobID string               `json:"previous_job_id,omitempty"`
+	// ChainID groups every generation belonging to ONE discovery draft: the
+	// first job's own id, inherited by each regeneration that supersedes it.
+	// It is what makes the per-draft regeneration cap enforceable server-side
+	// with a single indexed JSONB lookup instead of walking previous_job_id
+	// links, and it cannot be set by the client — the handler derives it from
+	// the previous job the server itself loaded.
+	ChainID        string `json:"chain_id,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	PromptVersion  string `json:"prompt_version"`
 }
 
 // GoalDiscoveryRoadmapJobPayload is the payload of the roadmap_generation job

@@ -49,6 +49,19 @@ const (
 	maxGoalDiscoveryBodyBytes = 64 << 10
 )
 
+// goalDiscoveryNow is the clock every time-dependent guard reads. A variable so
+// the stale-job threshold and the cooldown are deterministically testable
+// without sleeping; production never replaces it.
+var goalDiscoveryNow = time.Now
+
+// SetGoalDiscoveryClockForTest replaces the handler clock and returns a restore
+// hook. ONLY for tests.
+func SetGoalDiscoveryClockForTest(now func() time.Time) func() {
+	orig := goalDiscoveryNow
+	goalDiscoveryNow = now
+	return func() { goalDiscoveryNow = orig }
+}
+
 // goalOptionsRunner and goalDiscoveryRoadmapRunner are the async hand-offs. They
 // exist as variables so tests can exercise the 202 success path — every guard,
 // the job insert, and the response — without a real generation goroutine racing
@@ -131,46 +144,11 @@ func (h *AgentHandler) CreateGoalOptions(c *gin.Context) {
 	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
 	req.PreviousJobID = strings.TrimSpace(req.PreviousJobID)
 
-	// Idempotent repeat: the same key returns the job it already created rather
-	// than starting a second generation. This is what makes a retried request
-	// after a dropped response safe.
-	if existing, err := database.FindJobByIdempotencyKey(userID, types.JobTypeGoalDiscovery, req.IdempotencyKey); err != nil {
-		utils.InternalErrorResponse(c, err)
-		return
-	} else if existing != nil {
-		c.JSON(http.StatusAccepted, goalOptionsJobResponse(existing.JobID, existing.Status))
-		return
-	}
-
-	// Concurrency: one in-flight option generation per user.
-	active, err := database.CountActiveJobsOfType(userID, types.JobTypeGoalDiscovery, goalOptionsStaleAfter)
-	if err != nil {
-		utils.InternalErrorResponse(c, err)
-		return
-	}
-	if active > 0 {
-		c.AbortWithStatusJSON(http.StatusConflict, gin.H{
-			"code":    "generation_in_progress",
-			"message": "Your goal options are still being generated. Wait for that to finish before starting another.",
-		})
-		return
-	}
-
-	// Cooldown between distinct generations.
-	lastAt, err := database.LatestJobCreatedAt(userID, types.JobTypeGoalDiscovery)
-	if err != nil {
-		utils.InternalErrorResponse(c, err)
-		return
-	}
-	if !lastAt.IsZero() && time.Since(lastAt) < goalOptionsCooldown {
-		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-			"code":    "rate_limited",
-			"message": "You're generating options too quickly. Give it a few seconds and try again.",
-		})
-		return
-	}
-
-	// Same entitlement rule as every other AI generation.
+	// The option step exists to lead into a roadmap, so refuse it up front when
+	// the user could not build that roadmap today anyway. This CHECKS the
+	// roadmap entitlement without consuming it — option generation never
+	// increments the AI counter, which is what guarantees a successful option
+	// set always leaves exactly one final roadmap submission available.
 	if !utils.EnforceLimit(c, func() (*types.PlanLimitError, error) {
 		return database.CheckAIGeneration(userID)
 	}) {
@@ -178,34 +156,78 @@ func (h *AgentHandler) CreateGoalOptions(c *gin.Context) {
 	}
 
 	// Exclusions come from the SERVER's copy of the previous result. A client
-	// cannot inject arbitrary text into the prompt this way.
-	excludeTitles, err := h.excludedTitlesFor(userID, req.PreviousJobID)
+	// cannot inject arbitrary text into the prompt this way. The same lookup
+	// yields the draft's chain id, so the per-draft cap can't be dodged by
+	// omitting or forging a client-side identifier.
+	excludeTitles, inheritedChainID, err := h.previousResultContext(userID, req.PreviousJobID)
 	if err != nil {
 		utils.BadRequestResponse(c, err.Error())
 		return
 	}
 
+	dailyLimit, draftLimit, err := database.GoalOptionsLimitsFor(userID)
+	if err != nil {
+		utils.InternalErrorResponse(c, err)
+		return
+	}
+
+	now := goalDiscoveryNow()
 	job := types.BackgroundJob{
 		JobID:    uuid.NewString(),
 		UserID:   userID,
 		Type:     string(types.JobTypeGoalDiscovery),
 		Status:   string(types.JobStatusPending),
 		Progress: 0,
-		Payload: types.GoalDiscoveryJobPayload{
-			Answers:        req.Answers,
-			ExcludeTitles:  excludeTitles,
-			PreviousJobID:  req.PreviousJobID,
-			IdempotencyKey: req.IdempotencyKey,
-			PromptVersion:  types.GoalOptionsPromptVersion,
-		},
 	}
-	if err := database.CreateJob(&job); err != nil {
+	// A first generation starts its own chain; a regeneration stays in the
+	// chain it is replacing. Only an INHERITED chain is handed to the admission
+	// check — a brand-new one has nothing to count yet.
+	chainID := inheritedChainID
+	if chainID == "" {
+		chainID = job.JobID
+	}
+	job.Payload = types.GoalDiscoveryJobPayload{
+		Answers:        req.Answers,
+		ExcludeTitles:  excludeTitles,
+		PreviousJobID:  req.PreviousJobID,
+		ChainID:        chainID,
+		IdempotencyKey: req.IdempotencyKey,
+		PromptVersion:  types.GoalOptionsPromptVersion,
+	}
+
+	// Idempotency, the one-in-flight rule, the cooldown, and both caps are all
+	// decided and acted on inside a single per-user locked transaction. Doing
+	// them as separate reads before an insert is what lets two simultaneous
+	// requests each see "allowed" and both create a job.
+	admission, err := database.AdmitGoalOptionsJob(&job, database.GoalOptionsAdmission{
+		UserID:         userID,
+		IdempotencyKey: req.IdempotencyKey,
+		ChainID:        inheritedChainID,
+		Now:            now,
+		StaleAfter:     goalOptionsStaleAfter,
+		Cooldown:       goalOptionsCooldown,
+		DailyLimit:     dailyLimit,
+		DraftLimit:     draftLimit,
+	})
+	if err != nil {
 		utils.InternalErrorResponse(c, err)
+		return
+	}
+	if admission.Expired > 0 {
+		log.Info(ctx, "Retired abandoned goal options jobs",
+			fmt.Sprintf("user_id=%s expired=%d", userID, admission.Expired))
+	}
+	if admission.Existing != nil {
+		c.JSON(http.StatusAccepted, goalOptionsJobResponse(admission.Existing.JobID, admission.Existing.Status))
+		return
+	}
+	if admission.Rejection != "" {
+		respondGoalOptionsRejected(c, admission)
 		return
 	}
 
 	log.Info(ctx, "Goal options generation requested",
-		fmt.Sprintf("job_id=%s regeneration=%t excluded=%d", job.JobID, req.PreviousJobID != "", len(excludeTitles)))
+		fmt.Sprintf("job_id=%s chain_id=%s regeneration=%t excluded=%d", job.JobID, chainID, req.PreviousJobID != "", len(excludeTitles)))
 
 	bgCtx := log.WithLogger(context.Background(), log.NewLogger(job.JobID))
 	goalOptionsRunner(bgCtx, h.provider, job.JobID, userID, types.GoalOptionsInput{
@@ -216,11 +238,16 @@ func (h *AgentHandler) CreateGoalOptions(c *gin.Context) {
 	c.JSON(http.StatusAccepted, goalOptionsJobResponse(job.JobID, job.Status))
 }
 
-// excludedTitlesFor reads the goal titles the user already rejected out of the
-// previous job's stored result. Returns nil for a first-time generation.
-func (h *AgentHandler) excludedTitlesFor(userID, previousJobID string) ([]string, error) {
+// previousResultContext reads, from the previous job's SERVER-side row, both
+// the goal titles the user already rejected and the chain the draft belongs to.
+// Returns zero values for a first-time generation.
+//
+// Chain id is taken from the stored payload rather than from the request so a
+// client cannot start a fresh chain on every regeneration and sidestep the
+// per-draft cap.
+func (h *AgentHandler) previousResultContext(userID, previousJobID string) (titles []string, chainID string, err error) {
 	if previousJobID == "" {
-		return nil, nil
+		return nil, "", nil
 	}
 
 	job, err := database.GetGoalDiscoveryJob(userID, previousJobID)
@@ -228,18 +255,105 @@ func (h *AgentHandler) excludedTitlesFor(userID, previousJobID string) ([]string
 		// Deliberately the same message whether the job is missing or belongs to
 		// somebody else: a 404-vs-403 distinction would confirm the existence of
 		// another user's job.
-		return nil, errors.New("previous_job_id does not refer to one of your goal discovery results")
-	}
-	result, err := decodeGoalOptionsResult(job.Result)
-	if err != nil || result == nil {
-		return nil, nil
+		return nil, "", errors.New("previous_job_id does not refer to one of your goal discovery results")
 	}
 
-	titles := make([]string, 0, len(result.Options))
+	chainID = goalDiscoveryChainID(job)
+	// Pre-chain rows (created before this field existed) fall back to the job's
+	// own id, so an in-flight draft from an older build still gets capped.
+	if chainID == "" {
+		chainID = job.JobID
+	}
+
+	result, decodeErr := decodeGoalOptionsResult(job.Result)
+	if decodeErr != nil || result == nil {
+		return nil, chainID, nil
+	}
+
+	titles = make([]string, 0, len(result.Options))
 	for _, opt := range result.Options {
 		titles = append(titles, opt.GoalTitle)
 	}
-	return titles, nil
+	return titles, chainID, nil
+}
+
+// goalDiscoveryChainID pulls chain_id out of a job's JSONB payload. GORM hands
+// the column back as a map or as raw bytes depending on the driver path, so
+// both are handled rather than type-asserting one of them.
+func goalDiscoveryChainID(job *types.BackgroundJob) string {
+	if job == nil || job.Payload == nil {
+		return ""
+	}
+	if m, ok := job.Payload.(map[string]any); ok {
+		id, _ := m["chain_id"].(string)
+		return id
+	}
+	encoded, err := json.Marshal(job.Payload)
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		ChainID string `json:"chain_id"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return ""
+	}
+	return payload.ChainID
+}
+
+// respondGoalOptionsRejected turns an admission rejection into the HTTP status
+// and machine-readable code the app branches on. Every message states the
+// actual bound, so a user who hits one is told what the limit is rather than
+// being told to try again against a wall they cannot see.
+func respondGoalOptionsRejected(c *gin.Context, admission *database.GoalOptionsAdmissionResult) {
+	switch admission.Rejection {
+	case database.RejectGoalOptionsInProgress:
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{
+			"code":    admission.Rejection,
+			"message": "Your goal options are still being generated. Wait for that to finish before starting another.",
+		})
+
+	case database.RejectGoalOptionsRateLimited:
+		retryAfter := int(admission.RetryAfter.Seconds() + 0.999)
+		if retryAfter < 1 {
+			retryAfter = 1
+		}
+		c.Header("Retry-After", fmt.Sprintf("%d", retryAfter))
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+			"code":        admission.Rejection,
+			"message":     "You're generating options too quickly. Give it a few seconds and try again.",
+			"retry_after": retryAfter,
+		})
+
+	case database.RejectGoalOptionsDailyLimit:
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+			"code": admission.Rejection,
+			"message": fmt.Sprintf(
+				"You've generated goal options %d times today, which is the daily limit. You can still build a roadmap from the options you already have, or come back tomorrow.",
+				admission.Used),
+			"limit": admission.Limit,
+			"used":  admission.Used,
+		})
+
+	case database.RejectGoalOptionsDraftExceeded:
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+			"code": admission.Rejection,
+			"message": fmt.Sprintf(
+				"You've asked for different options %d times for these answers, which is the limit. Choose one of the options you have, or edit your answers to start a fresh set.",
+				admission.Used),
+			"limit": admission.Limit,
+			"used":  admission.Used,
+		})
+
+	default:
+		// Unreachable unless a new rejection code is added without a branch.
+		// Failing closed with a generic 429 beats returning 202 for a request
+		// that was refused.
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+			"code":    admission.Rejection,
+			"message": "We couldn't start another goal options generation right now. Please try again shortly.",
+		})
+	}
 }
 
 func goalOptionsJobResponse(jobID, status string) gin.H {
@@ -295,30 +409,49 @@ func processGoalOptionsGeneration(ctx context.Context, provider agent.Provider, 
 		Safety:        out.Safety,
 	}
 
-	now := time.Now()
-	if err := database.UpdateBackgroundJob(ctx, &types.BackgroundJob{
+	now := goalDiscoveryNow()
+	// Compare-and-set, not a blind update. This goroutine may have been
+	// superseded while it was generating — its job expired as stale, or the
+	// user started a replacement — and a late worker must not be able to
+	// resurrect the row as completed, overwrite a newer option set, or announce
+	// a result nobody is waiting for.
+	won, err := database.FinishJobIfActive(ctx, &types.BackgroundJob{
 		JobID:       jobID,
 		Status:      string(types.JobStatusCompleted),
 		Progress:    100,
 		CompletedAt: &now,
 		Result:      result,
-	}); err != nil {
+	})
+	if err != nil {
 		log.Error(ctx, "Failed to persist goal options result", err)
 		failGoalOptionsJob(jobID, userID, err)
 		return
 	}
-
-	// Only a real generation burns a credit. A safety block does not produce
-	// usable options, so it does not consume one.
-	if out.Safety == nil {
-		if err := database.IncrementAIGenerations(userID); err != nil {
-			log.Error(ctx, "processGoalOptionsGeneration: failed to increment AI counter", err)
-		}
+	if !won {
+		// Nothing user-visible: no status change, no socket event, no
+		// notification. The result is discarded because something else already
+		// decided this job's outcome.
+		log.Info(ctx, "Goal options result discarded: job already terminal",
+			fmt.Sprintf("job_id=%s options=%d generation_ms=%d",
+				jobID, len(out.Options), time.Since(start).Milliseconds()))
+		return
 	}
+
+	// Option generation is metered on its own budget (see
+	// types.GoalOptionsPerDraftLimit / database.GoalOptionsLimitsFor) and
+	// deliberately does NOT increment the AI roadmap counter. Charging both to
+	// the same daily allowance is what previously let the option step consume
+	// the generation the user needed to build the roadmap those options were
+	// for. The bound that replaced it is enforced in AdmitGoalOptionsJob.
 
 	log.Info(ctx, "Goal options generation finished",
 		fmt.Sprintf("job_id=%s options=%d safety_blocked=%t generation_ms=%d",
 			jobID, len(out.Options), out.Safety != nil, time.Since(start).Milliseconds()))
+
+	if out.Safety != nil {
+		notifyGoalOptionsUnavailable(ctx, jobID, userID)
+		return
+	}
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:     "complete",
@@ -340,6 +473,41 @@ func processGoalOptionsGeneration(ctx context.Context, provider agent.Provider, 
 	})
 }
 
+// notifyGoalOptionsUnavailable handles a safety-blocked result.
+//
+// The job is still 'completed' — the generation ran and returned a structured
+// answer — but there are no options, so the ordinary "Your goal options are
+// ready / choose one" notification would be a lie and would land on a user's
+// lock screen at the worst possible moment. This sends a separate, plainly
+// worded type instead.
+//
+// The copy is deliberately logistical: it says what to do next in the app and
+// makes no claim about why. It also carries no user text — the answers that
+// triggered the block are never echoed into a notification, a push payload, or
+// a log line.
+func notifyGoalOptionsUnavailable(ctx context.Context, jobID, userID string) {
+	log.Info(ctx, "Goal options generation returned a safety block", fmt.Sprintf("job_id=%s", jobID))
+
+	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
+		Type:     "complete",
+		JobID:    jobID,
+		Progress: 100,
+		Status:   string(types.JobStatusCompleted),
+		Message:  "Your goal discovery result is ready",
+		Data:     map[string]any{"job_id": jobID},
+	})
+
+	notifications.Dispatch(notifications.DispatchOptions{
+		UserID:           userID,
+		Category:         notifications.CategoryMyGoals,
+		NotificationType: "goal_options_unavailable",
+		DedupKey:         jobID + ":unavailable",
+		Title:            "We couldn't build goal options",
+		Body:             "Your goal discovery answers didn't produce options we can plan from. Open the app to edit them or start over.",
+		Data:             map[string]any{"goal_discovery_job_id": jobID},
+	})
+}
+
 // GoalOptionsUserFacingError maps ANY generation failure to one safe message.
 //
 // The cause is deliberately discarded rather than wrapped: a provider error can
@@ -353,18 +521,31 @@ func GoalOptionsUserFacingError(cause error) string {
 }
 
 // failGoalOptionsJob marks the job failed with a message that is safe to show.
+//
+// Like the success path this is a compare-and-set: a worker that lost the race
+// (its job was already expired or superseded) must not overwrite the terminal
+// state that is already there, nor send a second notification about it.
 func failGoalOptionsJob(jobID, userID string, cause error) {
 	ctx := log.WithLogger(context.Background(), log.NewLogger(jobID))
-	now := time.Now()
+	now := goalDiscoveryNow()
 
 	userFacing := GoalOptionsUserFacingError(cause)
 
-	_ = database.UpdateBackgroundJob(ctx, &types.BackgroundJob{
+	won, err := database.FinishJobIfActive(ctx, &types.BackgroundJob{
 		JobID:       jobID,
 		Status:      string(types.JobStatusFailed),
 		Error:       userFacing,
 		CompletedAt: &now,
 	})
+	if err != nil {
+		log.Error(ctx, "Failed to mark goal options job failed", err)
+		return
+	}
+	if !won {
+		log.Info(ctx, "Goal options failure discarded: job already terminal",
+			fmt.Sprintf("job_id=%s cause=%v", jobID, cause))
+		return
+	}
 
 	websocket.Manager.BroadcastToJob(ctx, jobID, types.ProgressUpdate{
 		Type:    "error",

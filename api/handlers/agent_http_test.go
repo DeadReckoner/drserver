@@ -331,3 +331,91 @@ func TestAgentWS_PlainHTTPRequest_UpgradeFails(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "Websocket upgrade failed")
 }
+
+// --- stale job expiry on the status read -------------------------------------
+//
+// Generation runs in an in-process goroutine with no durable queue behind it, so
+// a deploy or a crash mid-generation leaves the row 'processing' with nobody
+// left to finish it. The status endpoint is what the mobile client polls, so it
+// is where that has to become a terminal state — otherwise the client waits on
+// a dead job forever.
+
+func TestAgentJobStatus_AbandonedJobIsReportedAsFailed(t *testing.T) {
+	db, mock := testutil.NewSqlmockDBRegex(t)
+	t.Cleanup(database.SetDBForTest(db))
+
+	// A goal-discovery job stuck in 'processing' well past its 15-minute window.
+	staleCreatedAt := time.Now().Add(-2 * time.Hour)
+	hroadExpectJobLookup(mock).WillReturnRows(
+		sqlmock.NewRows([]string{"job_id", "user_id", "type", "status", "progress", "created_at"}).
+			AddRow(hroadAgentJobID, hroadAgentUserID, string(types.JobTypeGoalDiscovery),
+				string(types.JobStatusProcessing), 25, staleCreatedAt))
+
+	// The read retires it, guarded on the row still being unfinished so a worker
+	// that is genuinely still alive cannot be overwritten. GORM wraps a write in
+	// its own transaction.
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "background_jobs" SET`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	router := testutil.NewTestRouterAs(db, hroadAgentUserID)
+	w := testutil.Do(t, router, http.MethodGet, "/api/v1/jobs/"+hroadAgentJobID+"/status", hroadAgentUserID, nil)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	// The response describes the row that now exists, not the one that was read.
+	assert.Equal(t, string(types.JobStatusFailed), resp["status"],
+		"a client polling an abandoned job must be told it is over")
+	assert.Equal(t, types.JobExpiredError, resp["error"],
+		"the reason must be typed so the client can tell it from a generation failure")
+	assert.Contains(t, resp, "failed_at")
+	// The client's recovery path keys off this: answers preserved, retry offered.
+	assert.Contains(t, resp["error"], "try again")
+}
+
+// A job still inside its window is genuinely running and must be left alone —
+// no UPDATE is expected here, and sqlmock fails the test if one is issued.
+func TestAgentJobStatus_RecentInFlightJobIsNotExpired(t *testing.T) {
+	db, mock := testutil.NewSqlmockDBRegex(t)
+	t.Cleanup(database.SetDBForTest(db))
+
+	hroadExpectJobLookup(mock).WillReturnRows(
+		sqlmock.NewRows([]string{"job_id", "user_id", "type", "status", "progress", "created_at"}).
+			AddRow(hroadAgentJobID, hroadAgentUserID, string(types.JobTypeGoalDiscovery),
+				string(types.JobStatusProcessing), 25, time.Now().Add(-30*time.Second)))
+
+	router := testutil.NewTestRouterAs(db, hroadAgentUserID)
+	w := testutil.Do(t, router, http.MethodGet, "/api/v1/jobs/"+hroadAgentJobID+"/status", hroadAgentUserID, nil)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, string(types.JobStatusProcessing), resp["status"])
+	assert.NotContains(t, resp, "error")
+}
+
+// A roadmap job gets the same treatment on a longer window — the goal discovery
+// FINAL roadmap is an ordinary roadmap_generation job, so its pending state
+// needs the same escape hatch.
+func TestAgentJobStatus_RoadmapJobUsesItsOwnStaleWindow(t *testing.T) {
+	db, mock := testutil.NewSqlmockDBRegex(t)
+	t.Cleanup(database.SetDBForTest(db))
+
+	// 20 minutes: past the goal-discovery window, inside the roadmap one.
+	hroadExpectJobLookup(mock).WillReturnRows(
+		sqlmock.NewRows([]string{"job_id", "user_id", "type", "status", "progress", "created_at"}).
+			AddRow(hroadAgentJobID, hroadAgentUserID, string(types.JobTypeRoadmap),
+				string(types.JobStatusProcessing), 50, time.Now().Add(-20*time.Minute)))
+
+	router := testutil.NewTestRouterAs(db, hroadAgentUserID)
+	w := testutil.Do(t, router, http.MethodGet, "/api/v1/jobs/"+hroadAgentJobID+"/status", hroadAgentUserID, nil)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, string(types.JobStatusProcessing), resp["status"],
+		"a roadmap generation gets a longer window than an options generation")
+}
