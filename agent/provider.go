@@ -85,9 +85,20 @@ func GetProvider(providerType ProviderType) Provider {
 // AI_PROVIDER=mock selects the deterministic offline backend for local
 // development. That value is refused on a hosted runtime: a deploy configured
 // with it panics during router construction rather than silently serving
-// fabricated plans to real users.
+// fabricated plans to real users. An unrecognised value panics for the same
+// reason — quietly falling back to OpenAI turned a typo in a deploy config into
+// traffic on a backend nobody chose.
+//
+// This resolves SELECTION only. Key presence is a startup concern and belongs
+// to ValidateProviderConfig, which main() calls before serving; keeping it out
+// of here is what lets the handler tests construct a router without a real key.
 func DefaultProvider() Provider {
-	switch ProviderType(os.Getenv("AI_PROVIDER")) {
+	provider, err := ResolveProviderType(os.Getenv("AI_PROVIDER"))
+	if err != nil {
+		panic(err.Error())
+	}
+
+	switch provider {
 	case ProviderAnthropic:
 		return anthropic.NewProvider()
 	case ProviderMock:

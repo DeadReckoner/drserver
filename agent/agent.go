@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 )
 
@@ -912,6 +911,17 @@ func parseMilestoneAdjustmentsResponse(rawResp []byte) (*types.MilestoneAdjustme
 //
 // Used by both generateMacroMap and generateMilestoneMap
 func makeOpenAIRequest(ctx context.Context, reqBody AIRequest) ([]byte, error) {
+	// Resolve the key BEFORE doing any work. This used to read the key and
+	// immediately slice it for a log line, which both leaked a prefix and
+	// suffix of the credential into the logs and panicked outright on an unset
+	// or short key — taking down a background generation goroutine, which runs
+	// outside gin's Recovery middleware. A missing key is a configuration
+	// problem and is now returned as an ordinary error.
+	apiKey, err := RequireOpenAIKey()
+	if err != nil {
+		return nil, err
+	}
+
 	// Serialize the request body to JSON
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -924,9 +934,6 @@ func makeOpenAIRequest(ctx context.Context, reqBody AIRequest) ([]byte, error) {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set required headers (API key from environment variable)
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	log.Info(ctx, "OpenAI API Key", fmt.Sprintf("Using API key: %s...%s", apiKey[:10], apiKey[len(apiKey)-5:]))
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 

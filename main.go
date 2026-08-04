@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"dr/server/agent"
 	"dr/server/api"
 	"dr/server/database"
 	"dr/server/notifications/jobs"
@@ -71,6 +72,15 @@ func mustRegister(c *cron.Cron, spec, name string, fn func()) {
 
 func main() {
 	ctx := context.Background()
+
+	// Fail fast on an AI backend this process cannot actually use: an unknown
+	// AI_PROVIDER, the offline mock on a hosted runtime, or a missing/truncated
+	// key for the selected provider. Without this the process starts happily and
+	// every generation fails at request time instead. The error names the
+	// environment variable at fault and never its value.
+	if err := agent.ValidateProviderConfig(); err != nil {
+		log.Fatalf("AI provider configuration is invalid: %v", err)
+	}
 
 	db := database.Connect(ctx)
 

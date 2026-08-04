@@ -29,8 +29,21 @@ primary_region = 'ewr'
 
 
 [env]
+  # DATABASE_URL and anon_key are Fly SECRETS, not [env] values.
+  #
+  # They previously sat here as literals, which meant a live database
+  # connection string (with its password) and the Supabase anon key were
+  # committed to this repository and are permanently reachable in its git
+  # history. Both must be rotated; see SECRETS.md.
+  #
+  # Fly injects secrets into the machine environment exactly like [env]
+  # entries, so the application code reading os.Getenv("DATABASE_URL") and
+  # os.Getenv("anon_key") is unchanged. Set them with:
+  #
+  #   fly secrets set DATABASE_URL=... anon_key=...
+  #
+  # A deploy will start and then fail its database connection if they are
+  # not set as secrets first.
   LOG_LEVEL = "debug"
   API_URL = "https://bbghphhkbqxbjgwqmlhd.supabase.co"
-  DATABASE_URL="postgresql://postgres.bbghphhkbqxbjgwqmlhd:W07nO7QKpVpp2K9e@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
-  anon_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJiZ2hwaGhrYnF4Ympnd3FtbGhkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE1NTMzNTAsImV4cCI6MjA1NzEyOTM1MH0.5F59qXfUP2-kq8VtpT0-iur8MP7qoWhIvvMAYz4WE8A"
 
