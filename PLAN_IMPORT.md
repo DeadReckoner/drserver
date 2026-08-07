@@ -169,11 +169,19 @@ A flat document with no grouping becomes a single phase.
 
 Notes for the client:
 
-- **Tasks are not generated for every milestone.** Tasks the document contains
-  are carried over wherever they appear. Where the document has no action items,
-  only the **first** milestone gets generated tasks — the rest are filled in
-  later via `/agent/generate-next-milestone-async/:milestoneid`, same as an
-  AI-generated roadmap.
+- **The whole plan arrives in one pass.** Unlike AI generation — which fills in
+  tasks for the first milestone and leaves the rest to
+  `/agent/generate-next-milestone-async/:milestoneid` — an import populates
+  every milestone with tasks and every task with steps. The user is importing a
+  plan they already have, so nothing should need generating afterwards.
+- **Do not offer "generate next milestone" on an imported roadmap.** That flow
+  deletes a milestone's existing tasks before inserting new ones, so on an
+  imported roadmap it discards the user's own content. Nothing should trigger
+  it in practice: the affordance keys off a milestone having no tasks, and an
+  import leaves none empty.
+- **Steps are carried over, not invented.** Where the document has sub-bullets
+  under an action they become the steps verbatim. Where it has none, the task
+  gets a single step restating it rather than padded-out filler.
 - **Everything starts incomplete.** Even if the source document shows finished
   work, all `completed` flags come back `false`; completed work is mentioned in
   the milestone description instead.

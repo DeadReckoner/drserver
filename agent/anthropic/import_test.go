@@ -282,6 +282,29 @@ func TestTransposePlanTool_Schema(t *testing.T) {
 	assert.Contains(t, props, "goal")
 }
 
+// TestTransposePlanSystemPrompt_GeneratesEverythingUpFront pins the two rules
+// that make an import self-sufficient.
+//
+// Tasks: an earlier version filled in tasks for the FIRST milestone only and
+// left the rest to the next-milestone flow — which deletes a milestone's tasks
+// before regenerating them, so on an imported roadmap it would have destroyed
+// the user's own content. Importing a plan the user already has means every
+// milestone is populated in one pass and that flow is never needed.
+//
+// Steps: an earlier version skipped steps entirely for tasks carried over
+// intact, leaving imported tasks with empty checklists. Steps are required now,
+// but a task with no sub-bullets in the source gets ONE step restating it
+// rather than invented filler.
+func TestTransposePlanSystemPrompt_GeneratesEverythingUpFront(t *testing.T) {
+	prompt := transposePlanSystemPrompt()
+
+	assert.Contains(t, prompt, "EVERY milestone needs tasks")
+	assert.NotContains(t, prompt, "ONLY for the FIRST milestone")
+
+	assert.Contains(t, prompt, "a SINGLE step restating the task")
+	assert.NotContains(t, prompt, "needs no invented steps")
+}
+
 func TestTransposePlanSystemPrompt_StatesDayContract(t *testing.T) {
 	prompt := transposePlanSystemPrompt()
 	// StartRoadmap dates milestones and tasks as startDate + Day, so the prompt
