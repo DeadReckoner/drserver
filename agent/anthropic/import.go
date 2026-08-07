@@ -23,10 +23,15 @@ const (
 	// job than generating from a form, so this path pays for the larger model.
 	importModel = "claude-opus-5"
 
-	// importMaxTokens covers a full multi-phase plan with tasks and steps.
+	// importMaxTokens has to cover the whole plan in one pass: every milestone
+	// gets tasks, and every task gets steps, so a large document's tool payload
+	// is far bigger than the strategic-only calls in provider.go. Truncation
+	// here is not a partial import — the tool JSON fails to parse and the job
+	// fails — so this is sized generously rather than tightly. Opus 5 allows up
+	// to 128k; the ceiling on raising it further is latency, not the model.
 	// Above ~16k the SDK's HTTP timeout starts to bite on non-streaming
 	// requests, which is why this call streams and accumulates.
-	importMaxTokens = 32000
+	importMaxTokens = 64000
 
 	importToolName = "transpose_plan"
 
@@ -385,15 +390,15 @@ PRESERVATION RULES (these outrank everything else):
 2. Keep the document's ordering, numbering, and terminology, including jargon and project-specific names.
 3. Keep every action item the document contains, at whatever depth it appears. Never drop a milestone or task because it seems redundant, badly scoped, or unrealistic — that is the user's plan and they will edit it themselves.
 4. Keep concrete details the document supplies: durations, dates, effort estimates, dependencies, resources, risks, owners (fold an owner into the description).
-5. Do not add phases, milestones, or tasks that represent work the author did not plan.
+5. Do not add phases or milestones that represent work the author did not plan. Tasks you fill in for a milestone the document left bare (see FILLING GAPS) must stay inside the scope that milestone already describes — never new scope you think the plan ought to have.
 
 FILLING GAPS (only where the structure requires a value):
 The roadmap model needs fields most documents will not have. Supply these, conservatively, and list each kind of gap you filled in import_notes.inferred:
 - acceptance_test: how the user knows the milestone is done. Derive it from the milestone's own description.
 - duration_days_min / duration_days_max: from the document's timing if stated; otherwise estimate from the amount of work described.
 - day: see DAY NUMBERING below.
-- Tasks: if a milestone in the document has no action items, generate 8-12 tasks ONLY for the FIRST milestone, so the user has somewhere to start. Leave tasks empty for later milestones with no source content — the user generates those later, one milestone at a time.
-- Steps: only add steps when the document's task is too vague to act on. A task carried over intact needs no invented steps.
+- Tasks: EVERY milestone needs tasks, in this one pass. The user is importing a plan they already have; they should not have to generate anything afterwards. Where the document lists actions under a milestone, those are its tasks. Where it lists none, write 6-10 tasks for that milestone drawn from its own description and acceptance test — the work the document already implies, not new scope you think it ought to include.
+- Steps: where the document has sub-bullets or checklist items under an action, those ARE the steps: carry them over verbatim and add nothing. Where it has none, emit a SINGLE step restating the task's own action. Do not invent extra sub-structure to pad a task out — one honest step beats three made-up ones.
 
 DAY NUMBERING:
 "day" is a whole-number offset from the day the user starts the roadmap. Day 0 is the start day. It is GLOBAL across the roadmap, not relative to the phase or milestone.
@@ -481,7 +486,7 @@ func transposePlanTool() anthropic.ToolParam {
 			"steps": map[string]interface{}{
 				"type":        "array",
 				"items":       stepSchema,
-				"description": "Sub-steps from the document; empty array when the task needs none",
+				"description": "The document's own sub-bullets under this action where it has them; otherwise a single step restating the task. Never empty",
 			},
 		},
 		"required": []string{"title", "description", "day", "completed", "steps"},
@@ -525,7 +530,7 @@ func transposePlanTool() anthropic.ToolParam {
 			"tasks": map[string]interface{}{
 				"type":        "array",
 				"items":       taskSchema,
-				"description": "Action items from the document. Empty array for later milestones the document gives no actions for",
+				"description": "This milestone's tasks: the document's action items where it has them, otherwise 6-10 drawn from the milestone's own description. Every milestone gets tasks — never empty",
 			},
 		},
 		"required": []string{"sub_goal", "description", "acceptance_test", "duration_days_min", "duration_days_max", "order_index", "day", "spikes", "risks", "tasks"},
