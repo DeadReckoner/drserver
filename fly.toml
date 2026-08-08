@@ -29,8 +29,11 @@ primary_region = 'ewr'
 
 
 [env]
-  LOG_LEVEL = "debug"
-  API_URL = "https://bbghphhkbqxbjgwqmlhd.supabase.co"
-  DATABASE_URL="postgresql://postgres.bbghphhkbqxbjgwqmlhd:W07nO7QKpVpp2K9e@aws-0-us-east-1.pooler.supabase.com:6543/postgres"
-  anon_key="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJiZ2hwaGhrYnF4Ympnd3FtbGhkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE1NTMzNTAsImV4cCI6MjA1NzEyOTM1MH0.5F59qXfUP2-kq8VtpT0-iur8MP7qoWhIvvMAYz4WE8A"
+  # Only non-secret configuration belongs here: this file is tracked in git.
+  # DATABASE_URL and anon_key are Fly secrets, injected at runtime:
+  #   fly secrets set DATABASE_URL=... anon_key=...
 
+  # info, not debug: the auth path logs the full Supabase user record
+  # (emails, identities, sign-in history) at debug, and logs ship to Axiom.
+  LOG_LEVEL = "info"
+  API_URL = "https://bbghphhkbqxbjgwqmlhd.supabase.co"
