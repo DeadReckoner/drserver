@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"dr/server/log"
+	"dr/server/observability"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -334,11 +335,25 @@ func Recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if r := recover(); r != nil {
+				stack := debug.Stack()
 				log.FromContext(c.Request.Context()).LogAttrs(
 					log.LevelError, "panic recovered",
 					slog.String("panic", fmt.Sprintf("%v", r)),
-					slog.String("stack", string(debug.Stack())),
+					slog.String("stack", string(stack)),
 				)
+
+				// Also page it to Sentry. No-op when SENTRY_DSN is unset, so
+				// local runs and tests are unaffected. The tags mirror the
+				// fields on the access-log line so an issue can be traced back
+				// to the matching request in Axiom.
+				route := c.FullPath()
+				if route == "" {
+					route = c.Request.URL.Path
+				}
+				observability.ReportPanic(r, stack,
+					c.GetString("requestID"), c.GetString("user_id"),
+					c.Request.Method, route)
+
 				c.AbortWithStatus(http.StatusInternalServerError)
 			}
 		}()

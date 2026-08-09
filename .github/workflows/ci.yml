@@ -1,4 +1,9 @@
-name: Test
+# Test and deploy in one workflow so the deploy can actually depend on the
+# tests. They used to live in separate workflows (test.yml + fly-deploy.yml),
+# which meant both triggered on a push to main and raced: a red test suite did
+# not stop the deploy, because nothing connected them.
+
+name: CI
 
 on:
   pull_request:
@@ -45,3 +50,24 @@ jobs:
       # compiles them.
       - name: Run integration suite
         run: make integration_test
+
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+    # The gate. A red suite on either job stops the deploy.
+    needs: [unit, integration]
+    # PRs run the tests but never deploy.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    concurrency: deploy-group
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # NOTE: this does not run database migrations. Migrations are applied
+      # out-of-band with `supabase db push`. A change that depends on a new
+      # migration must have that migration applied BEFORE this deploy lands,
+      # or the new code will run against the old schema.
+      - run: flyctl deploy --remote-only --app drserver-purple-moon-7907
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

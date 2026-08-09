@@ -4,7 +4,6 @@ import (
 	"dr/server/api/handlers"
 	"dr/server/api/utils"
 	"dr/server/middleware"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -36,7 +35,7 @@ func SetupRoutesWithOptions(h *handlers.Handlers, opts Options) *gin.Engine {
 	router.Use(middleware.RequestLogger())
 	router.Use(middleware.Recovery())
 
-	setupHealthRoutes(router)
+	setupHealthRoutes(router, h.Health)
 
 	setupV1Routes(router, h, opts)
 
@@ -257,22 +256,35 @@ func setupAgentRoutes(rg *gin.RouterGroup, h *handlers.AgentHandler) {
 		agent.GET("/acknowledgment", h.GetAIAcknowledgment)
 		agent.POST("/acknowledgment", h.AcceptAIAcknowledgment)
 
-		// Structured roadmap generation endpoints. Backend provider is selected
-		// by the AI_PROVIDER env var (anthropic or openai); see agent.DefaultProvider.
-		// Note: /generate (synchronous) is slated for deprecation and remains OpenAI-only.
-		agent.POST("/generate", h.AgentGenerate)
-		agent.POST("/generateMilestone/:milestoneid", h.AgentGenerateMilestone)
-		agent.POST("/generate-async", h.AgentGenerateAsync)
-		agent.POST("/generate-next-milestone-async/:milestoneid", utils.ValidateUUID("milestoneid"), h.AgentGenerateNextMilestoneAsync)
+		// Every endpoint that spends money at a provider sits behind one shared
+		// per-user rate limit. Group("") keeps the /agent prefix while scoping
+		// the middleware, and a single AIRateLimit() instance means the budget
+		// is shared across these routes rather than granted per-endpoint.
+		//
+		// Deliberately excludes /acknowledgment (free), the deprecated
+		// /sessions routes (410), and /jobs/:jobid/status — clients poll that
+		// one every few seconds while a generation runs, so limiting it would
+		// break the fallback path for exactly the users already waiting.
+		billed := agent.Group("", middleware.AIRateLimit())
+		{
+			// Structured roadmap generation endpoints. Backend provider is selected
+			// by the AI_PROVIDER env var (anthropic or openai); see agent.DefaultProvider.
+			// Note: /generate (synchronous) is slated for deprecation and remains OpenAI-only.
+			billed.POST("/generate", h.AgentGenerate)
+			billed.POST("/generateMilestone/:milestoneid", h.AgentGenerateMilestone)
+			billed.POST("/generate-async", h.AgentGenerateAsync)
+			billed.POST("/generate-next-milestone-async/:milestoneid", utils.ValidateUUID("milestoneid"), h.AgentGenerateNextMilestoneAsync)
 
-		// Plan import: multipart PDF upload of a plan the user already has,
-		// transposed onto the roadmap model by Claude. Anthropic-only (PDF
-		// input), async, progress over the same /ws/agent/:jobid socket.
-		agent.POST("/import-plan", h.ImportPlan)
+			// Plan import: multipart PDF upload of a plan the user already has,
+			// transposed onto the roadmap model by Claude. Anthropic-only (PDF
+			// input), async, progress over the same /ws/agent/:jobid socket.
+			billed.POST("/import-plan", h.ImportPlan)
 
-		// Anthropic-based conversational chat endpoint
-		// Multi-turn conversation with tool use for roadmap generation, editing, and coaching
-		agent.POST("/chat", h.Chat)
+			// Anthropic-based conversational chat endpoint
+			// Multi-turn conversation with tool use for roadmap generation, editing, and coaching
+			billed.POST("/chat", h.Chat)
+		}
+
 		agent.DELETE("/chat/session/:session_id", h.EndChatSession)
 
 		// DEPRECATED: these never had a working implementation (no persistence, no
@@ -377,12 +389,11 @@ func setupWebSocketRoutes(rg *gin.RouterGroup, agent *handlers.AgentHandler, mes
 	}
 }
 
-func setupHealthRoutes(router *gin.Engine) {
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "dr-server"})
-	})
-
-	router.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
+// setupHealthRoutes wires the probes. /health is liveness (shallow, never
+// touches the DB); /healthz is readiness (pings the DB, 503s when it can't).
+// fly.toml's http_service check points at /healthz — see HealthHandler for why
+// the split matters.
+func setupHealthRoutes(router *gin.Engine, h *handlers.HealthHandler) {
+	router.GET("/health", h.Live)
+	router.GET("/healthz", h.Ready)
 }

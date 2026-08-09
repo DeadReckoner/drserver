@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"os"
 	"time"
@@ -124,8 +125,11 @@ func AdminAuthMiddleware() gin.HandlerFunc {
 				gin.H{"error": "Admin endpoints disabled: ADMIN_API_KEY not configured"})
 			return
 		}
+		// Constant-time: this endpoint is reachable without a Supabase JWT and
+		// has no rate limit in front of it, so a length-or-prefix-dependent
+		// comparison is the kind of thing worth not having.
 		got := c.GetHeader("X-Admin-Key")
-		if got != expected {
+		if subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
 			c.AbortWithStatusJSON(http.StatusForbidden,
 				gin.H{"error": "Invalid or missing X-Admin-Key"})
 			return

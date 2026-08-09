@@ -6,6 +6,7 @@ import (
 	"dr/server/api/routes"
 	"dr/server/auth/apple"
 	"dr/server/log"
+	"dr/server/middleware"
 	"dr/server/storage"
 	"os"
 
@@ -35,6 +36,23 @@ func NewRouterWithOptions(db *gorm.DB, opts routes.Options) *gin.Engine {
 	}
 	h := handlers.NewHandlers(db, storageClient, appleClient)
 	return routes.SetupRoutesWithOptions(h, opts)
+}
+
+// NewHealthOnlyRouter builds a router that serves nothing but the liveness and
+// readiness probes. Used by the scheduler process group, which runs cron and
+// must not expose the API — it isn't attached to the public http_service, but
+// building the full route tree there would mean a second set of machines could
+// serve user traffic if that ever changed by accident.
+func NewHealthOnlyRouter(db *gorm.DB) *gin.Engine {
+	router := gin.New()
+	router.TrustedPlatform = gin.PlatformFlyIO
+	router.Use(middleware.RequestLogger())
+	router.Use(middleware.Recovery())
+
+	h := handlers.NewHealthHandler(db)
+	router.GET("/health", h.Live)
+	router.GET("/healthz", h.Ready)
+	return router
 }
 
 // NewRouterFromHandlers builds the router from a pre-built *handlers.Handlers

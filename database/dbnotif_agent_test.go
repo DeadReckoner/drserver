@@ -147,3 +147,117 @@ func TestUpdateBackgroundJob_UpdateError_Propagates(t *testing.T) {
 	err := UpdateBackgroundJob(context.Background(), &types.BackgroundJob{JobID: dbnotifJobID, Status: string(types.JobStatusFailed)})
 	assert.ErrorContains(t, err, "update failed")
 }
+
+// --- FailStaleJobs -----------------------------------------------------------
+// The reaper's recovery path. What matters: it only claims pending/processing
+// rows past the cutoff, the claim is atomic (UPDATE ... RETURNING) so two
+// machines can't both reap the same job, and it never downgrades a roadmap
+// that already reached 'completed'.
+
+const dbnotifStaleRoadmapID = "11111111-2222-3333-4444-555555555555"
+
+// expectClaim sets up the atomic claim: UPDATE ... RETURNING * over every
+// pending/processing job older than the cutoff.
+func expectClaim(mock sqlmock.Sqlmock, cutoff time.Time, rows *sqlmock.Rows) {
+	mock.ExpectBegin()
+	mock.ExpectQuery(`UPDATE "background_jobs" SET "completed_at"=\$1,"error"=\$2,"status"=\$3,"updated_at"=\$4 WHERE status IN \(\$5,\$6\) AND updated_at < \$7 RETURNING \*`).
+		WithArgs(dbnotifNonZeroTime{}, StaleJobError, string(types.JobStatusFailed), dbnotifNonZeroTime{},
+			string(types.JobStatusPending), string(types.JobStatusProcessing), cutoff).
+		WillReturnRows(rows)
+	mock.ExpectCommit()
+}
+
+func TestFailStaleJobs_ClaimsOnlyUnfinishedJobsPastCutoff(t *testing.T) {
+	cutoff := time.Date(2026, 8, 8, 11, 45, 0, 0, time.UTC)
+	mock := withMockDB(t)
+
+	// Empty claim short-circuits: no roadmap lookup, no roadmap update.
+	expectClaim(mock, cutoff, sqlmock.NewRows([]string{"job_id"}))
+
+	stale, err := FailStaleJobs(cutoff)
+	require.NoError(t, err)
+	assert.Empty(t, stale)
+}
+
+func TestFailStaleJobs_ReturnsClaimedJobsWithTheirRoadmaps(t *testing.T) {
+	cutoff := time.Date(2026, 8, 8, 11, 45, 0, 0, time.UTC)
+	mock := withMockDB(t)
+
+	expectClaim(mock, cutoff, sqlmock.NewRows([]string{"job_id", "user_id", "type"}).
+		AddRow(dbnotifJobID, testUserID, string(types.JobTypeRoadmap)))
+
+	mock.ExpectQuery(`SELECT "roadmap_id","job_id" FROM "roadmaps" WHERE job_id IN \(\$1\)`).
+		WithArgs(dbnotifJobID).
+		WillReturnRows(sqlmock.NewRows([]string{"roadmap_id", "job_id"}).
+			AddRow(dbnotifStaleRoadmapID, dbnotifJobID))
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "roadmaps" SET "generation_status"=\$1 WHERE job_id IN \(\$2\) AND generation_status = \$3`).
+		WithArgs(string(types.GenerationStatusFailed), dbnotifJobID, string(types.GenerationStatusProcessing)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	stale, err := FailStaleJobs(cutoff)
+	require.NoError(t, err)
+	require.Len(t, stale, 1)
+	assert.Equal(t, dbnotifJobID, stale[0].JobID)
+	assert.Equal(t, testUserID, stale[0].UserID)
+	assert.Equal(t, dbnotifStaleRoadmapID, stale[0].RoadmapID,
+		"caller needs the roadmap id to tell the user which goal died")
+}
+
+// A job with no draft roadmap (or whose roadmap was already deleted) still
+// gets reaped — it just carries an empty RoadmapID.
+func TestFailStaleJobs_JobWithoutRoadmapStillReaped(t *testing.T) {
+	cutoff := time.Date(2026, 8, 8, 11, 45, 0, 0, time.UTC)
+	mock := withMockDB(t)
+
+	expectClaim(mock, cutoff, sqlmock.NewRows([]string{"job_id", "user_id", "type"}).
+		AddRow(dbnotifJobID, testUserID, string(types.JobTypeMilestone)))
+
+	mock.ExpectQuery(`SELECT "roadmap_id","job_id" FROM "roadmaps"`).
+		WillReturnRows(sqlmock.NewRows([]string{"roadmap_id", "job_id"}))
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "roadmaps"`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	stale, err := FailStaleJobs(cutoff)
+	require.NoError(t, err)
+	require.Len(t, stale, 1)
+	assert.Empty(t, stale[0].RoadmapID)
+}
+
+// Guards the data-loss case: a job that finished its work but died before
+// marking itself done leaves a COMPLETED roadmap. The generation_status
+// predicate is what stops the reaper from failing a perfectly good roadmap.
+func TestFailStaleJobs_LeavesCompletedRoadmapsAlone(t *testing.T) {
+	cutoff := time.Date(2026, 8, 8, 11, 45, 0, 0, time.UTC)
+	mock := withMockDB(t)
+
+	expectClaim(mock, cutoff, sqlmock.NewRows([]string{"job_id", "user_id", "type"}).
+		AddRow(dbnotifJobID, testUserID, string(types.JobTypeRoadmap)))
+	mock.ExpectQuery(`SELECT "roadmap_id","job_id" FROM "roadmaps"`).
+		WillReturnRows(sqlmock.NewRows([]string{"roadmap_id", "job_id"}).
+			AddRow(dbnotifStaleRoadmapID, dbnotifJobID))
+	mock.ExpectBegin()
+	// The predicate must pin generation_status='processing'; without it this
+	// UPDATE would clobber completed roadmaps.
+	mock.ExpectExec(`UPDATE "roadmaps" SET "generation_status"=\$1 WHERE job_id IN \(\$2\) AND generation_status = \$3`).
+		WithArgs(string(types.GenerationStatusFailed), dbnotifJobID, string(types.GenerationStatusProcessing)).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+
+	_, err := FailStaleJobs(cutoff)
+	require.NoError(t, err)
+}
+
+func TestFailStaleJobs_ClaimError_Propagates(t *testing.T) {
+	mock := withMockDB(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`UPDATE "background_jobs"`).WillReturnError(errors.New("claim failed"))
+	mock.ExpectRollback()
+
+	_, err := FailStaleJobs(time.Now())
+	assert.ErrorContains(t, err, "claim failed")
+}

@@ -1,0 +1,39 @@
+# Everything here is excluded from the Docker build context. The context was
+# ~64MB, almost all of it git history and local Claude Code worktrees (each a
+# full copy of the repo), none of which the build needs.
+
+# Version control
+.git
+.gitignore
+.github
+
+# Local Claude Code state — .claude/worktrees holds complete repo copies
+.claude
+
+# Secrets and local env — must never enter an image layer
+.env
+.env.*
+*.pem
+*.key
+
+# Docs, notes, and API collections: not compiled, not served
+docs
+README.md
+CLAUDE.md
+openapi.yaml
+
+# Supabase migrations are applied out-of-band via the CLI, not by the server
+supabase
+
+# Editor/OS noise
+.vscode
+.idea
+.DS_Store
+logfile
+
+# Build outputs — never ship a host-built binary into the image
+main
+drserver
+*.test
+*.out
+coverage.*
