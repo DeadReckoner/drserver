@@ -17,8 +17,9 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-func TestHealthEndpoint(t *testing.T) {
-	// Health endpoints don't use the database, so we can pass nil
+// /health is liveness: it answers "is this process running", never touches the
+// database, and so still succeeds with a nil DB.
+func TestHealthEndpoint_LivenessIgnoresDatabase(t *testing.T) {
 	router := NewRouter(nil)
 
 	req, _ := http.NewRequest("GET", "/health", nil)
@@ -33,19 +34,25 @@ func TestHealthEndpoint(t *testing.T) {
 	assert.Equal(t, "dr-server", response["service"])
 }
 
-func TestHealthzEndpoint(t *testing.T) {
-	// Health endpoints don't use the database, so we can pass nil
+// /healthz is readiness: it answers "can this instance serve traffic", which
+// requires a reachable database. With no DB it must report unavailable — that
+// 503 is what keeps a broken instance out of the load balancer's rotation.
+func TestHealthzEndpoint_ReadinessFailsWithoutDatabase(t *testing.T) {
 	router := NewRouter(nil)
 
 	req, _ := http.NewRequest("GET", "/healthz", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	var response map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
-	assert.Equal(t, "ok", response["status"])
+	assert.Equal(t, "unavailable", response["status"])
+
+	checks, ok := response["checks"].(map[string]interface{})
+	assert.True(t, ok, "response should report which check failed")
+	assert.Equal(t, "unreachable", checks["database"])
 }
 
 func TestUUIDValidationMiddleware(t *testing.T) {
@@ -169,4 +176,37 @@ func TestResponseUtilities(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, response["items"])
 	})
+}
+
+// The scheduler process group runs this router. It must serve the probes so
+// Fly can health check it, and must NOT serve the API — nothing public routes
+// to those machines today, and a router that could serve traffic is one
+// misconfiguration away from doing so.
+func TestNewHealthOnlyRouter_ServesProbes(t *testing.T) {
+	router := NewHealthOnlyRouter(nil)
+
+	for _, path := range []string{"/health", "/healthz"} {
+		req, _ := http.NewRequest("GET", path, nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.NotEqual(t, http.StatusNotFound, w.Code, "%s should be routed", path)
+	}
+}
+
+func TestNewHealthOnlyRouter_DoesNotServeAPI(t *testing.T) {
+	router := NewHealthOnlyRouter(nil)
+
+	for _, path := range []string{
+		"/api/v1/users",
+		"/api/v1/roadmaps",
+		"/api/v1/agent/generate-async",
+		"/admin/users/550e8400-e29b-41d4-a716-446655440000/plan",
+		"/webhooks/revenuecat",
+	} {
+		req, _ := http.NewRequest("GET", path, nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code,
+			"%s must not be routed on the scheduler process", path)
+	}
 }

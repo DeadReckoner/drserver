@@ -5,12 +5,22 @@ import (
 	"dr/server/api"
 	"dr/server/database"
 	"dr/server/notifications/jobs"
+	"dr/server/observability"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	// Embeds the IANA timezone database in the binary as a fallback for when
+	// the host has none. Quiet hours and digest delivery resolve each user's
+	// local time via time.LoadLocation, and both callers treat a lookup
+	// failure as "use UTC" *silently* (notifications/resolver.go:203,
+	// types/types.go:643). On a base image without tzdata that means every
+	// user's quiet hours are computed in UTC and nothing logs a complaint.
+	// This import makes correctness independent of the runtime image.
+	_ "time/tzdata"
 
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
@@ -56,6 +66,12 @@ func setupScheduler(db *gorm.DB) *cron.Cron {
 	mustRegister(c, "* * * * *", "deliver_pending", jobs.DeliverPendingNotifications(db))
 	mustRegister(c, "0 * * * *", "cleanup_delivery_log", jobs.CleanupDeliveryLog(db))
 
+	// Recovery, not notification work: generation goroutines run detached from
+	// the request and die with the process, so this is what unsticks a user
+	// whose roadmap was mid-generation during a deploy. Every 5 minutes bounds
+	// how long they wait past the staleness timeout itself.
+	mustRegister(c, "*/5 * * * *", "reap_stale_jobs", jobs.ReapStaleJobs(db))
+
 	return c
 }
 
@@ -72,17 +88,43 @@ func mustRegister(c *cron.Cron, spec, name string, fn func()) {
 func main() {
 	ctx := context.Background()
 
+	role, err := resolveRole(os.Args[1:])
+	if err != nil {
+		log.Fatalf("invalid role: %v", err)
+	}
+
+	// Error reporting first, so a panic during the rest of startup is still
+	// reported. No-op unless SENTRY_DSN is set.
+	flushSentry := observability.Init()
+	defer flushSentry()
+
 	db := database.Connect(ctx)
 
-	scheduler := setupScheduler(db)
-	scheduler.Start()
-	log.Printf("Scheduler started with %d jobs", len(scheduler.Entries()))
+	// Cron runs only where the role says it should. Running it on every web
+	// machine would double-fire every scan.
+	var scheduler *cron.Cron
+	if role.runsScheduler() {
+		scheduler = setupScheduler(db)
+		scheduler.Start()
+		log.Printf("[%s] Scheduler started with %d jobs", role, len(scheduler.Entries()))
+	}
 
-	router := api.NewRouter(db)
+	// The scheduler-only process still serves HTTP, but just the probes: Fly
+	// needs something to health check, and a wedged scheduler should be
+	// restartable. It is not attached to the public http_service, so these
+	// routes are only reachable inside the private network.
+	var handler http.Handler
+	if role.runsWeb() {
+		handler = api.NewRouter(db)
+		log.Printf("[%s] API routes registered", role)
+	} else {
+		handler = api.NewHealthOnlyRouter(db)
+		log.Printf("[%s] health-only routes registered", role)
+	}
 
 	srv := &http.Server{
 		Addr:    ":8080",
-		Handler: router,
+		Handler: handler,
 	}
 
 	go func() {
@@ -103,12 +145,14 @@ func main() {
 	// Stop the scheduler first; cron.Stop() returns a context that's done
 	// when in-flight jobs finish. We bound the wait so a hung job doesn't
 	// keep the process alive past the shutdown deadline.
-	stopCtx := scheduler.Stop()
-	select {
-	case <-stopCtx.Done():
-		log.Println("Scheduler stopped cleanly")
-	case <-time.After(5 * time.Second):
-		log.Println("Scheduler shutdown timed out; in-flight jobs were interrupted")
+	if scheduler != nil {
+		stopCtx := scheduler.Stop()
+		select {
+		case <-stopCtx.Done():
+			log.Println("Scheduler stopped cleanly")
+		case <-time.After(5 * time.Second):
+			log.Println("Scheduler shutdown timed out; in-flight jobs were interrupted")
+		}
 	}
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {

@@ -8,25 +8,82 @@ primary_region = 'ewr'
 
 [build]
 
+# Two process groups, because they have opposite scaling constraints.
+#
+# The scheduler is in-process cron with no distributed locking, so it must run
+# on EXACTLY ONE machine — two would double-fire every scan. The API has the
+# opposite need: more than one machine, so a deploy can roll without dropping
+# traffic and a lost machine isn't an outage.
+#
+# Previously both lived in one process, so the scheduler's constraint won and
+# the whole app was pinned to a single machine. Splitting them lets each side
+# scale on its own terms. The role flag is read in role.go; running the binary
+# with no arguments still does both, which is what local development wants.
+[processes]
+  app = '--role=web'
+  scheduler = '--role=scheduler'
+
 [http_service]
   internal_port = 8080
   force_https = true
-  # Phase 1 of the notification scheduler runs in-process via robfig/cron.
-  # Pin to exactly one machine so we don't get duplicate scans firing the
-  # same notification from two workers. Auto-stop is off so the machine
-  # stays warm for periodic cron ticks even when HTTP traffic is idle.
-  # When Phase 2 (dedicated worker process) lands, revisit these.
-  auto_stop_machines = 'off'
-  auto_start_machines = true
-  min_machines_running = 1
-  max_machines_running = 1
+  # Only the web group serves public traffic. The scheduler group has no
+  # http_service, so it is unreachable from the internet — it only listens
+  # internally so Fly can health check it (see [checks] below).
   processes = ['app']
+
+  # min 2 is what buys zero-downtime deploys and redundancy: Fly can cycle one
+  # machine while the other serves. Going back to 1 reintroduces the outage on
+  # every deploy.
+  #
+  # auto_stop/auto_start let the group scale down to min during quiet periods
+  # and back up under load. 'suspend' resumes faster than a cold boot.
+  auto_stop_machines = 'suspend'
+  auto_start_machines = true
+  min_machines_running = 2
+  max_machines_running = 4
+
+  # Readiness, not liveness. /healthz pings Postgres and 503s when it can't
+  # reach it, so a machine that is up but can't serve gets pulled from
+  # rotation instead of accepting requests it will only fail. /health is the
+  # shallow probe and is deliberately NOT used here — pointing a check that
+  # can cycle a machine at a database-dependent endpoint turns a brief
+  # Supabase blip into a restart loop.
+  #
+  # grace_period covers boot + first DB connect.
+  [[http_service.http_checks]]
+    interval = '15s'
+    timeout = '5s'
+    grace_period = '20s'
+    method = 'GET'
+    path = '/healthz'
+
+# Health checking for the scheduler group. It has no http_service (nothing
+# public routes to it), so it gets a machine-level check instead. This exposes
+# no ports — it exists so a wedged scheduler is restarted rather than silently
+# ceasing to send every notification in the system.
+[checks]
+  [checks.scheduler_alive]
+    type = 'http'
+    port = 8080
+    processes = ['scheduler']
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '20s'
+    method = 'GET'
+    path = '/healthz'
 
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
+  processes = ['app']
 
+# The scheduler does periodic scans, not request serving, so it needs less.
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
+  processes = ['scheduler']
 
 [env]
   # Only non-secret configuration belongs here: this file is tracked in git.
