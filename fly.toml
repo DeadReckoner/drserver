@@ -50,7 +50,13 @@ primary_region = 'ewr'
   # Supabase blip into a restart loop.
   #
   # grace_period covers boot + first DB connect.
-  [[http_service.http_checks]]
+  #
+  # NOTE the key is `http_service.checks`, NOT `http_service.http_checks`.
+  # `http_checks` belongs to the older `[[services]]` block; under
+  # `[http_service]` it is an unknown key that `fly config validate` accepts
+  # and then silently ignores, leaving the machines with no checks at all.
+  # Verify with `fly checks list`, not with validate.
+  [[http_service.checks]]
     interval = '15s'
     timeout = '5s'
     grace_period = '20s'
