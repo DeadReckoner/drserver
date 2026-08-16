@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"dr/server/analytics"
 	"dr/server/database"
 	"dr/server/log"
 	"dr/server/notifications"
@@ -71,6 +72,14 @@ func (h *RoadmapHandler) CreateRoadmap(c *gin.Context) {
 		utils.InternalErrorResponse(c, err)
 		return
 	}
+
+	// Ids and the roadmap's provenance only — never the goal text the user
+	// typed, which is the single most sensitive field in the product.
+	analytics.Emit(ctx, analytics.EventGoalCreated, analytics.Props(
+		"roadmap_id", createdRoadmap.RoadmapID,
+		"goal_id", createdRoadmap.RoadmapID,
+		"source_screen", createdRoadmap.Type,
+	))
 
 	utils.DataResponse(c, http.StatusCreated, createdRoadmap)
 	log.Info(ctx, "Roadmap created successfully")
@@ -329,8 +338,44 @@ func (h *RoadmapHandler) StartRoadmap(c *gin.Context) {
 	// Refresh the roadmap to get the computed statuses
 	updatedRoadmap := database.GetRoadmapFull(c, roadmapID)
 
+	// Starting a roadmap is the activation moment: it is when the plan gets
+	// real dates and the user's first scheduled action comes into existence.
+	// Both events fire here because the CEO scorecard counts activated
+	// roadmaps while the funnel counts activated goals, and they are the same
+	// act — keeping them as one event would force one of the two dashboards to
+	// use the other's vocabulary.
+	analytics.Emit(ctx, analytics.EventRoadmapActivated, analytics.Props(
+		"roadmap_id", roadmapID,
+		"goal_id", roadmapID,
+		"count", countScheduledTasks(updatedRoadmap),
+	))
+	analytics.Emit(ctx, analytics.EventGoalActivated, analytics.Props(
+		"roadmap_id", roadmapID,
+		"goal_id", roadmapID,
+	))
+
 	utils.DataResponse(c, http.StatusOK, updatedRoadmap)
 	log.Info(ctx, "Roadmap started successfully")
+}
+
+// countScheduledTasks totals the tasks a started roadmap put on the calendar,
+// across both the phase hierarchy and the legacy top-level milestones.
+//
+// Recorded at activation because it is the denominator's starting point: a
+// roadmap that activates with three tasks and one that activates with sixty
+// produce very different completion rates, and without the count those look
+// identical in aggregate.
+func countScheduledTasks(r types.Roadmap) int {
+	total := 0
+	for _, phase := range r.Phases {
+		for _, m := range phase.Milestones {
+			total += len(m.Tasks)
+		}
+	}
+	for _, m := range r.Milestones {
+		total += len(m.Tasks)
+	}
+	return total
 }
 
 // dateMilestones and dateTasks place an item at startDate + (Day - dayZero),
@@ -392,6 +437,12 @@ func (h *RoadmapHandler) CreateAnchorRequest(c *gin.Context) {
 		return
 	}
 
+	analytics.Emit(ctx, analytics.EventAnchorInviteSent, analytics.Props(
+		"anchor_relationship_id", anchorRequest.RequestID,
+		"roadmap_id", roadmapID,
+		"item_type", "roadmap",
+	))
+
 	utils.DataResponse(c, http.StatusCreated, anchorRequest)
 	log.Info(ctx, "Anchor request created successfully")
 
@@ -432,6 +483,22 @@ func (h *RoadmapHandler) AcceptAnchorRequest(c *gin.Context) {
 		return
 	}
 
+	// Acceptance and relationship activation are the same instant today, but
+	// they answer different questions — invite conversion versus how many
+	// live anchor relationships exist — so both are recorded rather than
+	// leaving one to be inferred.
+	analytics.Emit(ctx, analytics.EventAnchorInviteAccepted, analytics.Props(
+		"anchor_relationship_id", anchorRequest.RequestID,
+		"roadmap_id", derefID(anchorRequest.RoadmapID),
+		"item_type", "roadmap",
+	))
+	analytics.Emit(ctx, analytics.EventAnchorRelationshipActivated, analytics.Props(
+		"anchor_relationship_id", anchorRequest.RequestID,
+		"roadmap_id", derefID(anchorRequest.RoadmapID),
+		"item_type", "roadmap",
+		"anchor_active", true,
+	))
+
 	utils.DataResponse(c, http.StatusOK, anchorRequest)
 	log.Info(ctx, "Anchor request accepted successfully")
 
@@ -469,6 +536,12 @@ func (h *RoadmapHandler) RejectAnchorRequest(c *gin.Context) {
 		utils.InternalErrorResponse(c, err)
 		return
 	}
+
+	analytics.Emit(ctx, analytics.EventAnchorInviteDeclined, analytics.Props(
+		"anchor_relationship_id", anchorRequest.RequestID,
+		"roadmap_id", derefID(anchorRequest.RoadmapID),
+		"item_type", "roadmap",
+	))
 
 	utils.DataResponse(c, http.StatusOK, anchorRequest)
 	log.Info(ctx, "Anchor request rejected successfully")
@@ -1010,4 +1083,14 @@ func (h *RoadmapHandler) CopySharedRoadmap(c *gin.Context) {
 
 	utils.DataResponse(c, http.StatusCreated, roadmap)
 	log.Info(ctx, "Shared roadmap copied successfully")
+}
+
+// derefID returns the value of a nullable id column, or "" when unset.
+// Anchor requests target either a roadmap or a habit, so exactly one of the
+// two id columns is populated on any given row.
+func derefID(id *string) string {
+	if id == nil {
+		return ""
+	}
+	return *id
 }

@@ -29,6 +29,13 @@ func NewProvider() *Provider {
 
 func (p *Provider) Name() string { return "anthropic" }
 
+// GenerationModel is the model every generation call in this package uses.
+// Declared once so the value reported to observability cannot drift from the
+// value actually sent to the API.
+const GenerationModel = anthropic.ModelClaudeSonnet4_6
+
+func (p *Provider) Model() string { return string(GenerationModel) }
+
 // GenerateStrategicRoadmap generates the high-level roadmap with phases and milestones
 func (p *Provider) GenerateStrategicRoadmap(ctx context.Context, goalReq types.GoalRequest) (*types.Roadmap, error) {
 	log.Info(ctx, "Starting Anthropic strategic roadmap generation")
@@ -39,7 +46,7 @@ func (p *Provider) GenerateStrategicRoadmap(ctx context.Context, goalReq types.G
 
 	// Call Anthropic with tool use
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaudeSonnet4_6,
+		Model:     GenerationModel,
 		MaxTokens: 8192,
 		System: []anthropic.TextBlockParam{
 			{Text: systemPrompt},
@@ -87,7 +94,7 @@ func (p *Provider) GenerateMilestoneTasks(ctx context.Context, goalReq types.Goa
 	tool := milestoneTasksTool()
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaudeSonnet4_6,
+		Model:     GenerationModel,
 		MaxTokens: 8192,
 		System: []anthropic.TextBlockParam{
 			{Text: systemPrompt},
@@ -157,7 +164,7 @@ func (p *Provider) GenerateNextMilestoneFromReview(
 	tool := milestoneTasksTool()
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaudeSonnet4_6,
+		Model:     GenerationModel,
 		MaxTokens: 8192,
 		System: []anthropic.TextBlockParam{
 			{Text: systemPrompt},
@@ -200,7 +207,7 @@ func (p *Provider) generateAdjustments(ctx context.Context, userPrompt, mileston
 	tool := adjustmentsTool()
 
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.ModelClaudeSonnet4_6,
+		Model:     GenerationModel,
 		MaxTokens: 4096,
 		System: []anthropic.TextBlockParam{
 			{Text: systemPrompt},

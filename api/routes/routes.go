@@ -55,6 +55,10 @@ func setupV1Routes(router *gin.Engine, h *handlers.Handlers, opts Options) {
 	// shared secret depending on provider). No Supabase JWT.
 	setupWebhookRoutes(router, h.Webhook)
 
+	// Analytics ingest. Registered outside the authenticated group because the
+	// events that matter most here happen before the user has an account.
+	setupEventRoutes(router, h.Event)
+
 	auth := opts.AuthMiddleware
 	if auth == nil {
 		auth = middleware.AuthMiddleware()
@@ -105,6 +109,21 @@ func setupAdminRoutes(router *gin.Engine, h *handlers.AdminHandler) {
 
 func setupWebhookRoutes(router *gin.Engine, h *handlers.WebhookHandler) {
 	router.POST("/webhooks/revenuecat", h.RevenueCatWebhook)
+}
+
+// setupEventRoutes wires the client analytics ingest endpoint.
+//
+// The middleware order is load-bearing: optional auth first so the rate
+// limiter can key on the user when there is one, then the request-context
+// middleware so every accepted event inherits the same request id, platform,
+// and app version as any other request.
+func setupEventRoutes(router *gin.Engine, h *handlers.EventHandler) {
+	router.POST("/api/v1/events",
+		middleware.OptionalAuthMiddleware(),
+		middleware.EventIngestRateLimit(),
+		middleware.AdminMiddleware(),
+		h.Ingest,
+	)
 }
 
 func setupUserRoutes(rg *gin.RouterGroup, h *handlers.UserHandler) {

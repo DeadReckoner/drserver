@@ -4,8 +4,10 @@ import (
 	"context"
 	"dr/server/agent"
 	"dr/server/agent/anthropic"
+	"dr/server/analytics"
 	"dr/server/database"
 	"dr/server/log"
+	"dr/server/middleware"
 	"dr/server/notifications"
 	"dr/server/types"
 	"dr/server/websocket"
@@ -152,7 +154,7 @@ func (h *AgentHandler) AgentGenerateAsync(c *gin.Context) {
 
 	// Use background context for the goroutine so it doesn't get cancelled when the HTTP request completes
 	// Create logger with JobID as correlation ID for tracking
-	bgCtx := log.WithLogger(context.Background(), log.NewLogger(job.JobID))
+	bgCtx := middleware.DetachRequestContext(c.Request.Context(), job.JobID)
 	go processRoadmapGeneration(bgCtx, h.provider, job.JobID, draft.RoadmapID, userID, req)
 
 	c.JSON(http.StatusAccepted, gin.H{
@@ -244,17 +246,57 @@ func processRoadmapGeneration(ctx context.Context, provider agent.Provider, jobI
 	// The HTTP request only enqueues this work, so its access-log duration_ms
 	// can't measure this. The defer covers every exit path; outcome stays
 	// "failed" unless the success path sets it.
+	//
+	// errCode is set alongside outcome on the failure paths so the dashboard
+	// can break failures down by cause rather than showing one flat count —
+	// a provider outage and a malformed-response bug need different responses
+	// and should not look the same on a chart.
 	start := time.Now()
 	outcome := "failed"
+	errCode := ""
+	requestID := middleware.GetRequestID(ctx)
+
+	analytics.Emit(ctx, analytics.EventRoadmapGenerationStarted, analytics.Props(
+		"job_id", jobID,
+		"roadmap_id", roadmapID,
+		"provider", provider.Name(),
+		"model", provider.Model(),
+	))
+
 	defer func() {
-		log.FromContext(ctx).LogAttrs(log.LevelInfo, "roadmap generation finished",
+		durationMs := time.Since(start).Milliseconds()
+
+		attrs := []slog.Attr{
 			slog.String("job_id", jobID),
 			slog.String("roadmap_id", roadmapID),
 			slog.String("user_id", userID),
+			slog.String("request_id", requestID),
 			slog.String("provider", provider.Name()),
+			slog.String("model", provider.Model()),
 			slog.String("outcome", outcome),
-			slog.Int64("generation_ms", time.Since(start).Milliseconds()),
+			slog.Int("retry_count", 0),
+			slog.Int64("generation_ms", durationMs),
+		}
+		if errCode != "" {
+			attrs = append(attrs, slog.String("error_code", errCode))
+		}
+		log.FromContext(ctx).LogAttrs(log.LevelInfo, "roadmap generation finished", attrs...)
+
+		event := analytics.EventRoadmapGenerationSucceeded
+		props := analytics.Props(
+			"job_id", jobID,
+			"roadmap_id", roadmapID,
+			"provider", provider.Name(),
+			"model", provider.Model(),
+			"outcome", outcome,
+			"generation_ms", durationMs,
+			"retry_count", 0,
 		)
+		if outcome != "completed" {
+			event = analytics.EventRoadmapGenerationFailed
+			props["error_code"] = errCode
+		}
+		analytics.Emit(ctx, event, props)
 	}()
 
 	log.Info(ctx, "Starting roadmap generation process", fmt.Sprintf("JobID: %s, RoadmapID: %s, UserID: %s", jobID, roadmapID, userID))
@@ -268,7 +310,14 @@ func processRoadmapGeneration(ctx context.Context, provider agent.Provider, jobI
 	// Step 1: Generate strategic roadmap (phases with milestones)
 	roadmap, err := provider.GenerateStrategicRoadmap(ctx, req)
 	if err != nil {
-		log.Info(ctx, "Strategic roadmap generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
+		errCode = log.ErrorCode(err)
+		log.Failure(ctx, log.FailureAIProvider, errCode, err,
+			slog.String("provider", provider.Name()),
+			slog.String("model", provider.Model()),
+			slog.String("stage", "strategic_roadmap"),
+			slog.String("job_id", jobID),
+			slog.String("roadmap_id", roadmapID),
+		)
 		handleGenerationError(jobID, roadmapID, userID, err)
 		return
 	}
@@ -289,7 +338,14 @@ func processRoadmapGeneration(ctx context.Context, provider agent.Provider, jobI
 	if firstMilestone != nil {
 		tasks, err := provider.GenerateMilestoneTasks(ctx, req, firstMilestone)
 		if err != nil {
-			log.Info(ctx, "Milestone tasks generation failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
+			errCode = log.ErrorCode(err)
+			log.Failure(ctx, log.FailureAIProvider, errCode, err,
+				slog.String("provider", provider.Name()),
+				slog.String("model", provider.Model()),
+				slog.String("stage", "milestone_tasks"),
+				slog.String("job_id", jobID),
+				slog.String("roadmap_id", roadmapID),
+			)
 			handleGenerationError(jobID, roadmapID, userID, err)
 			return
 		}
@@ -304,6 +360,12 @@ func processRoadmapGeneration(ctx context.Context, provider agent.Provider, jobI
 	roadmap.Type = string(types.RoadmapTypeAIGenerated)
 
 	if err := database.UpdateRoadmapWithGeneration(ctx, roadmap); err != nil {
+		errCode = log.ErrorCode(err)
+		log.Failure(ctx, log.FailureDatabase, errCode, err,
+			slog.String("stage", "persist_generation"),
+			slog.String("job_id", jobID),
+			slog.String("roadmap_id", roadmapID),
+		)
 		handleGenerationError(jobID, roadmapID, userID, err)
 		return
 	}
@@ -547,7 +609,7 @@ func (h *AgentHandler) AgentGenerateNextMilestoneAsync(c *gin.Context) {
 		return
 	}
 
-	bgCtx := log.WithLogger(context.Background(), log.NewLogger(job.JobID))
+	bgCtx := middleware.DetachRequestContext(c.Request.Context(), job.JobID)
 	go processNextMilestoneGeneration(bgCtx, h.provider, job.JobID, milestoneID, userID, req)
 
 	c.JSON(http.StatusAccepted, gin.H{

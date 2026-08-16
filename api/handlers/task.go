@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"dr/server/analytics"
 	"dr/server/database"
 	"dr/server/log"
 	"dr/server/types"
 	"fmt"
 	"net/http"
+	"time"
 
 	"dr/server/api/utils"
 
@@ -95,14 +97,61 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		return
 	}
 
+	// Capture completion state before the write so the event fires on the
+	// transition rather than on every PATCH. The client sends the whole task
+	// on any edit, so a completed task being renamed would otherwise emit a
+	// second completion and inflate the execution numbers.
+	wasCompleted := taskAlreadyCompleted(c, taskID, updatedTask)
+
 	task := h.service.Update(c, taskID, updatedTask)
 	if task.TaskID == "" {
 		utils.NotFoundResponse(c, "Task")
 		return
 	}
 
+	if task.Completed && !wasCompleted {
+		analytics.Emit(ctx, analytics.EventWorkItemCompleted, analytics.Props(
+			"work_item_id", task.TaskID,
+			"occurrence_id", taskOccurrenceID(task),
+			"item_type", analytics.ItemTypeOneTimeTask,
+			"milestone_id", task.MilestoneID,
+			"scheduled_date", formatDay(task.Date),
+		))
+	}
+
 	utils.DataResponse(c, http.StatusOK, task)
 	log.Info(ctx, "Task updated successfully")
+}
+
+// taskAlreadyCompleted reports whether the task was complete before this
+// update. Gated on the update actually setting completed, so the extra read
+// happens only on the request that could be a completion.
+func taskAlreadyCompleted(c *gin.Context, taskID string, update types.Task) bool {
+	if !update.Completed {
+		return false
+	}
+	prior := database.GetTask(c, taskID)
+	return prior.Completed
+}
+
+// taskOccurrenceID gives a roadmap task the same occurrence identity a habit
+// gets, keyed on its scheduled date. A roadmap task occurs once, so this is
+// effectively the task id — but emitting the field uniformly means execution
+// queries can treat every work item the same way instead of special-casing
+// item_type, and a recurring-task model later slots in without changing them.
+func taskOccurrenceID(task types.Task) string {
+	if task.Date == nil {
+		return analytics.OccurrenceID(task.TaskID, time.Time{})
+	}
+	return analytics.OccurrenceID(task.TaskID, *task.Date)
+}
+
+// formatDay renders a nullable schedule date as YYYY-MM-DD, or "" when unset.
+func formatDay(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format("2006-01-02")
 }
 
 func (h *TaskHandler) DeleteTask(c *gin.Context) {
@@ -154,6 +203,18 @@ func (h *TaskHandler) UpdateStep(c *gin.Context) {
 		return
 	}
 
+	// Substeps are progress within a work item, not a work item of their own,
+	// so they get their own event name and stay out of the completion-rate
+	// numerator. Counting them as completions would let one task with twenty
+	// steps outweigh twenty separate tasks.
+	if step.Completed {
+		analytics.Emit(ctx, analytics.EventWorkItemSubstepComplete, analytics.Props(
+			"work_item_id", taskID,
+			"item_type", analytics.ItemTypeRoadmapStep,
+			"step_index", step.Number,
+		))
+	}
+
 	utils.DataResponse(c, http.StatusOK, step)
 	log.Info(ctx, "Step updated successfully")
 }
@@ -187,6 +248,21 @@ func (h *TaskHandler) CompleteAllSteps(c *gin.Context) {
 		}
 		utils.InternalErrorResponse(c, err)
 		return
+	}
+
+	// This path cascades to completing the task itself, so it is a completion
+	// as much as a PATCH to the task is. Re-reading the task rather than
+	// assuming keeps the event honest if the cascade rules change, and gives
+	// the same occurrence_id the direct path would produce.
+	if task := database.GetTask(c, taskID); task.Completed {
+		analytics.Emit(ctx, analytics.EventWorkItemCompleted, analytics.Props(
+			"work_item_id", task.TaskID,
+			"occurrence_id", taskOccurrenceID(task),
+			"item_type", analytics.ItemTypeOneTimeTask,
+			"milestone_id", task.MilestoneID,
+			"scheduled_date", formatDay(task.Date),
+			"count", stepsCompleted,
+		))
 	}
 
 	c.JSON(http.StatusOK, gin.H{

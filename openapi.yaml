@@ -41,6 +41,80 @@ paths:
                     type: string
                     example: dr-server
 
+  # Product analytics ingest
+  /api/v1/events:
+    post:
+      summary: Report client product events
+      description: >
+        Accepts a batch of product-analytics events from the mobile app.
+        Authentication is optional: events that occur before signup (first app
+        open, signup started, paywall viewed) are attributed to the anonymous
+        install id supplied via the X-Anonymous-ID header.
+
+
+        The server rebuilds the event envelope from the request — user,
+        platform, app version — rather than trusting the payload, and rejects
+        event names outside the client-emittable allowlist. Server-authoritative
+        events (signup completion, action completion, any subscription event)
+        are recorded by the backend and are rejected here.
+
+
+        Always returns 202 for a well-formed request, reporting per-event
+        outcomes in the body, so a rejected event never triggers a client retry
+        loop. Duplicate event_ids are dropped, making batch retries safe.
+      tags: [Analytics]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                events:
+                  type: array
+                  maxItems: 100
+                  items:
+                    type: object
+                    required: [event_name]
+                    properties:
+                      event_id:
+                        type: string
+                        description: Client-generated unique id; used for dedupe on retry.
+                        example: 8f14e45f-ceea-467a-9f3a-2c1e7b9d4a10
+                      event_name:
+                        type: string
+                        example: paywall_viewed
+                      occurred_at:
+                        type: string
+                        format: date-time
+                        description: >
+                          When the event happened on the client. Honored only
+                          when plausible (not in the future, under 7 days old);
+                          otherwise server receipt time is used.
+                      properties:
+                        type: object
+                        additionalProperties: true
+                        description: >
+                          Filtered against a server-side allowlist. Keys outside
+                          it are dropped. Never include user-authored content.
+      responses:
+        '202':
+          description: Batch accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accepted:
+                    type: integer
+                  rejected:
+                    type: integer
+                  duplicates:
+                    type: integer
+        '429':
+          description: Rate limited
+
   /healthz:
     get:
       summary: Kubernetes health check
