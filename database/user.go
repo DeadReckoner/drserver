@@ -55,17 +55,33 @@ func GetUser(c *gin.Context) types.User {
 }
 
 func UpdateUser(user_id string, user types.User) *gorm.DB {
+	tx, _ := UpdateUserReturningPrior(user_id, user)
+	return tx
+}
+
+// UpdateUserReturningPrior updates the user and also returns the record as it
+// was before the write.
+//
+// The prior state is what tells a state change apart from a repeated
+// assertion of the same state — onboarding_completed going false→true is an
+// activation event, whereas the client resending it on every profile edit is
+// not. The update already has to read the row to build the GORM update, so
+// returning it costs nothing; querying separately would add a round trip to
+// the hot path purely to learn something already in hand.
+func UpdateUserReturningPrior(user_id string, user types.User) (*gorm.DB, types.User) {
 	var existingUser types.User
 	result := db.Where("user_id = ?", user_id).First(&existingUser)
 
-	if result.Error == nil {
-		// User exists, return success without error
-		tx := db.Model(&existingUser).Updates(user)
-		return tx
-	} else {
-		// Some error occurred
-		return &gorm.DB{Error: result.Error}
+	if result.Error != nil {
+		return &gorm.DB{Error: result.Error}, types.User{}
 	}
+
+	// Copied before Updates, which mutates existingUser in place with the
+	// applied changes — reading it afterwards would report the new state.
+	prior := existingUser
+
+	tx := db.Model(&existingUser).Updates(user)
+	return tx, prior
 }
 
 // DeleteUser removes the row identified by userID. The caller is responsible

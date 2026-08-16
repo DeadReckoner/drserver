@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -60,12 +61,14 @@ func (h *WebhookHandler) RevenueCatWebhook(c *gin.Context) {
 	// 2. Verify auth.
 	switch err := revenuecat.VerifyAuth(c.GetHeader("Authorization")); {
 	case errors.Is(err, revenuecat.ErrSecretNotConfigured):
-		log.Error(ctx, "RC webhook: REVENUECAT_WEBHOOK_SECRET not set", err)
+		log.Failure(ctx, log.FailureBilling, "secret_not_configured", err,
+			slog.String("provider", "revenuecat"))
 		c.JSON(http.StatusServiceUnavailable,
 			gin.H{"error": "webhook secret not configured"})
 		return
 	case errors.Is(err, revenuecat.ErrAuthMismatch):
-		log.Warn(ctx, "RC webhook: auth mismatch")
+		log.Failure(ctx, log.FailureBilling, log.CodeUnauthorized, nil,
+			slog.String("provider", "revenuecat"))
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	case err != nil:
@@ -92,7 +95,8 @@ func (h *WebhookHandler) RevenueCatWebhook(c *gin.Context) {
 	// 4. Idempotency check (outside tx - cheaper).
 	exists, err := database.EntitlementEventExists(h.db, env.Event.ID)
 	if err != nil {
-		log.Error(ctx, "RC webhook: idempotency lookup", err)
+		log.Failure(ctx, log.FailureDatabase, log.ErrorCode(err), err,
+			slog.String("stage", "rc_idempotency_lookup"))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "idempotency check"})
 		return
 	}
@@ -153,13 +157,27 @@ func (h *WebhookHandler) RevenueCatWebhook(c *gin.Context) {
 		return database.InsertEntitlementEvent(tx, &evtRow)
 	})
 	if txErr != nil {
-		log.Error(ctx, "RC webhook: tx", txErr)
+		log.Failure(ctx, log.FailureBilling, log.ErrorCode(txErr), txErr,
+			slog.String("provider", "revenuecat"),
+			slog.String("stage", "apply_and_persist"),
+			slog.String("event_type", env.Event.Type))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "persist"})
 		return
 	}
 
 	log.Info(ctx, "RC webhook: handled",
 		"event_id="+env.Event.ID, "type="+env.Event.Type, "apply="+applyStatus)
+
+	// Emitted after the transaction commits, so the product event and the
+	// entitlement state can never disagree — a rolled-back apply produces no
+	// event. userIDPtr is nil for events we could not map to a DR user; those
+	// still emit, without a user id, so revenue totals stay complete even
+	// though those rows drop out of per-user cohort analysis.
+	var analyticsUserID string
+	if userIDPtr != nil {
+		analyticsUserID = *userIDPtr
+	}
+	emitSubscriptionEvent(ctx, env.Event, analyticsUserID)
 
 	// 6. Dispatch lifecycle email if applicable. Fire-and-forget goroutine -
 	// email failures must not affect the webhook response (RC would retry

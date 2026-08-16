@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"dr/server/analytics"
 	"dr/server/log"
 	"dr/server/observability"
 	"encoding/json"
@@ -88,6 +89,55 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 
+}
+
+// OptionalAuthMiddleware resolves the user from a bearer token when one is
+// present and valid, and otherwise lets the request through unauthenticated.
+//
+// This exists for the analytics ingest endpoint, which has to accept events
+// from before the user has an account — first app open, signup started, the
+// paywall shown during onboarding. Requiring auth there would silently discard
+// the entire top of the funnel, which is exactly the part nothing else can
+// observe. A bad or missing token is not an error here: the event is simply
+// attributed to the anonymous install id instead of a user.
+//
+// It grants no access to anything. Only routes that are safe to serve
+// unauthenticated may use it.
+func OptionalAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader != "" {
+			if uid := parseToken(strings.TrimPrefix(authHeader, "Bearer ")); uid != "" {
+				c.Set("user_id", uid)
+			}
+		}
+		c.Next()
+	}
+}
+
+// EventIngestRateLimit bounds how often a single caller may post analytics
+// batches. Keyed by user when authenticated and by client IP otherwise.
+//
+// The endpoint is unauthenticated by necessity (see OptionalAuthMiddleware),
+// which makes it the one write path anyone on the internet can reach. The
+// limit is set well above what a correct client needs — the app batches and
+// flushes periodically, not per interaction — so it constrains only abuse and
+// runaway retry loops.
+func EventIngestRateLimit() gin.HandlerFunc {
+	limiter := NewRateLimiter(60, time.Minute)
+	limiter.StartEvictionSweep(5 * time.Minute)
+
+	return func(c *gin.Context) {
+		key := c.GetString("user_id")
+		if key == "" {
+			key = "ip:" + c.ClientIP()
+		}
+		if ok, retryAfter := limiter.Allow(key); !ok {
+			abortRateLimited(c, retryAfter, "Too many analytics requests.")
+			return
+		}
+		c.Next()
+	}
 }
 
 // curl -X GET 'http://127.0.0.1:54321/auth/v1/user' \
@@ -207,14 +257,21 @@ func verifyTokenWithSupabase(accessToken string) string {
 		return ""
 	}
 
-	// The response body is the full Supabase user record — emails, identities,
-	// sign-in history. That's PII, so it only ever logs at debug level.
-	// Routine token rejections (expired/invalid) come back non-200 and are
-	// worth a status-only line at warn.
+	// The response body is the full Supabase user record — email, identities,
+	// phone, sign-in history. It is never logged, at any level.
+	//
+	// This used to log the whole body at debug, relying on LOG_LEVEL=info in
+	// fly.toml to keep it out of production. That made a routine debugging
+	// step — flipping one env var to chase a bug — silently start writing user
+	// emails into a log aggregator, where they persist for the dataset's whole
+	// retention and are hard to retract. A log level is an operational knob,
+	// not a privacy control; the redaction belongs at the call site.
+	//
+	// Status alone is what this line was actually useful for, and it is kept.
 	if resp.StatusCode != http.StatusOK {
 		authLog.Warn("supabase auth: non-OK response", resp.Status)
 	}
-	authLog.Debug("supabase auth response", "status", resp.Status, "body", string(body))
+	authLog.Debug("supabase auth response", "status", resp.Status, "body_bytes", len(body))
 
 	var user AuthenticatedUser
 	if err := json.Unmarshal(body, &user); err != nil {
@@ -246,6 +303,20 @@ func AdminMiddleware() gin.HandlerFunc {
 		ctx := context.WithValue(c.Request.Context(), RequestIDKey, requestID)
 		ctx = log.WithLogger(ctx, logger)
 
+		// Attach the analytics identity once, here, so every product event
+		// emitted anywhere downstream inherits the same user, request, and
+		// client metadata without each handler assembling it by hand.
+		cc := ClientContext(c)
+		ctx = analytics.WithRequestContext(ctx, analytics.RequestContext{
+			UserID:      c.GetString("user_id"),
+			RequestID:   requestID,
+			Platform:    cc.Platform,
+			AppVersion:  cc.AppVersion,
+			BuildNumber: cc.BuildNumber,
+			AnonymousID: cc.AnonymousID,
+			SessionID:   cc.SessionID,
+		})
+
 		c.Request = c.Request.WithContext(ctx)
 
 		// Set the header
@@ -254,6 +325,60 @@ func AdminMiddleware() gin.HandlerFunc {
 		c.Next()
 
 	}
+}
+
+// Client metadata headers sent by the mobile app.
+const (
+	HeaderAppVersion  = "X-App-Version"
+	HeaderAppBuild    = "X-App-Build"
+	HeaderPlatform    = "X-Platform"
+	HeaderAnonymousID = "X-Anonymous-ID"
+	HeaderSessionID   = "X-Session-ID"
+)
+
+// ClientMeta is the app-identifying metadata a mobile request carries.
+type ClientMeta struct {
+	Platform    string
+	AppVersion  string
+	BuildNumber string
+	AnonymousID string
+	SessionID   string
+}
+
+// ClientContext extracts client metadata from request headers.
+//
+// Every value is sanitized: these are attacker-controlled strings that end up
+// as fields in the log aggregator and as dimensions in dashboards. An
+// unbounded header would let any caller write megabytes into the log stream,
+// and control characters would corrupt the JSON line a drain has to parse.
+// Bounding length and stripping non-printables costs nothing and removes both.
+func ClientContext(c *gin.Context) ClientMeta {
+	return ClientMeta{
+		Platform:    sanitizeHeader(c.GetHeader(HeaderPlatform), 16),
+		AppVersion:  sanitizeHeader(c.GetHeader(HeaderAppVersion), 32),
+		BuildNumber: sanitizeHeader(c.GetHeader(HeaderAppBuild), 32),
+		AnonymousID: sanitizeHeader(c.GetHeader(HeaderAnonymousID), 64),
+		SessionID:   sanitizeHeader(c.GetHeader(HeaderSessionID), 64),
+	}
+}
+
+// sanitizeHeader trims, truncates to max runes, and drops anything that isn't
+// printable ASCII.
+func sanitizeHeader(v string, max int) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range v {
+		if b.Len() >= max {
+			break
+		}
+		if r >= 0x20 && r < 0x7f {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // RequestLogger emits one structured JSON line per HTTP request once it
@@ -290,6 +415,25 @@ func RequestLogger() gin.HandlerFunc {
 		}
 		if uid := c.GetString("user_id"); uid != "" {
 			attrs = append(attrs, slog.String("user_id", uid))
+		}
+
+		// App version and platform, so error rates and latency can be split by
+		// client build. Without these, "the 500s all come from the version we
+		// shipped Tuesday" is not a question the data can answer — and it is
+		// usually the answer. Omitted rather than emitted empty for requests
+		// that carry no client headers (webhooks, probes, curl), which keeps
+		// those out of per-version aggregations instead of piling them into a
+		// blank bucket.
+		if cc := ClientContext(c); cc.AppVersion != "" || cc.Platform != "" {
+			if cc.Platform != "" {
+				attrs = append(attrs, slog.String("platform", cc.Platform))
+			}
+			if cc.AppVersion != "" {
+				attrs = append(attrs, slog.String("app_version", cc.AppVersion))
+			}
+			if cc.BuildNumber != "" {
+				attrs = append(attrs, slog.String("build_number", cc.BuildNumber))
+			}
 		}
 		logger := log.NewLogger(c.GetString("requestID"))
 
@@ -366,4 +510,37 @@ func GetRequestID(ctx context.Context) string { // Exported helper
 		return id
 	}
 	return "unknown"
+}
+
+// DetachRequestContext returns a context that outlives the request but keeps
+// its observability identity: the originating request_id, the analytics
+// identity (user, app version, platform), and a logger correlated on
+// correlationID — the job id, for work whose natural unit is the job.
+//
+// Background work must not inherit the request's context directly: that
+// context is canceled the moment the response is written, which would kill a
+// generation the instant the client is told it started. Deriving from
+// context.Background() instead is correct, but a bare Background() also
+// discards every field that makes the resulting logs and events attributable —
+// which is how roadmap generation ends up as a stream of anonymous lines that
+// cannot be tied to the user who triggered it.
+func DetachRequestContext(ctx context.Context, correlationID string) context.Context {
+	rc := analytics.RequestContextFrom(ctx)
+
+	// The request id lives in two places — the bare context value read by
+	// GetRequestID, and the analytics identity — and which one is populated
+	// depends on how the context was built. Falling back to the other keeps
+	// detached work correlated either way, rather than silently degrading to
+	// "unknown" and severing the link between a generation's logs and the
+	// request that started it.
+	requestID := GetRequestID(ctx)
+	if requestID == "unknown" && rc.RequestID != "" {
+		requestID = rc.RequestID
+	}
+
+	out := context.WithValue(context.Background(), RequestIDKey, requestID)
+	out = log.WithLogger(out, log.NewLogger(correlationID).With(
+		slog.String("request_id", requestID),
+	))
+	return analytics.WithRequestContext(out, rc)
 }

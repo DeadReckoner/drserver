@@ -16,6 +16,12 @@ type Provider interface {
 	// Used for observability so logs/dashboards show which provider ran a job.
 	Name() string
 
+	// Model returns the model identifier this provider generates with. Logged
+	// alongside every generation attempt: when latency or failure rate moves,
+	// "which model was that?" is the first question, and a model upgrade is a
+	// far more common cause than a code change.
+	Model() string
+
 	// GenerateStrategicRoadmap generates the high-level roadmap with phases and milestones
 	GenerateStrategicRoadmap(ctx context.Context, goalReq types.GoalRequest) (*types.Roadmap, error)
 
@@ -34,6 +40,12 @@ const (
 	ProviderAnthropic ProviderType = "anthropic"
 )
 
+// openAIRoadmapModel is the model the OpenAI roadmap-generation path calls
+// (see GenerateMilestoneTasksFromGoalRequest). Named here so Model() reports
+// something meaningful for observability without threading the value back out
+// of each request builder.
+const openAIRoadmapModel = "gpt-5-mini"
+
 // OpenAIProvider wraps the existing OpenAI functions to implement Provider
 type OpenAIProvider struct{}
 
@@ -43,6 +55,11 @@ func NewOpenAIProvider() *OpenAIProvider {
 }
 
 func (p *OpenAIProvider) Name() string { return string(ProviderOpenAI) }
+
+// Model reports the primary generation model. The OpenAI path picks a model
+// per call (gpt-5-mini for roadmaps, gpt-5-nano for lighter passes), so this
+// names the one that does the roadmap generation these metrics describe.
+func (p *OpenAIProvider) Model() string { return openAIRoadmapModel }
 
 func (p *OpenAIProvider) GenerateStrategicRoadmap(ctx context.Context, goalReq types.GoalRequest) (*types.Roadmap, error) {
 	return GenerateStrategicRoadmapFromGoalRequest(ctx, goalReq)

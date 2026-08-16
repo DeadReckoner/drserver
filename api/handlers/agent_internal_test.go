@@ -103,6 +103,8 @@ type hfinAgFakeProvider struct {
 
 func (p *hfinAgFakeProvider) Name() string { return "hfin-fake" }
 
+func (p *hfinAgFakeProvider) Model() string { return "hfin-fake-model" }
+
 func (p *hfinAgFakeProvider) GenerateStrategicRoadmap(_ context.Context, _ types.GoalRequest) (*types.Roadmap, error) {
 	return p.roadmap, p.roadmapErr
 }

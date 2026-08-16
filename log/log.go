@@ -84,6 +84,66 @@ func SetMinLevel(l Level) func() {
 	return func() { minLevel = prev }
 }
 
+// Deployment identity, resolved once at startup and stamped onto every log
+// line and every product event. These are what make a dashboard answerable:
+// without `environment` a staging error looks like a production one, and
+// without `release` you cannot tell whether an error-rate spike started with
+// a specific deploy.
+//
+// Each falls back through an explicit override, then a Fly-provided value,
+// then a safe default — so local runs and tests need no configuration and a
+// Fly deploy is annotated correctly with no extra secrets.
+var (
+	environment = resolveEnvironment()
+	release     = resolveRelease()
+	service     = resolveService()
+)
+
+// Environment is "production", "staging", or "development". Product events and
+// operational logs are filtered on this, so prod dashboards never silently
+// include a developer's laptop.
+func Environment() string { return environment }
+
+// Release identifies the running deploy. On Fly this is the machine version,
+// which changes on every deploy — exactly the grouping key you want when
+// asking "did this start with the last release?".
+func Release() string { return release }
+
+// Service names the emitting process. Fly runs `app` and `scheduler` process
+// groups from the same binary, and they fail in very different ways, so
+// keeping them separable in the log stream matters.
+func Service() string { return service }
+
+func resolveEnvironment() string {
+	for _, key := range []string{"ENVIRONMENT", "APP_ENV"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return strings.ToLower(v)
+		}
+	}
+	// Running on Fly with no explicit setting means production. Defaulting the
+	// other way would quietly drop real traffic out of the prod dashboards.
+	if os.Getenv("FLY_APP_NAME") != "" {
+		return "production"
+	}
+	return "development"
+}
+
+func resolveRelease() string {
+	for _, key := range []string{"RELEASE", "FLY_MACHINE_VERSION", "FLY_IMAGE_REF"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	return "dev"
+}
+
+func resolveService() string {
+	if v := strings.TrimSpace(os.Getenv("FLY_PROCESS_GROUP")); v != "" {
+		return v
+	}
+	return "drserver"
+}
+
 // base is the process-wide JSON logger. Every per-request logger is derived
 // from it via With(...), so all output shares one structured JSON format that
 // log aggregators (Axiom) and Fly's log stream can parse field-by-field.
@@ -98,7 +158,14 @@ func init() {
 	// Handler stays at debug; level filtering is done in code against minLevel
 	// (see its doc comment) so SetMinLevel remains the single knob for tests.
 	handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})
-	base = slog.New(handler)
+	// Attaching deployment identity to the base logger means every line in the
+	// process carries it — including the bare standard-library log.* calls
+	// bridged in via SetDefault — without touching a single call site.
+	base = slog.New(handler).With(
+		slog.String("environment", environment),
+		slog.String("service", service),
+		slog.String("release", release),
+	)
 	slog.SetDefault(base)
 }
 

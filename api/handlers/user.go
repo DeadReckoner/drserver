@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"dr/server/analytics"
 	"dr/server/api/utils"
 	"dr/server/auth/apple"
 	"dr/server/database"
@@ -71,8 +72,24 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 
 	user := database.GetUser(c)
 	h.sendWelcomeAsync(user.UserID)
+	emitSignupIfNew(ctx, tx)
 	utils.DataResponse(c, http.StatusOK, user)
 	log.Info(ctx, "User upserted successfully")
+}
+
+// emitSignupIfNew emits signup_completed only for a genuinely new account.
+//
+// CreateUser is an upsert and the client calls it on every app launch in some
+// flows, so emitting unconditionally would report a signup per launch and make
+// the top of the funnel meaningless. database.CreateUser returns a zero-value
+// *gorm.DB (RowsAffected 0) when the user already existed and the result of
+// the INSERT (RowsAffected 1) when it created one, which is the only signal
+// distinguishing the two.
+func emitSignupIfNew(ctx context.Context, tx *gorm.DB) {
+	if tx == nil || tx.RowsAffected != 1 {
+		return
+	}
+	analytics.Emit(ctx, analytics.EventSignupCompleted, nil)
 }
 
 // CreateUserWithImage creates a user with an optional profile image.
@@ -136,6 +153,7 @@ func (h *UserHandler) CreateUserWithImage(c *gin.Context) {
 
 	user := database.GetUser(c)
 	h.sendWelcomeAsync(user.UserID)
+	emitSignupIfNew(ctx, tx)
 	utils.DataResponse(c, http.StatusOK, user)
 	log.Info(ctx, "User created with image successfully")
 }
@@ -161,15 +179,32 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	// Parse full_name into first_name/last_name if provided
 	updatedUser.ParseFullName()
 
-	tx := database.UpdateUser(userID, updatedUser)
+	tx, prior := database.UpdateUserReturningPrior(userID, updatedUser)
 	if tx.Error != nil {
 		utils.InternalErrorResponse(c, tx.Error)
 		return
 	}
 
+	emitOnboardingIfNewlyComplete(ctx, prior, updatedUser)
+
 	user := database.GetUser(c)
 	utils.DataResponse(c, http.StatusOK, user)
 	log.Info(ctx, "User updated successfully")
+}
+
+// emitOnboardingIfNewlyComplete fires onboarding_completed only on the
+// false→true transition.
+//
+// Setup Activation is defined as onboarding completing within 24 hours of
+// signup, so the event has to represent a moment, not a state. The client
+// PATCHes the user record for many reasons and may include the flag every
+// time; emitting on the flag alone would re-fire on every profile edit and
+// push the activation rate past 100%.
+func emitOnboardingIfNewlyComplete(ctx context.Context, prior, update types.User) {
+	if !update.OnboardingCompleted || prior.OnboardingCompleted {
+		return
+	}
+	analytics.Emit(ctx, analytics.EventOnboardingCompleted, nil)
 }
 
 // UpdateUserWithImage updates a user with an optional profile image.
@@ -229,11 +264,13 @@ func (h *UserHandler) UpdateUserWithImage(c *gin.Context) {
 		updatedUser.ProfileImageURL = h.storage.PublicURL(avatarsBucket, path)
 	}
 
-	tx := database.UpdateUser(userID, updatedUser)
+	tx, prior := database.UpdateUserReturningPrior(userID, updatedUser)
 	if tx.Error != nil {
 		utils.InternalErrorResponse(c, tx.Error)
 		return
 	}
+
+	emitOnboardingIfNewlyComplete(ctx, prior, updatedUser)
 
 	user := database.GetUser(c)
 	utils.DataResponse(c, http.StatusOK, user)
@@ -291,6 +328,8 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		utils.InternalErrorResponse(c, err)
 		return
 	}
+
+	analytics.Emit(ctx, analytics.EventAccountDeleted, nil)
 
 	utils.MessageResponse(c, http.StatusOK, "User deleted successfully")
 	log.Info(ctx, "User deleted successfully")

@@ -3,11 +3,13 @@ package utils
 import (
 	"bytes"
 	"context"
+	"dr/server/analytics"
 	"dr/server/database"
 	"dr/server/log"
 	"dr/server/types"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -51,8 +53,55 @@ func SendPushNotification(userID, notificationType, title, body string, data map
 	for _, token := range tokens {
 		// Pass the notification ID as correlation ID for tracking
 		notifCtx := log.WithLogger(context.Background(), log.NewLogger(alert.NotificationID))
+		notifCtx = analytics.WithUserID(notifCtx, userID)
 		go sendExpoNotification(notifCtx, token.ExpoToken, notificationType, title, body, data, alert.NotificationID, badgeCount)
 	}
+}
+
+// accountabilityTypes are the notification types that constitute an
+// accountability alert — the ones an anchor relationship exists to produce.
+//
+// Tracked separately from ordinary notifications because the CEO scorecard
+// asks a question no aggregate delivery rate can answer: whether being held
+// accountable actually changes behavior. That needs the alerts to be
+// distinguishable from friend requests and digests.
+var accountabilityTypes = map[string]struct{}{
+	"missed_task":       {},
+	"falling_behind":    {},
+	"milestone_at_risk": {},
+	"roadmap_nudge":     {},
+	"habit_nudge":       {},
+}
+
+// emitNotificationOutcome records the result of a push delivery attempt.
+//
+// "Delivered" here means Expo accepted the message, which is the furthest
+// point our server can observe. Whether the device rendered it, and whether
+// the user saw it, are only knowable from the client — notification_opened
+// comes from there. Conflating the two would overstate reach.
+func emitNotificationOutcome(ctx context.Context, notificationType, notificationID, errCode string, err error) {
+	delivered := err == nil && errCode == ""
+
+	props := analytics.Props(
+		"notification_type", notificationType,
+		"notification_channel", "push",
+		"work_item_id", notificationID,
+	)
+	name := analytics.EventNotificationDelivered
+	if !delivered {
+		name = analytics.EventNotificationFailed
+		props["error_code"] = errCode
+	}
+	analytics.Emit(ctx, name, props)
+
+	if _, ok := accountabilityTypes[notificationType]; !ok {
+		return
+	}
+	alertName := analytics.EventAccountabilityAlertDelivered
+	if !delivered {
+		alertName = analytics.EventAccountabilityAlertFailed
+	}
+	analytics.Emit(ctx, alertName, props)
 }
 
 // sendExpoNotification sends a push notification via Expo's push service
@@ -77,8 +126,10 @@ func sendExpoNotification(ctx context.Context, expoToken, notificationType, titl
 
 	payload, err := json.Marshal(pushMessage)
 	if err != nil {
-		log.Info(ctx, "Failed to marshal push notification payload", err)
+		log.Failure(ctx, log.FailureNotification, log.CodeInvalidRequest, err,
+			slog.String("notification_type", notificationType))
 		updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), err.Error())
+		emitNotificationOutcome(ctx, notificationType, notificationID, log.CodeInvalidRequest, err)
 		return
 	}
 
@@ -89,8 +140,11 @@ func sendExpoNotification(ctx context.Context, expoToken, notificationType, titl
 		bytes.NewBuffer(payload),
 	)
 	if err != nil {
-		log.Info(ctx, "Failed to send push notification", err)
+		code := log.ErrorCode(err)
+		log.Failure(ctx, log.FailureNotification, code, err,
+			slog.String("notification_type", notificationType))
 		updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), err.Error())
+		emitNotificationOutcome(ctx, notificationType, notificationID, code, err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -98,15 +152,21 @@ func sendExpoNotification(ctx context.Context, expoToken, notificationType, titl
 	// Read response
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Info(ctx, "Failed to read push notification response", err)
+		code := log.ErrorCode(err)
+		log.Failure(ctx, log.FailureNotification, code, err,
+			slog.String("notification_type", notificationType))
 		updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), err.Error())
+		emitNotificationOutcome(ctx, notificationType, notificationID, code, err)
 		return
 	}
 
 	// Check if successful
 	if resp.StatusCode != http.StatusOK {
-		log.Info(ctx, "Expo push notification failed", string(responseBody))
+		log.Failure(ctx, log.FailureNotification, log.CodeUnavailable, nil,
+			slog.String("notification_type", notificationType),
+			slog.Int("provider_status", resp.StatusCode))
 		updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), string(responseBody))
+		emitNotificationOutcome(ctx, notificationType, notificationID, log.CodeUnavailable, nil)
 		return
 	}
 
@@ -120,14 +180,18 @@ func sendExpoNotification(ctx context.Context, expoToken, notificationType, titl
 
 	if err := json.Unmarshal(responseBody, &expoResponse); err == nil {
 		if len(expoResponse.Data) > 0 && expoResponse.Data[0].Status == "error" {
-			log.Info(ctx, "Expo returned error", expoResponse.Data[0].Message)
+			log.Failure(ctx, log.FailureNotification, log.CodeInvalidRequest, nil,
+				slog.String("notification_type", notificationType),
+				slog.String("provider_message", expoResponse.Data[0].Message))
 			updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusFailed), expoResponse.Data[0].Message)
+			emitNotificationOutcome(ctx, notificationType, notificationID, log.CodeInvalidRequest, nil)
 			return
 		}
 	}
 
 	// Success!
 	updateNotificationStatus(ctx, notificationID, string(types.NotificationStatusSent), "")
+	emitNotificationOutcome(ctx, notificationType, notificationID, "", nil)
 	log.Info(ctx, "Push notification sent successfully", notificationID)
 }
 

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"dr/server/analytics"
 	"dr/server/api/utils"
 	"dr/server/database"
 	"dr/server/log"
@@ -87,6 +88,11 @@ func (h *HabitHandler) CreateHabit(c *gin.Context) {
 		utils.InternalErrorResponse(c, err)
 		return
 	}
+
+	analytics.Emit(ctx, analytics.EventWorkItemCreated, analytics.Props(
+		"work_item_id", createdHabit.HabitID,
+		"item_type", analytics.ItemTypeHabit,
+	))
 
 	utils.DataResponse(c, http.StatusCreated, createdHabit)
 	log.Info(ctx, "CreateHabit: habit created successfully", createdHabit.HabitID)
@@ -381,6 +387,16 @@ func (h *HabitHandler) CompleteHabit(c *gin.Context) {
 		return
 	}
 
+	// occurrence_id, not just habit_id: what was completed is one scheduled day
+	// of this habit, and the completion rate needs that granularity to mean
+	// anything. See analytics.OccurrenceID.
+	analytics.Emit(ctx, analytics.EventWorkItemCompleted, analytics.Props(
+		"work_item_id", habitID,
+		"occurrence_id", analytics.OccurrenceID(habitID, date),
+		"item_type", analytics.ItemTypeHabit,
+		"scheduled_date", date.Format("2006-01-02"),
+	))
+
 	utils.DataResponse(c, http.StatusCreated, completion)
 	log.Info(ctx, "CompleteHabit: habit completed successfully", habitID)
 }
@@ -411,6 +427,17 @@ func (h *HabitHandler) UncompleteHabit(c *gin.Context) {
 		utils.InternalErrorResponse(c, err)
 		return
 	}
+
+	// Undo is emitted as skipped rather than left silent: without it the
+	// completion event stands forever and the rate drifts permanently above
+	// reality. Queries net the two by occurrence_id.
+	analytics.Emit(ctx, analytics.EventWorkItemSkipped, analytics.Props(
+		"work_item_id", habitID,
+		"occurrence_id", analytics.OccurrenceID(habitID, date),
+		"item_type", analytics.ItemTypeHabit,
+		"scheduled_date", date.Format("2006-01-02"),
+		"reason", "uncompleted",
+	))
 
 	utils.MessageResponse(c, http.StatusOK, "Completion removed successfully")
 	log.Info(ctx, "UncompleteHabit: completion removed successfully", habitID)
@@ -547,6 +574,12 @@ func (h *HabitHandler) CreateHabitAnchorRequest(c *gin.Context) {
 		return
 	}
 
+	analytics.Emit(ctx, analytics.EventAnchorInviteSent, analytics.Props(
+		"anchor_relationship_id", anchorRequest.RequestID,
+		"work_item_id", habitID,
+		"item_type", analytics.ItemTypeHabit,
+	))
+
 	utils.DataResponse(c, http.StatusCreated, anchorRequest)
 	log.Info(ctx, "CreateHabitAnchorRequest: anchor request created successfully")
 
@@ -578,6 +611,12 @@ func (h *HabitHandler) RemoveHabitAnchor(c *gin.Context) {
 		utils.InternalErrorResponse(c, err)
 		return
 	}
+
+	analytics.Emit(ctx, analytics.EventAnchorRelationshipEnded, analytics.Props(
+		"work_item_id", habitID,
+		"item_type", analytics.ItemTypeHabit,
+		"anchor_active", false,
+	))
 
 	utils.MessageResponse(c, http.StatusOK, "Anchor removed successfully")
 	log.Info(ctx, "RemoveHabitAnchor: anchor removed successfully")

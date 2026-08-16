@@ -16,9 +16,11 @@ import (
 	"time"
 
 	"dr/server/agent/anthropic"
+	"dr/server/analytics"
 	"dr/server/api/utils"
 	"dr/server/database"
 	"dr/server/log"
+	"dr/server/middleware"
 	"dr/server/notifications"
 	"dr/server/types"
 	"dr/server/websocket"
@@ -177,7 +179,7 @@ func (h *AgentHandler) ImportPlan(c *gin.Context) {
 
 	// Background context so the work survives the HTTP request completing,
 	// with the job ID as the correlation ID.
-	bgCtx := log.WithLogger(context.Background(), log.NewLogger(job.JobID))
+	bgCtx := middleware.DetachRequestContext(c.Request.Context(), job.JobID)
 	go processPlanImport(bgCtx, h.importer, job.JobID, draft.RoadmapID, userID, pdf, hints)
 
 	c.JSON(http.StatusAccepted, gin.H{
@@ -290,17 +292,59 @@ func sanitizeUploadName(header *multipart.FileHeader) string {
 // processRoadmapGeneration's job/websocket/notification lifecycle.
 func processPlanImport(ctx context.Context, importer *anthropic.Provider, jobID, roadmapID, userID string, pdf []byte, hints types.PlanImportContext) {
 	// Same end-to-end timing event as roadmap generation, so both AI paths
-	// chart the same way in Axiom.
+	// chart the same way in Axiom. Plan import is a generation attempt from the
+	// dashboard's point of view — it spends money at a provider and either
+	// produces a usable roadmap or does not — so it emits the same event names
+	// with provider metadata rather than a parallel set nobody would remember
+	// to chart.
 	start := time.Now()
 	outcome := "failed"
+	errCode := ""
+	requestID := middleware.GetRequestID(ctx)
+
+	analytics.Emit(ctx, analytics.EventRoadmapGenerationStarted, analytics.Props(
+		"job_id", jobID,
+		"roadmap_id", roadmapID,
+		"provider", importer.Name(),
+		"model", importer.Model(),
+		"source_screen", "plan_import",
+	))
+
 	defer func() {
-		log.FromContext(ctx).LogAttrs(log.LevelInfo, "plan import finished",
+		durationMs := time.Since(start).Milliseconds()
+
+		attrs := []slog.Attr{
 			slog.String("job_id", jobID),
 			slog.String("roadmap_id", roadmapID),
 			slog.String("user_id", userID),
+			slog.String("request_id", requestID),
+			slog.String("provider", importer.Name()),
+			slog.String("model", importer.Model()),
 			slog.String("outcome", outcome),
-			slog.Int64("generation_ms", time.Since(start).Milliseconds()),
+			slog.Int("retry_count", 0),
+			slog.Int64("generation_ms", durationMs),
+		}
+		if errCode != "" {
+			attrs = append(attrs, slog.String("error_code", errCode))
+		}
+		log.FromContext(ctx).LogAttrs(log.LevelInfo, "plan import finished", attrs...)
+
+		event := analytics.EventRoadmapGenerationSucceeded
+		props := analytics.Props(
+			"job_id", jobID,
+			"roadmap_id", roadmapID,
+			"provider", importer.Name(),
+			"model", importer.Model(),
+			"outcome", outcome,
+			"generation_ms", durationMs,
+			"retry_count", 0,
+			"source_screen", "plan_import",
 		)
+		if outcome != "completed" {
+			event = analytics.EventRoadmapGenerationFailed
+			props["error_code"] = errCode
+		}
+		analytics.Emit(ctx, event, props)
 	}()
 
 	log.Info(ctx, "Starting plan import process", fmt.Sprintf("JobID: %s, RoadmapID: %s, UserID: %s", jobID, roadmapID, userID))
@@ -310,7 +354,14 @@ func processPlanImport(ctx context.Context, importer *anthropic.Provider, jobID,
 
 	imported, err := importer.ImportPlanFromPDF(ctx, pdf, hints, time.Now())
 	if err != nil {
-		log.Info(ctx, "Plan import failed", fmt.Sprintf("JobID: %s, Error: %v", jobID, err))
+		errCode = log.ErrorCode(err)
+		log.Failure(ctx, log.FailureAIProvider, errCode, err,
+			slog.String("provider", importer.Name()),
+			slog.String("model", importer.Model()),
+			slog.String("stage", "plan_import"),
+			slog.String("job_id", jobID),
+			slog.String("roadmap_id", roadmapID),
+		)
 		handleImportError(jobID, roadmapID, userID, err)
 		return
 	}
@@ -323,6 +374,12 @@ func processPlanImport(ctx context.Context, importer *anthropic.Provider, jobID,
 	roadmap.Type = string(types.RoadmapTypeAIGenerated)
 
 	if err := database.UpdateRoadmapWithGeneration(ctx, &roadmap); err != nil {
+		errCode = log.ErrorCode(err)
+		log.Failure(ctx, log.FailureDatabase, errCode, err,
+			slog.String("stage", "persist_import"),
+			slog.String("job_id", jobID),
+			slog.String("roadmap_id", roadmapID),
+		)
 		handleImportError(jobID, roadmapID, userID, err)
 		return
 	}

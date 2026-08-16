@@ -96,7 +96,18 @@ primary_region = 'ewr'
   # DATABASE_URL and anon_key are Fly secrets, injected at runtime:
   #   fly secrets set DATABASE_URL=... anon_key=...
 
-  # info, not debug: the auth path logs the full Supabase user record
-  # (emails, identities, sign-in history) at debug, and logs ship to Axiom.
+  # info, not debug: debug is high-volume (per-request auth detail, no-op cron
+  # ticks) and every line ships to Axiom, where volume is cost.
+  #
+  # Raising this to debug is now safe from a privacy standpoint — the Supabase
+  # user record is redacted at the call site rather than merely level-gated
+  # (middleware.go, verifyTokenWithSupabase) — but expect a large jump in
+  # ingest volume.
   LOG_LEVEL = "info"
+
+  # Tags every log line and product event with the environment. Fly presence
+  # already implies production, so this is belt-and-braces for the app process;
+  # set it explicitly to "staging" on any non-prod app so its traffic stays out
+  # of the production dashboards.
+  ENVIRONMENT = "production"
   API_URL = "https://bbghphhkbqxbjgwqmlhd.supabase.co"

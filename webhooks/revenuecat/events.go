@@ -6,6 +6,8 @@
 // Reference: https://www.revenuecat.com/docs/webhooks/event-types-and-fields
 package revenuecat
 
+import "strings"
+
 // Envelope is the top-level RevenueCat webhook payload.
 type Envelope struct {
 	Event      Event  `json:"event"`
@@ -98,6 +100,29 @@ type Event struct {
 
 	// TransactionID is the specific transaction (one per renewal).
 	TransactionID string `json:"transaction_id,omitempty"`
+
+	// Price is the transaction amount in USD, net of store commission as RC
+	// reports it. Parsed for revenue reporting (MRR/ARR) only — entitlement
+	// state never depends on it.
+	Price float64 `json:"price,omitempty"`
+
+	// PriceInPurchasedCurrency is the amount in the currency the user actually
+	// paid in, paired with Currency.
+	PriceInPurchasedCurrency float64 `json:"price_in_purchased_currency,omitempty"`
+
+	// Currency is the ISO code for PriceInPurchasedCurrency.
+	Currency string `json:"currency,omitempty"`
+}
+
+// IsSandbox reports whether the event came from a store sandbox rather than
+// real money changing hands.
+//
+// Every revenue metric must exclude these. Sandbox events arrive on the same
+// webhook with the same shape, and TestFlight builds plus RC's dashboard test
+// button generate them continuously — folding them into MRR would inflate it
+// with purchases that do not exist.
+func (e Event) IsSandbox() bool {
+	return strings.EqualFold(e.Environment, "SANDBOX")
 }
 
 // Event types we handle explicitly. Anything not in this list is recorded

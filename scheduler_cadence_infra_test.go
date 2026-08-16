@@ -43,12 +43,12 @@ func infraCadenceCron(t *testing.T) *cron.Cron {
 }
 
 // TestSetupScheduler_CadenceMultiset guards against fat-fingering a cron spec
-// (e.g. "*/5" -> "5") without touching the count test: the 9 schedules must
-// partition into exactly 4 every-minute, 4 every-5-minute, and 1 hourly job.
+// (e.g. "*/5" -> "5") without touching the count test: the 10 schedules must
+// partition into exactly 5 every-minute, 4 every-5-minute, and 1 hourly job.
 func TestSetupScheduler_CadenceMultiset(t *testing.T) {
 	c := infraCadenceCron(t)
 	entries := c.Entries()
-	require.Len(t, entries, 9)
+	require.Len(t, entries, 10)
 
 	counts := make(map[time.Duration]int)
 	for _, e := range entries {
@@ -57,7 +57,9 @@ func TestSetupScheduler_CadenceMultiset(t *testing.T) {
 	}
 
 	want := map[time.Duration]int{
-		time.Minute:     4, // missed tasks, due digests, anchor batches, pending deliveries
+		// missed tasks, due digests, anchor batches, pending deliveries,
+		// telemetry heartbeat
+		time.Minute:     5,
 		5 * time.Minute: 4, // falling behind, at-risk milestones, next milestone, stale-job reaper
 		time.Hour:       1, // delivery-log cleanup
 	}

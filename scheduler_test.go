@@ -18,8 +18,9 @@ func TestSetupScheduler_RegistersAllJobs(t *testing.T) {
 		<-c.Stop().Done()
 	})
 
-	// 8 notification jobs + reap_stale_jobs (background-job recovery).
-	const want = 9
+	// 8 notification jobs + reap_stale_jobs (background-job recovery) +
+	// telemetry heartbeat.
+	const want = 10
 	if got := len(c.Entries()); got != want {
 		t.Errorf("setupScheduler registered %d jobs, want %d", got, want)
 	}

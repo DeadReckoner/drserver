@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"dr/server/analytics"
 	"dr/server/api"
 	"dr/server/database"
 	"dr/server/notifications/jobs"
@@ -72,6 +73,21 @@ func setupScheduler(db *gorm.DB) *cron.Cron {
 	// how long they wait past the staleness timeout itself.
 	mustRegister(c, "*/5 * * * *", "reap_stale_jobs", jobs.ReapStaleJobs(db))
 
+	// Telemetry heartbeat. Every other signal in this system is emitted only
+	// when something happens, which means total instrumentation failure is
+	// indistinguishable from a quiet night — the dashboards just go flat and
+	// nobody can tell whether that is real. A fixed-cadence event gives the
+	// monitors something whose *absence* is unambiguous.
+	//
+	// Every minute, and deliberately not wrapped in jobs.Timed: the wrapper's
+	// own duration logging would be noise for a job whose entire purpose is to
+	// be a single predictable line.
+	if _, err := c.AddFunc("* * * * *", func() {
+		analytics.Heartbeat(context.Background())
+	}); err != nil {
+		log.Fatalf("cron.AddFunc(heartbeat): %v", err)
+	}
+
 	return c
 }
 
@@ -97,6 +113,12 @@ func main() {
 	// reported. No-op unless SENTRY_DSN is set.
 	flushSentry := observability.Init()
 	defer flushSentry()
+
+	// Product-event pipeline. Buffered and batched, so the deferred flush is
+	// what stops a deploy from discarding the last few seconds of events.
+	// Falls back to the log stream when Axiom ingest isn't configured.
+	flushAnalytics := analytics.Init()
+	defer flushAnalytics()
 
 	db := database.Connect(ctx)
 
