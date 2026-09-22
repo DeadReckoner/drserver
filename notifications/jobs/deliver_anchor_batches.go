@@ -104,7 +104,7 @@ func findAnchoredSummariesFor(db *gorm.DB, anchorUserIDs []string) ([]anchoredSu
 		JOIN users u        ON u.user_id    = r.user_id
 		JOIN owner_today ot ON ot.user_id   = r.user_id
 		LEFT JOIN tasks t   ON t.roadmap_id = r.roadmap_id
-		WHERE r.anchor_id = ANY(?)
+		WHERE r.anchor_id IN (?)
 		  AND r.archived = false
 		  AND r.paused_at IS NULL
 		GROUP BY r.anchor_id, u.user_id, u.first_name, u.last_name, u.email
