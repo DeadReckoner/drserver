@@ -287,47 +287,22 @@ func (h *RoadmapHandler) StartRoadmap(c *gin.Context) {
 	// Anchor the start to the owner's calendar day, not the server's UTC day —
 	// a user starting a roadmap on their evening is still starting it today.
 	loc := database.UserLocation(roadmap.UserID)
-	date := types.ScheduleDayIn(types.Now(), loc)
-	roadmap.StartDate = &date
+	startDate := types.ScheduleDayIn(types.Now(), loc)
 
 	// Day is an offset from the start day, so rebase onto the plan's earliest
 	// day; otherwise a plan numbered from day 1 starts tomorrow.
 	dayZero := roadmap.MinScheduledDay()
 
-	// Date all milestones and tasks in phases
-	for phaseIdx := range roadmap.Phases {
-		for milestoneIdx := range roadmap.Phases[phaseIdx].Milestones {
-			milestone := &roadmap.Phases[phaseIdx].Milestones[milestoneIdx]
-			log.Info(ctx, "Starting phase milestone", fmt.Sprintf("Day: %d", milestone.Day))
-			updatedMilestone := h.dateMilestones(c, *roadmap.StartDate, dayZero, *milestone)
-			roadmap.Phases[phaseIdx].Milestones[milestoneIdx] = updatedMilestone
-
-			for taskIdx := range updatedMilestone.Tasks {
-				task := updatedMilestone.Tasks[taskIdx]
-				updatedTask := h.dateTasks(c, *roadmap.StartDate, dayZero, task)
-				roadmap.Phases[phaseIdx].Milestones[milestoneIdx].Tasks[taskIdx] = updatedTask
-				log.Info(ctx, "Set task date", fmt.Sprintf("Day: %d, Date: %v", updatedTask.Day, updatedTask.Date))
-			}
-		}
+	// One transaction records the start date and dates every milestone and task
+	// from its Day offset. This used to walk the hierarchy in Go and write each
+	// row through UpdateMilestone/UpdateTask, which cost roughly ten queries per
+	// milestone and seven per task — hundreds of round trips for one button
+	// press on a full roadmap.
+	if err := database.StartRoadmapSchedule(roadmapID, startDate, dayZero, loc); err != nil {
+		log.Error(ctx, "Error scheduling roadmap dates", err.Error())
+		utils.InternalErrorResponse(c, err)
+		return
 	}
-
-	// Date all top-level milestones and tasks (backward compatibility)
-	for milestoneIdx := range roadmap.Milestones {
-		milestone := &roadmap.Milestones[milestoneIdx]
-		log.Info(ctx, "Starting top-level milestone", fmt.Sprintf("Day: %d", milestone.Day))
-		updatedMilestone := h.dateMilestones(c, *roadmap.StartDate, dayZero, *milestone)
-		roadmap.Milestones[milestoneIdx] = updatedMilestone
-
-		for taskIdx := range updatedMilestone.Tasks {
-			task := updatedMilestone.Tasks[taskIdx]
-			updatedTask := h.dateTasks(c, *roadmap.StartDate, dayZero, task)
-			roadmap.Milestones[milestoneIdx].Tasks[taskIdx] = updatedTask
-			log.Info(ctx, "Set task date", fmt.Sprintf("Day: %d, Date: %v", updatedTask.Day, updatedTask.Date))
-		}
-	}
-
-	// Save the roadmap with start date first (so RecomputeAndSaveStatuses sees it)
-	_ = database.UpdateRoadmap(c, roadmapID, roadmap)
 
 	// Recompute and save all statuses for the roadmap now that it's started
 	// This computes task, milestone, and phase statuses in one unified operation
@@ -376,25 +351,6 @@ func countScheduledTasks(r types.Roadmap) int {
 		total += len(m.Tasks)
 	}
 	return total
-}
-
-// dateMilestones and dateTasks place an item at startDate + (Day - dayZero),
-// where dayZero is the plan's earliest Day. AddDate walks calendar days in
-// startDate's location, so the anchor hour survives DST transitions.
-func (h *RoadmapHandler) dateMilestones(c *gin.Context, startDate time.Time, dayZero int, milestone types.Milestone) types.Milestone {
-
-	date := startDate.AddDate(0, 0, types.ScheduleOffset(milestone.Day, dayZero))
-	milestone.Date = &date
-
-	return database.UpdateMilestone(c, milestone.MilestoneID, milestone)
-}
-
-func (h *RoadmapHandler) dateTasks(c *gin.Context, startDate time.Time, dayZero int, task types.Task) types.Task {
-
-	date := startDate.AddDate(0, 0, types.ScheduleOffset(task.Day, dayZero))
-	task.Date = &date
-
-	return database.UpdateTask(c, task.TaskID, task)
 }
 
 // Anchor handlers

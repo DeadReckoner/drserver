@@ -92,7 +92,37 @@ create table if not exists public.roadmaps (
   anchor_id  uuid,
   goal       text not null default '',
   archived   boolean not null default false,
-  paused_at  timestamptz
+  paused_at  timestamptz,
+  completed  boolean not null default false,
+  start_date timestamptz
+);
+
+-- milestones/tasks carry only the columns the tests under this harness touch:
+-- the hierarchy keys plus the day/date/completion fields that scheduling and
+-- the cron candidate queries read. Not the production schema in full.
+create table if not exists public.milestones (
+  milestone_id uuid primary key default gen_random_uuid(),
+  roadmap_id   uuid references public.roadmaps(roadmap_id) on delete cascade,
+  user_id      uuid,
+  phase_id     uuid,
+  sub_goal     text not null default '',
+  day          integer not null default 0,
+  date         timestamptz,
+  reached      boolean not null default false,
+  status       text not null default 'not_started',
+  order_index  integer not null default 0
+);
+
+create table if not exists public.tasks (
+  task_id      uuid primary key default gen_random_uuid(),
+  roadmap_id   uuid references public.roadmaps(roadmap_id) on delete cascade,
+  milestone_id uuid references public.milestones(milestone_id) on delete cascade,
+  user_id      uuid,
+  title        text not null default '',
+  day          integer not null default 0,
+  date         timestamptz,
+  completed    boolean not null default false,
+  status       text not null default 'not_started'
 );
 `
 
@@ -116,22 +146,36 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// dsnEnv lets a developer without a running Docker daemon point the suite at a
+// Postgres they already have. The schema bootstrap is not idempotent (the real
+// migration files use bare CREATE TABLE), so it must name an EMPTY database
+// that the suite is free to own:
+//
+//	createdb dr_integration
+//	INTEGRATION_DATABASE_URL="host=/tmp dbname=dr_integration sslmode=disable" make integration_test
+//
+// Unset — the normal case, and what CI uses — the suite starts its own
+// throwaway container instead.
+const dsnEnv = "INTEGRATION_DATABASE_URL"
+
 func runSuite(m *testing.M) (int, error) {
 	ctx := context.Background()
 
-	container, err := tcpostgres.Run(ctx, "postgres:16-alpine",
-		tcpostgres.WithDatabase("dr_test"),
-		tcpostgres.WithUsername("postgres"),
-		tcpostgres.WithPassword("postgres"),
-	)
-	if err != nil {
-		return 1, fmt.Errorf("start container: %w", err)
-	}
-	defer func() { _ = container.Terminate(ctx) }()
+	dsn := os.Getenv(dsnEnv)
+	if dsn == "" {
+		container, err := tcpostgres.Run(ctx, "postgres:16-alpine",
+			tcpostgres.WithDatabase("dr_test"),
+			tcpostgres.WithUsername("postgres"),
+			tcpostgres.WithPassword("postgres"),
+		)
+		if err != nil {
+			return 1, fmt.Errorf("start container: %w", err)
+		}
+		defer func() { _ = container.Terminate(ctx) }()
 
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		return 1, fmt.Errorf("connection string: %w", err)
+		if dsn, err = container.ConnectionString(ctx, "sslmode=disable"); err != nil {
+			return 1, fmt.Errorf("connection string: %w", err)
+		}
 	}
 
 	gdb, err := openWithRetry(dsn)

@@ -362,21 +362,22 @@ func TestRestartRoadmap_ResetsStateAndRecalculatesDates(t *testing.T) {
 	mock.ExpectExec(`UPDATE "steps" SET "completed"=\$1,"status"=\$2 WHERE task_id IN \(\$3\)`).
 		WithArgs(false, "incomplete", dbcoreTaskID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	// Date recalculation rebases onto the plan's earliest day (the task's Day=2),
-	// so milestone Day=5 -> today+3 and task Day=2 -> today.
-	mock.ExpectQuery(`SELECT \* FROM "milestones" WHERE roadmap_id = \$1`).
-		WithArgs(dbcoreRoadmapID).
-		WillReturnRows(sqlmock.NewRows([]string{"milestone_id", "roadmap_id", "day"}).
-			AddRow(dbcoreMilestoneID, dbcoreRoadmapID, 5))
-	mock.ExpectExec(`UPDATE "milestones" SET "date"=\$1 WHERE milestone_id = \$2`).
-		WithArgs(today.AddDate(0, 0, 3), dbcoreMilestoneID).
+	// Date recalculation is two set-based UPDATEs that rebase every row from its
+	// own `day` column, so there is no per-row SELECT/UPDATE pair to expect.
+	//
+	// What these assertions still prove is the inputs: the start day, and
+	// dayZero=2 — the plan's earliest day, taken from the task's Day=2 rather
+	// than the milestone's Day=5, which is the rebasing this test has always
+	// been about. The arithmetic itself (Day=5 -> start+3, Day=2 -> start) is now
+	// Postgres's, and sqlmock does not execute SQL, so it is covered against a
+	// real server by TestStartRoadmapSchedule_MatchesGoScheduleOffset in
+	// test/integration/roadmap_schedule_test.go instead.
+	startDay := today.Format("2006-01-02")
+	mock.ExpectExec(`UPDATE milestones SET date = \(\$1::date \+ GREATEST\("day" - \$2, 0\) \* INTERVAL '1 day' \+ INTERVAL '12 hours'\) AT TIME ZONE \$3 WHERE roadmap_id = \$4`).
+		WithArgs(startDay, 2, "UTC", dbcoreRoadmapID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(`SELECT \* FROM "tasks" WHERE roadmap_id = \$1`).
-		WithArgs(dbcoreRoadmapID).
-		WillReturnRows(sqlmock.NewRows([]string{"task_id", "roadmap_id", "day"}).
-			AddRow(dbcoreTaskID, dbcoreRoadmapID, 2))
-	mock.ExpectExec(`UPDATE "tasks" SET "date"=\$1 WHERE task_id = \$2`).
-		WithArgs(today, dbcoreTaskID).
+	mock.ExpectExec(`UPDATE tasks SET date = \(\$1::date \+ GREATEST\("day" - \$2, 0\) \* INTERVAL '1 day' \+ INTERVAL '12 hours'\) AT TIME ZONE \$3 WHERE roadmap_id = \$4`).
+		WithArgs(startDay, 2, "UTC", dbcoreRoadmapID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE "phases" SET "status"=\$1 WHERE roadmap_id = \$2`).
 		WithArgs("not_started", dbcoreRoadmapID).
