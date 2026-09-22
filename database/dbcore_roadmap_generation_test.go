@@ -27,7 +27,7 @@ func TestUpdateRoadmapWithGeneration_WiresEntitiesAndReturnsSaveError(t *testing
 	// mutations have already happened by then and are asserted below.
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "roadmaps" SET`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	presetMilestoneID := "eeeeeeee-0000-0000-0000-000000000002"
@@ -53,7 +53,7 @@ func TestUpdateRoadmapWithGeneration_WiresEntitiesAndReturnsSaveError(t *testing
 	}
 
 	err := UpdateRoadmapWithGeneration(t.Context(), &rm)
-	require.ErrorIs(t, err, dbcoreErrDB, "save error is returned")
+	require.ErrorIs(t, err, errDBCore, "save error is returned")
 
 	phase := rm.Phases[0]
 	dbcoreRequireUUID(t, phase.PhaseID, "phase id")
@@ -117,10 +117,10 @@ func TestSaveNextMilestone_FetchErrorReturnedBeforeTransaction(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT \* FROM "milestones" WHERE milestone_id = \$1`).
 		WithArgs(dbcoreMilestoneID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	err := SaveNextMilestone(t.Context(), dbcoreMilestoneID, nil, []types.Task{{Title: "t"}})
-	require.ErrorIs(t, err, dbcoreErrDB, "no transaction expected after a fetch failure")
+	require.ErrorIs(t, err, errDBCore, "no transaction expected after a fetch failure")
 }
 
 func TestSaveNextMilestone_PastMilestone_AnchorsTasksAtToday(t *testing.T) {
@@ -249,9 +249,9 @@ func TestSaveNextMilestone_MidTransactionErrorRollsBack(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM "tasks" WHERE milestone_id = \$1`).
 		WithArgs(dbcoreMilestoneID).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	err := SaveNextMilestone(t.Context(), dbcoreMilestoneID, nil, nil)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }

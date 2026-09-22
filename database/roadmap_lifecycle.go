@@ -15,6 +15,91 @@ import (
 	"gorm.io/gorm"
 )
 
+// scheduleDateExpr is the SQL that places a milestone or task on
+// startDay + (day - dayZero) calendar days, at ScheduleAnchorHour local time.
+// It takes three placeholders, in order: the start day as YYYY-MM-DD, dayZero,
+// and the owner's IANA timezone.
+//
+// The arithmetic runs on a local `timestamp` and only converts to timestamptz
+// at the very end. That is what keeps a DST transition inside the roadmap's
+// span from dragging dates onto a neighbouring day, and it is the same reason
+// RealignRoadmapDates builds its shift the same way — adding INTERVAL '1 day'
+// to a timestamptz instead would add exactly 24h and drift the local hour.
+//
+// GREATEST("day" - dayZero, 0) is types.ScheduleOffset expressed in SQL: a
+// stray low day can't schedule work before the roadmap starts.
+func scheduleDateExpr() string {
+	return fmt.Sprintf(
+		`(?::date + GREATEST("day" - ?, 0) * INTERVAL '1 day' + INTERVAL '%d hours') AT TIME ZONE ?`,
+		types.ScheduleAnchorHour,
+	)
+}
+
+// scheduleRoadmapDates writes `date` onto every milestone and task of a roadmap
+// from its stored Day offset, as two set-based UPDATEs.
+//
+// Both callers used to load every row and issue one UPDATE per row, which made
+// starting or restarting a 90-task roadmap cost hundreds of sequential round
+// trips with the transaction held open across all of them. The Day offsets are
+// already in the rows, so Postgres can do the whole rebase without the data
+// making a trip through Go.
+//
+// Takes a *gorm.DB so it can run inside a caller's transaction.
+func scheduleRoadmapDates(tx *gorm.DB, roadmapID string, startDate time.Time, dayZero int, loc *time.Location) error {
+	if loc == nil {
+		loc = time.UTC
+	}
+	startDay := startDate.In(loc).Format("2006-01-02")
+	tz := loc.String()
+	expr := scheduleDateExpr()
+
+	if err := tx.Exec(
+		"UPDATE milestones SET date = "+expr+" WHERE roadmap_id = ?",
+		startDay, dayZero, tz, roadmapID,
+	).Error; err != nil {
+		return err
+	}
+	return tx.Exec(
+		"UPDATE tasks SET date = "+expr+" WHERE roadmap_id = ?",
+		startDay, dayZero, tz, roadmapID,
+	).Error
+}
+
+// StartRoadmapSchedule puts a roadmap on the calendar: it records the start date
+// and dates every milestone and task from its Day offset, in one transaction.
+//
+// This is the write half of PUT /roadmaps/:id/start. The handler keeps the
+// ownership check and the response, and passes the start day and dayZero in
+// because it already holds the loaded roadmap those come from.
+func StartRoadmapSchedule(roadmapID string, startDate time.Time, dayZero int, loc *time.Location) error {
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		// The start date has to land before RecomputeAndSaveStatuses runs, which
+		// is what lets the status computation see the roadmap as started.
+		if err := tx.Model(&types.Roadmap{}).
+			Where("roadmap_id = ?", roadmapID).
+			Update("start_date", startDate).Error; err != nil {
+			return err
+		}
+		return scheduleRoadmapDates(tx, roadmapID, startDate, dayZero, loc)
+	}); err != nil {
+		return err
+	}
+
+	// Carried over from the UpdateRoadmap call this replaced: a roadmap whose
+	// milestones are all already reached is marked complete on start.
+	//
+	// NOTE: shouldCompleteRoadmap counts *unreached* milestones, so a roadmap
+	// with no milestones at all also satisfies it. That is pre-existing
+	// behavior, preserved deliberately rather than quietly changed by a
+	// performance refactor.
+	if shouldCompleteRoadmap(roadmapID) {
+		return db.Model(&types.Roadmap{}).
+			Where("roadmap_id = ?", roadmapID).
+			Update("completed", true).Error
+	}
+	return nil
+}
+
 // RestartRoadmap resets a roadmap to start fresh from today.
 // It resets all completion states and recalculates dates from today.
 func RestartRoadmap(c *gin.Context, roadmapID string) (types.Roadmap, error) {
@@ -98,21 +183,12 @@ func RestartRoadmap(c *gin.Context, roadmapID string) (types.Roadmap, error) {
 		}
 	}
 
-	// Recalculate dates for milestones and tasks based on new start date
-	// Update milestones
-	var milestones []types.Milestone
-	tx.Where("roadmap_id = ?", roadmapID).Find(&milestones)
-	for _, m := range milestones {
-		newDate := startDate.AddDate(0, 0, types.ScheduleOffset(m.Day, dayZero))
-		tx.Model(&types.Milestone{}).Where("milestone_id = ?", m.MilestoneID).Update("date", newDate)
-	}
-
-	// Update tasks
-	var tasks []types.Task
-	tx.Where("roadmap_id = ?", roadmapID).Find(&tasks)
-	for _, t := range tasks {
-		newDate := startDate.AddDate(0, 0, types.ScheduleOffset(t.Day, dayZero))
-		tx.Model(&types.Task{}).Where("task_id = ?", t.TaskID).Update("date", newDate)
+	// Recalculate milestone and task dates from the new start date. Two
+	// statements, no row-by-row loop — and unlike the loop this replaced, a
+	// failure here aborts the restart instead of being silently dropped.
+	if err := scheduleRoadmapDates(tx, roadmapID, startDate, dayZero, loc); err != nil {
+		tx.Rollback()
+		return types.Roadmap{}, err
 	}
 
 	// Reset phases status
