@@ -45,11 +45,11 @@ func TestGenerateShareToken_UpdateErrorPropagated(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "roadmaps" SET "share_token"=\$1 WHERE roadmap_id = \$2`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	_, err := GenerateShareToken(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 func TestGenerateShareToken_HappyPath_TokenShapeAndPersistence(t *testing.T) {
@@ -102,10 +102,10 @@ func TestRevokeShareToken_DBErrorPropagated(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "roadmaps" SET "share_token"=\$1`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
-	require.ErrorIs(t, RevokeShareToken(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID), dbcoreErrDB)
+	require.ErrorIs(t, RevokeShareToken(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID), errDBCore)
 }
 
 // --- GetRoadmapByShareToken ---
@@ -125,10 +125,10 @@ func TestGetRoadmapByShareToken_OtherErrorPassthrough(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT \* FROM "roadmaps" WHERE share_token = \$1`).
 		WithArgs(dbcoreShareToken, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	_, err := GetRoadmapByShareToken(dbcoreShareToken)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 func TestGetRoadmapByShareToken_MinimalHappyPath(t *testing.T) {
@@ -289,9 +289,9 @@ func TestGetRoadmapFullByID_FetchErrorPropagated(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT \* FROM "roadmaps" WHERE roadmap_id = \$1`).
 		WithArgs(dbcoreRoadmapID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	got, err := GetRoadmapFullByID(dbcoreRoadmapID)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 	assert.Equal(t, types.Roadmap{}, got)
 }

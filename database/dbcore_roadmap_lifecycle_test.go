@@ -8,7 +8,7 @@ package database
 // "Trim the tail" pattern: RestartRoadmap/ShiftRoadmapDates/RealignRoadmapDates
 // run RecomputeAndSaveStatuses (failure logged, not returned) and then
 // GetRoadmapFullByID (failure returned). Tests error both SELECTs with
-// dbcoreErrDB so the flow ends cheaply while ExpectationsWereMet still proves
+// errDBCore so the flow ends cheaply while ExpectationsWereMet still proves
 // all the writes happened.
 
 import (
@@ -49,15 +49,15 @@ func dbcoreExpectRoadmapOwnedNotFound(mock sqlmock.Sqlmock) {
 func dbcoreExpectRecomputeSwallowed(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(`SELECT \* FROM "roadmaps" WHERE roadmap_id = \$1`).
 		WithArgs(dbcoreRoadmapID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 }
 
 // dbcoreExpectFullReloadFails errors the GetRoadmapFullByID reload; its error
-// IS surfaced by Restart/Shift/Realign, so tests assert dbcoreErrDB.
+// IS surfaced by Restart/Shift/Realign, so tests assert errDBCore.
 func dbcoreExpectFullReloadFails(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(`SELECT \* FROM "roadmaps" WHERE roadmap_id = \$1`).
 		WithArgs(dbcoreRoadmapID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 }
 
 // --- PauseRoadmap ---
@@ -143,11 +143,11 @@ func TestArchiveRoadmap_DBErrorPropagated(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "roadmaps" SET "archived"=\$1`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	err := ArchiveRoadmap(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 // --- ResumeRoadmap ---
@@ -200,7 +200,7 @@ func TestResumeRoadmap_PausedUnderADay_ShiftsByOneDayMinimum(t *testing.T) {
 	dbcoreExpectFullReloadFails(mock)
 
 	_, err := ResumeRoadmap(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID)
-	require.ErrorIs(t, err, dbcoreErrDB, "only the trimmed reload fails; all shift writes matched")
+	require.ErrorIs(t, err, errDBCore, "only the trimmed reload fails; all shift writes matched")
 }
 
 func TestResumeRoadmap_PausedThreeDays_ShiftsByThree(t *testing.T) {
@@ -222,7 +222,7 @@ func TestResumeRoadmap_PausedThreeDays_ShiftsByThree(t *testing.T) {
 	dbcoreExpectFullReloadFails(mock)
 
 	_, err := ResumeRoadmap(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 // --- ShiftRoadmapDates ---
@@ -254,7 +254,7 @@ func TestShiftRoadmapDates_HappyPath_ShiftsStartAndIntervalUpdates(t *testing.T)
 	dbcoreExpectFullReloadFails(mock)
 
 	_, err := ShiftRoadmapDates(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID, 3)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 func TestShiftRoadmapDates_CommitErrorPropagated(t *testing.T) {
@@ -272,10 +272,10 @@ func TestShiftRoadmapDates_CommitErrorPropagated(t *testing.T) {
 	mock.ExpectExec(`UPDATE tasks SET date = date \+ INTERVAL '1 day' \* \$1`).
 		WithArgs(2, dbcoreRoadmapID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit().WillReturnError(dbcoreErrDB)
+	mock.ExpectCommit().WillReturnError(errDBCore)
 
 	_, err := ShiftRoadmapDates(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID, 2)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 // --- RestartRoadmap ---
@@ -390,7 +390,7 @@ func TestRestartRoadmap_ResetsStateAndRecalculatesDates(t *testing.T) {
 	dbcoreExpectFullReloadFails(mock)
 
 	_, err := RestartRoadmap(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID)
-	require.ErrorIs(t, err, dbcoreErrDB,
+	require.ErrorIs(t, err, errDBCore,
 		"reset writes all matched; only the trimmed final reload fails")
 }
 
@@ -460,10 +460,10 @@ func TestRestoreRoadmap_StartFromToday_DelegatesToRestart(t *testing.T) {
 	// fetch. Error it to prove delegation without mocking the whole restart.
 	mock.ExpectQuery(`SELECT \* FROM "roadmaps" WHERE user_id = \$1 AND roadmap_id = \$2`).
 		WithArgs(dbcoreUserID, dbcoreRoadmapID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	_, err := RestoreRoadmap(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID, true)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 // --- RealignRoadmapDates ---
@@ -543,7 +543,7 @@ func TestRealignRoadmapDates_ShiftsIncompleteWork(t *testing.T) {
 
 	_, daysShifted, err := RealignRoadmapDates(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID, 2)
 	assert.Equal(t, 5, daysShifted)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 func TestRealignRoadmapDates_AlreadyAligned_StillReanchors(t *testing.T) {
@@ -576,5 +576,5 @@ func TestRealignRoadmapDates_AlreadyAligned_StillReanchors(t *testing.T) {
 
 	_, daysShifted, err := RealignRoadmapDates(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID, 0)
 	assert.Equal(t, 0, daysShifted)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }

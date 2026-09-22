@@ -75,7 +75,7 @@ func TestUpdateTask_FetchError_ReturnsZeroTask(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT \* FROM "tasks" WHERE user_id = \$1 AND task_id = \$2`).
 		WithArgs(dbcoreUserID, dbcoreTaskID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	got := UpdateTask(dbcoreCtx(dbcoreUserID), dbcoreTaskID, types.Task{Title: "x"})
 	assert.Equal(t, types.Task{}, got)
@@ -114,7 +114,7 @@ func TestUpdateTask_CompletedFlip_TriggersMilestoneRecompute(t *testing.T) {
 	// milestone SELECT errors; UpdateTask only logs and continues.
 	mock.ExpectQuery(`SELECT \* FROM "milestones" WHERE milestone_id = \$1`).
 		WithArgs(dbcoreMilestoneID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	dbcoreExpectStepCounts(mock, 1, 1) // still-incomplete step -> no auto-complete
 	dbcoreExpectFinalTaskReload(mock, "T", true)
@@ -336,11 +336,11 @@ func TestCreateStep_InsertErrorPropagated(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`INSERT INTO "steps"`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	_, err := CreateStep(dbcoreCtx(dbcoreUserID), dbcoreTaskID, types.Step{StepID: dbcoreStepID, Description: "d"})
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 func TestCreateStep_Success_ForcesPathTaskID(t *testing.T) {
@@ -396,11 +396,11 @@ func TestDeleteStep_DeleteErrorPropagated(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM "steps" WHERE task_id = \$1 AND step_id = \$2`).
 		WithArgs(dbcoreTaskID, dbcoreStepID).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	err := DeleteStep(dbcoreCtx(dbcoreUserID), dbcoreTaskID, dbcoreStepID)
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 func TestDeleteStep_Success(t *testing.T) {
@@ -435,10 +435,10 @@ func TestCompleteAllSteps_FetchErrorPassthrough(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT \* FROM "tasks" WHERE user_id = \$1 AND task_id = \$2`).
 		WithArgs(dbcoreUserID, dbcoreTaskID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	_, err := CompleteAllSteps(dbcoreCtx(dbcoreUserID), dbcoreTaskID)
-	require.ErrorIs(t, err, dbcoreErrDB, "non-NotFound fetch errors pass through unmapped")
+	require.ErrorIs(t, err, errDBCore, "non-NotFound fetch errors pass through unmapped")
 }
 
 func TestCompleteAllSteps_HappyPath_ReturnsCountAndCascades(t *testing.T) {

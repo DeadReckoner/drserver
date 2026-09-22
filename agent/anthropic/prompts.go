@@ -78,7 +78,7 @@ Briefly summarize it in 2-3 sentences and ask if anything needs adjusting.`)
 	// Inject any existing user context (e.g., partial goal data from the UI)
 	if len(ctx) > 0 {
 		contextJSON, _ := json.MarshalIndent(ctx, "", "  ")
-		sb.WriteString(fmt.Sprintf("\n\n### Pre-loaded context from the app:\n```json\n%s\n```\nUse this as a starting point. Confirm or refine with the user as needed.", string(contextJSON)))
+		fmt.Fprintf(&sb, "\n\n### Pre-loaded context from the app:\n```json\n%s\n```\nUse this as a starting point. Confirm or refine with the user as needed.", string(contextJSON))
 	}
 
 	return sb.String()
@@ -115,7 +115,7 @@ You are reviewing the user's recent progress and providing actionable coaching.
 	// Inject performance data
 	if len(ctx) > 0 {
 		contextJSON, _ := json.MarshalIndent(ctx, "", "  ")
-		sb.WriteString(fmt.Sprintf("\n\n### User's current performance data:\n```json\n%s\n```", string(contextJSON)))
+		fmt.Fprintf(&sb, "\n\n### User's current performance data:\n```json\n%s\n```", string(contextJSON))
 	}
 
 	return sb.String()
@@ -160,7 +160,7 @@ Sun=1, Mon=2, Tue=4, Wed=8, Thu=16, Fri=32, Sat=64
 	// Inject current roadmap data
 	if len(ctx) > 0 {
 		contextJSON, _ := json.MarshalIndent(ctx, "", "  ")
-		sb.WriteString(fmt.Sprintf("\n\n### Current roadmap data:\n```json\n%s\n```", string(contextJSON)))
+		fmt.Fprintf(&sb, "\n\n### Current roadmap data:\n```json\n%s\n```", string(contextJSON))
 	}
 
 	return sb.String()

@@ -84,10 +84,9 @@ func TestLoggerWith_DerivesWithoutMutatingParent(t *testing.T) {
 	restore := SetMinLevel(LevelDebug)
 	defer restore()
 
-	parent := NewLogger("req-9")
 	buf := tleSwapBase(t)
-	// Re-derive from the swapped base so output is captured.
-	parent = NewLogger("req-9")
+	// Derive from the swapped base so output is captured.
+	parent := NewLogger("req-9")
 	child := parent.With("user_id", "u1")
 
 	child.Info("child line")
