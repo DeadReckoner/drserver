@@ -8,6 +8,7 @@ package database
 // flag values.
 
 import (
+	"database/sql/driver"
 	"testing"
 
 	"dr/server/types"
@@ -448,10 +449,12 @@ func TestCompleteAllSteps_HappyPath_ReturnsCountAndCascades(t *testing.T) {
 		WillReturnRows(dbcoreTaskRow("T", 1, false, nil))
 
 	// Bulk-complete only steps still incomplete; RowsAffected becomes the
-	// returned count.
+	// returned count. Both columns are written together, and the filter is on
+	// status rather than the completed boolean so skipped steps are left alone
+	// (completed = false matches them too).
 	mock.ExpectBegin()
-	mock.ExpectExec(`UPDATE "steps" SET "completed"=\$1 WHERE task_id = \$2 AND completed = \$3`).
-		WithArgs(true, dbcoreTaskID, false).
+	mock.ExpectExec(`UPDATE "steps" SET "completed"=\$1,"status"=\$2 WHERE task_id = \$3 AND status = \$4`).
+		WithArgs(true, "completed", dbcoreTaskID, "incomplete").
 		WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectCommit()
 
@@ -486,4 +489,118 @@ func TestCompleteAllSteps_HappyPath_ReturnsCountAndCascades(t *testing.T) {
 	count, err := CompleteAllSteps(dbcoreCtx(dbcoreUserID), dbcoreTaskID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
+}
+
+// dbcoreStepRow is a tiny in-memory stand-in for one row of the steps table.
+type dbcoreStepRow struct {
+	status    string
+	completed bool
+}
+
+// TestCompleteAllSteps_LeavesStepsConsistentForShouldCompleteTask is the
+// regression test for the split-brain bug: CompleteAllSteps used to write only
+// the completed boolean, while shouldCompleteTask decides on status, so a task
+// whose steps had all just been completed still reported as incomplete.
+//
+// sqlmock cannot execute SQL, so rather than hand-feed the answer this replays
+// the SET/WHERE values CompleteAllSteps actually handed the driver onto an
+// in-memory fixture, and answers shouldCompleteTask's COUNT from the result.
+// That keeps the assertion honest: stop writing status and the fixture keeps
+// its 'incomplete' rows, so shouldCompleteTask goes back to false.
+func TestCompleteAllSteps_LeavesStepsConsistentForShouldCompleteTask(t *testing.T) {
+	// Two steps the user still owes, plus one they explicitly skipped.
+	steps := []dbcoreStepRow{
+		{status: "incomplete", completed: false},
+		{status: "incomplete", completed: false},
+		{status: "skipped", completed: false},
+	}
+
+	mock := withMockDB(t)
+	mock.ExpectQuery(`SELECT \* FROM "tasks" WHERE user_id = \$1 AND task_id = \$2`).
+		WithArgs(dbcoreUserID, dbcoreTaskID, 1).
+		WillReturnRows(dbcoreTaskRow("T", 1, false, nil))
+
+	// Capture what the UPDATE actually writes instead of asserting it inline,
+	// so the fixture below is driven by the real statement.
+	var setCompleted, setStatus, whereTask, whereStatus driver.Value
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "steps" SET "completed"=\$1,"status"=\$2 WHERE task_id = \$3 AND status = \$4`).
+		WithArgs(
+			dbcoreArgCapture{&setCompleted},
+			dbcoreArgCapture{&setStatus},
+			dbcoreArgCapture{&whereTask},
+			dbcoreArgCapture{&whereStatus},
+		).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectCommit()
+
+	// Task marked complete unconditionally.
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE "tasks" SET "completed"=\$1 WHERE "task_id" = \$2`).
+		WithArgs(true, dbcoreTaskID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	// Milestone cascade does not fire (a sibling task is still open), which
+	// keeps this test on the step bookkeeping.
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "tasks" WHERE milestone_id = \$1`).
+		WithArgs(dbcoreMilestoneID).
+		WillReturnRows(dbcoreCountRows(2))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "tasks" WHERE milestone_id = \$1 AND completed = \$2`).
+		WithArgs(dbcoreMilestoneID, false).
+		WillReturnRows(dbcoreCountRows(1))
+
+	dbcoreExpectRecomputeSwallowed(mock)
+
+	count, err := CompleteAllSteps(dbcoreCtx(dbcoreUserID), dbcoreTaskID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	// Both columns move together, and the row filter is status-based.
+	assert.Equal(t, true, setCompleted, `SET completed = true`)
+	assert.Equal(t, string(types.StepStatusCompleted), setStatus, `SET status = 'completed'`)
+	assert.Equal(t, dbcoreTaskID, whereTask)
+	assert.Equal(t, string(types.StepStatusIncomplete), whereStatus,
+		"must filter on status: completed = false also matches skipped steps")
+
+	// Replay that UPDATE onto the fixture.
+	targetStatus, ok := whereStatus.(string)
+	require.True(t, ok, "status predicate should be a string")
+	for i := range steps {
+		if steps[i].status != targetStatus {
+			continue
+		}
+		steps[i].completed = setCompleted.(bool)
+		steps[i].status = setStatus.(string)
+	}
+
+	// The skipped step is untouched: skipping is a deliberate choice that
+	// already counts as done, so "complete all" must not rewrite it.
+	assert.Equal(t, dbcoreStepRow{status: string(types.StepStatusSkipped), completed: false}, steps[2])
+
+	// Every row is internally consistent - completed tracks status, the same
+	// invariant UpdateStep maintains in both directions.
+	for i, s := range steps {
+		assert.Equal(t, s.status == string(types.StepStatusCompleted), s.completed,
+			"step %d (status %q): completed must track status", i, s.status)
+	}
+
+	// Finally, shouldCompleteTask - which counts status = 'incomplete' - agrees
+	// that the task is done. Counts come from the replayed fixture, not from a
+	// hand-written expectation.
+	var incomplete int64
+	for _, s := range steps {
+		if s.status == string(types.StepStatusIncomplete) {
+			incomplete++
+		}
+	}
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "steps" WHERE task_id = \$1`).
+		WithArgs(dbcoreTaskID).
+		WillReturnRows(dbcoreCountRows(int64(len(steps))))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM "steps" WHERE task_id = \$1 AND status = \$2`).
+		WithArgs(dbcoreTaskID, string(types.StepStatusIncomplete)).
+		WillReturnRows(dbcoreCountRows(incomplete))
+
+	assert.True(t, shouldCompleteTask(dbcoreTaskID),
+		"after CompleteAllSteps no step is still incomplete, so the task is completable")
 }
