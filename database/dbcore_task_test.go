@@ -156,7 +156,7 @@ func TestGetTasks_DBError_ReturnsEmpty(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(dbcoreGetTasksBaseRegex).
 		WithArgs(dbcoreUserID, false).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	assert.Empty(t, GetTasks(dbcoreCtx(dbcoreUserID), "", "", ""), "errors are logged, not returned")
 }
@@ -222,7 +222,7 @@ func TestCreateTask_InsertErrorPropagated(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectBegin()
 	mock.ExpectQuery(`INSERT INTO "tasks"`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	_, err := CreateTask(dbcoreCtx(dbcoreUserID), types.Task{
@@ -231,7 +231,7 @@ func TestCreateTask_InsertErrorPropagated(t *testing.T) {
 		Title:     "T",
 		Status:    "not_started",
 	})
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 // --- DeleteTask ---
@@ -260,10 +260,10 @@ func TestDeleteTask_DBErrorPropagated(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM "tasks" WHERE user_id = \$1 AND task_id = \$2`).
 		WithArgs(dbcoreUserID, dbcoreTaskID).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
-	require.ErrorIs(t, DeleteTask(dbcoreCtx(dbcoreUserID), dbcoreTaskID), dbcoreErrDB)
+	require.ErrorIs(t, DeleteTask(dbcoreCtx(dbcoreUserID), dbcoreTaskID), errDBCore)
 }
 
 // --- GetTask / GetTasksByMilestone ---
@@ -278,7 +278,7 @@ func TestGetTask_FetchError_ZeroValue(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT \* FROM "tasks" WHERE user_id = \$1 AND task_id = \$2`).
 		WithArgs(dbcoreUserID, dbcoreTaskID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	assert.Equal(t, types.Task{}, GetTask(dbcoreCtx(dbcoreUserID), dbcoreTaskID))
 }
@@ -293,7 +293,7 @@ func TestGetTasksByMilestone_FetchError_Empty(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT \* FROM "tasks" WHERE user_id = \$1 AND milestone_id = \$2 ORDER BY day ASC`).
 		WithArgs(dbcoreUserID, dbcoreMilestoneID).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	assert.Empty(t, GetTasksByMilestone(dbcoreCtx(dbcoreUserID), dbcoreMilestoneID))
 }

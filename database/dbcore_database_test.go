@@ -35,10 +35,10 @@ const (
 	dbcoreTaskID2     = "dddddddd-0000-0000-0000-000000000007"
 )
 
-// dbcoreErrDB is the sentinel used to terminate flows early ("trim the tail"):
+// errDBCore is the sentinel used to terminate flows early ("trim the tail"):
 // several functions log-and-continue on recompute failures but surface reload
 // failures, so tests error a SELECT with this and assert accordingly.
-var dbcoreErrDB = errors.New("dbcore: simulated db failure")
+var errDBCore = errors.New("dbcore: simulated db failure")
 
 // dbcoreCtx returns a gin context carrying user_id (empty userID leaves it
 // unset, exercising the missing-user guard). A Request is always attached

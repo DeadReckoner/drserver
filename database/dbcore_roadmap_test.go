@@ -166,7 +166,7 @@ func TestCreateRoadmap_UserCheckErrorWrapped(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT \* FROM "users" WHERE user_id = \$1`).
 		WithArgs(dbcoreUserID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	_, err := CreateRoadmap(dbcoreCtx(dbcoreUserID), dbcoreNewRoadmapFixture())
 	require.Error(t, err)
@@ -181,7 +181,7 @@ func TestCreateRoadmap_UserCreateErrorWrapped(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO "users"`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	_, err := CreateRoadmap(dbcoreCtx(dbcoreUserID), dbcoreNewRoadmapFixture())
@@ -197,11 +197,11 @@ func TestCreateRoadmap_InsertErrorPropagated(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`INSERT INTO "roadmaps"`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	_, err := CreateRoadmap(dbcoreCtx(dbcoreUserID), dbcoreNewRoadmapFixture())
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 // --- CreateDraftRoadmap ---
@@ -266,12 +266,12 @@ func TestCreateDraftRoadmap_CreateErrorPropagated(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`INSERT INTO "roadmaps"`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	draft := dbcoreNewRoadmapFixture()
 	draft.RoadmapID = dbcoreRoadmapID
-	require.ErrorIs(t, CreateDraftRoadmap(dbcoreCtx(dbcoreUserID), &draft), dbcoreErrDB)
+	require.ErrorIs(t, CreateDraftRoadmap(dbcoreCtx(dbcoreUserID), &draft), errDBCore)
 }
 
 // --- GetRoadmapsByUser ---
@@ -432,10 +432,10 @@ func TestDeleteRoadmap_DBErrorPropagated(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM "roadmaps"`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
-	require.ErrorIs(t, DeleteRoadmap(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID), dbcoreErrDB)
+	require.ErrorIs(t, DeleteRoadmap(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID), errDBCore)
 }
 
 func TestDeleteMilestone_MissingUserID(t *testing.T) {
@@ -461,10 +461,10 @@ func TestDeleteMilestone_DBErrorPropagated(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`DELETE FROM "milestones"`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
-	require.ErrorIs(t, DeleteMilestone(dbcoreCtx(dbcoreUserID), dbcoreMilestoneID), dbcoreErrDB)
+	require.ErrorIs(t, DeleteMilestone(dbcoreCtx(dbcoreUserID), dbcoreMilestoneID), errDBCore)
 }
 
 // --- CreateMilestone ---
@@ -527,13 +527,13 @@ func TestCreateMilestone_CreateErrorPropagated(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectBegin()
 	mock.ExpectQuery(`INSERT INTO "milestones"`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	_, err := CreateMilestone(dbcoreCtx(dbcoreUserID), dbcoreRoadmapID, types.Milestone{
 		MilestoneID: dbcoreMilestoneID, SubGoal: "sg", Status: "not_started",
 	})
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 }
 
 // --- UpdateMilestone ---
@@ -649,10 +649,10 @@ func TestUpdatePhaseStatus_ErrorPropagated(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "phases" SET "status"=\$1`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
-	require.ErrorIs(t, UpdatePhaseStatus(dbcorePhaseID, "in_progress"), dbcoreErrDB)
+	require.ErrorIs(t, UpdatePhaseStatus(dbcorePhaseID, "in_progress"), errDBCore)
 }
 
 func TestUpdateMilestoneStatus(t *testing.T) {
@@ -670,10 +670,10 @@ func TestUpdateMilestoneStatus_ErrorPropagated(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "milestones" SET "status"=\$1`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
-	require.ErrorIs(t, UpdateMilestoneStatus(dbcoreMilestoneID, "completed"), dbcoreErrDB)
+	require.ErrorIs(t, UpdateMilestoneStatus(dbcoreMilestoneID, "completed"), errDBCore)
 }
 
 func TestUpdateRoadmapGenerationStatus(t *testing.T) {
@@ -691,8 +691,8 @@ func TestUpdateRoadmapGenerationStatus_ErrorPropagated(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "roadmaps" SET "generation_status"=\$1`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
-	require.ErrorIs(t, UpdateRoadmapGenerationStatus(t.Context(), dbcoreRoadmapID, "failed"), dbcoreErrDB)
+	require.ErrorIs(t, UpdateRoadmapGenerationStatus(t.Context(), dbcoreRoadmapID, "failed"), errDBCore)
 }

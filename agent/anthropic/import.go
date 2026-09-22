@@ -424,7 +424,7 @@ You MUST call the transpose_plan tool with your response.`
 func buildImportPrompt(hints types.PlanImportContext, now time.Time) string {
 	var b strings.Builder
 	b.WriteString("Transpose the attached plan onto the roadmap structure, preserving as much of it as you can.\n\n")
-	b.WriteString(fmt.Sprintf("Today's date is %s (use it to convert any calendar dates in the document into day offsets).\n", now.Format("2006-01-02")))
+	fmt.Fprintf(&b, "Today's date is %s (use it to convert any calendar dates in the document into day offsets).\n", now.Format("2006-01-02"))
 
 	var provided []string
 	appendIf := func(label, value string) {

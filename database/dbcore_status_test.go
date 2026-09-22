@@ -35,7 +35,7 @@ func TestResolveUserLocation_PluckError_FallsBackToUTC(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT "timezone" FROM "users" WHERE user_id = \$1`).
 		WithArgs(dbcoreUserID).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	assert.Equal(t, time.UTC, resolveUserLocation(dbcoreUserID))
 }
@@ -89,9 +89,9 @@ func TestRecomputeAndSaveStatuses_RoadmapFetchError(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT \* FROM "roadmaps" WHERE roadmap_id = \$1`).
 		WithArgs(dbcoreRoadmapID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
-	require.ErrorIs(t, RecomputeAndSaveStatuses(dbcoreRoadmapID), dbcoreErrDB)
+	require.ErrorIs(t, RecomputeAndSaveStatuses(dbcoreRoadmapID), errDBCore)
 }
 
 func TestRecomputeAndSaveStatuses_PersistsComputedStatuses(t *testing.T) {
@@ -196,10 +196,10 @@ func TestRecomputeAndSaveStatuses_UpdateErrorRollsBack(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "tasks" SET "status"=\$1 WHERE task_id IN \(\$2\)`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
-	require.ErrorIs(t, RecomputeAndSaveStatuses(dbcoreRoadmapID), dbcoreErrDB)
+	require.ErrorIs(t, RecomputeAndSaveStatuses(dbcoreRoadmapID), errDBCore)
 }
 
 func TestRecomputeAndSaveStatuses_PhaseOwnedMilestoneNotSavedTwice(t *testing.T) {
@@ -269,9 +269,9 @@ func TestRecomputeAndSaveStatusesByMilestone_ChainsIntoRoadmapRecompute(t *testi
 	// roadmap_id. Error it to terminate cheaply.
 	mock.ExpectQuery(`SELECT \* FROM "roadmaps" WHERE roadmap_id = \$1`).
 		WithArgs(dbcoreRoadmapID, 1).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
-	require.ErrorIs(t, RecomputeAndSaveStatusesByMilestone(dbcoreMilestoneID), dbcoreErrDB)
+	require.ErrorIs(t, RecomputeAndSaveStatusesByMilestone(dbcoreMilestoneID), errDBCore)
 }
 
 // --- UpdateAllStatuses ---
@@ -279,10 +279,10 @@ func TestRecomputeAndSaveStatusesByMilestone_ChainsIntoRoadmapRecompute(t *testi
 func TestUpdateAllStatuses_FindError(t *testing.T) {
 	mock := withMockDB(t)
 	mock.ExpectQuery(`SELECT \* FROM "roadmaps"`).
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 
 	tasks, milestones, err := UpdateAllStatuses()
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 	assert.Zero(t, tasks)
 	assert.Zero(t, milestones)
 }
@@ -364,11 +364,11 @@ func TestUpdateAllStatuses_TaskUpdateErrorMidLoop_PartialCounts(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(`UPDATE "tasks" SET "status"=\$1 WHERE task_id = \$2 AND status != \$3`).
 		WithArgs("not_started", dbcoreTaskID2, "not_started").
-		WillReturnError(dbcoreErrDB)
+		WillReturnError(errDBCore)
 	mock.ExpectRollback()
 
 	tasksUpdated, milestonesUpdated, err := UpdateAllStatuses()
-	require.ErrorIs(t, err, dbcoreErrDB)
+	require.ErrorIs(t, err, errDBCore)
 	assert.Equal(t, int64(1), tasksUpdated)
 	assert.Equal(t, int64(0), milestonesUpdated)
 }
