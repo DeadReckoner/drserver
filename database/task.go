@@ -505,10 +505,26 @@ func CompleteAllSteps(c *gin.Context, taskID string) (int64, error) {
 		return 0, taskResult.Error
 	}
 
-	// Mark all incomplete steps as complete
+	// Mark all incomplete steps as complete. Both columns must be written in
+	// the same UPDATE: status is what the completion checks read
+	// (shouldCompleteTask counts rows with status = 'incomplete'), while
+	// completed is the legacy boolean clients still consume. Writing only
+	// completed leaves the rows internally inconsistent, so shouldCompleteTask
+	// keeps reporting false for a task whose steps are all done.
+	//
+	// Skipped steps are deliberately left alone. UpdateStep treats "skipped"
+	// as done-but-not-completed (status = 'skipped', completed = false), so
+	// they already don't block task completion, and rewriting them to
+	// "completed" would silently overwrite the user's choice to skip. That is
+	// why the filter is status = 'incomplete' rather than completed = false:
+	// the latter also matches skipped rows. Filtering on status additionally
+	// makes this query agree with shouldCompleteTask by construction.
 	result := db.Model(&types.Step{}).
-		Where("task_id = ? AND completed = ?", taskID, false).
-		Update("completed", true)
+		Where("task_id = ? AND status = ?", taskID, string(types.StepStatusIncomplete)).
+		Updates(map[string]interface{}{
+			"completed": true,
+			"status":    string(types.StepStatusCompleted),
+		})
 
 	if result.Error != nil {
 		log.Println("Error completing all steps:", result.Error)
