@@ -3,6 +3,4 @@ logfile
 .vscode
 .DS_Store
 /docs
-
-# Claude Code worktrees - local-only working directories
-.claude/worktrees/
+.claude/
