@@ -6,6 +6,7 @@ import (
 	"dr/server/log"
 	"dr/server/observability"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -213,7 +214,24 @@ func verifyTokenLocally(accessToken, secret string) string {
 	if err != nil {
 		// Expired and malformed tokens are routine — clients retry with a
 		// refreshed token — so this is a warning, not an error.
-		authLog.Warn("supabase auth: token rejected", err.Error())
+		attrs := []slog.Attr{slog.String("detail", err.Error())}
+
+		// Attach the subject so a rejected token can be traced to a user.
+		// The 401 access line cannot carry user_id — AuthMiddleware aborts
+		// before the middleware that resolves it runs — so without this the
+		// only identifier on an auth failure is the client IP, which is
+		// useless for a mobile client behind carrier NAT.
+		//
+		// Only when the token is *expired*, never merely unparseable: the
+		// parser returns at ErrTokenSignatureInvalid before it validates
+		// claims, so reaching ErrTokenExpired proves these claims were
+		// signed with our secret. Logging a subject from an unverified token
+		// would let anyone write an arbitrary user_id into the logs.
+		if errors.Is(err, jwt.ErrTokenExpired) && claims.Subject != "" {
+			attrs = append(attrs, slog.String("user_id", claims.Subject))
+		}
+
+		authLog.LogAttrs(log.LevelWarn, "supabase auth: token rejected", attrs...)
 		return ""
 	}
 

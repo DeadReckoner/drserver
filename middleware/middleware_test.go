@@ -397,3 +397,55 @@ func TestGetRequestID(t *testing.T) {
 		})
 	}
 }
+
+// verifyTokenLocally attaches the token's subject to the rejection log line,
+// but only when the failure is expiry — that is what makes an expired-token
+// retry loop traceable to a user, since the 401 access line cannot carry a
+// user_id (AuthMiddleware aborts before the middleware that resolves one).
+//
+// Its safety rests on an ordering guarantee inside golang-jwt: the parser
+// verifies the signature and returns ErrTokenSignatureInvalid *before* it
+// validates claims, so ErrTokenExpired can only surface for a token signed
+// with our secret. That assumption lives in the library, not in our code, so
+// pin it here. If an upgrade ever reorders the two, this test fails — and the
+// subject logging becomes a way for anyone to write an arbitrary user_id into
+// the logs rather than a diagnostic.
+func TestJWTParse_ExpiryImpliesVerifiedSignature(t *testing.T) {
+	const sub = "11111111-1111-1111-1111-111111111111"
+	expired := time.Now().Add(-time.Minute)
+
+	parse := func(token string) (supabaseClaims, error) {
+		var claims supabaseClaims
+		_, err := jwt.ParseWithClaims(token, &claims,
+			func(*jwt.Token) (interface{}, error) { return []byte(umwTestSecret), nil },
+			jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		)
+		return claims, err
+	}
+
+	t.Run("expired but correctly signed exposes a trustworthy subject", func(t *testing.T) {
+		claims, err := parse(umwSignToken(t, umwTestSecret, umwUserClaims(sub, expired)))
+		require.Error(t, err)
+		require.True(t, errors.Is(err, jwt.ErrTokenExpired),
+			"expected ErrTokenExpired, got %v", err)
+		assert.Equal(t, sub, claims.Subject,
+			"claims must be populated for an expired token, or the log line carries nothing")
+	})
+
+	// The important half: claims from a token we did not sign are attacker
+	// controlled, so they must never reach the log as a user_id.
+	t.Run("wrong signature never reports expiry", func(t *testing.T) {
+		_, err := parse(umwSignToken(t, "a-different-secret", umwUserClaims(sub, expired)))
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, jwt.ErrTokenSignatureInvalid),
+			"expected ErrTokenSignatureInvalid, got %v", err)
+		assert.False(t, errors.Is(err, jwt.ErrTokenExpired),
+			"signature failure must short-circuit before claims validation")
+	})
+
+	t.Run("garbage never reports expiry", func(t *testing.T) {
+		_, err := parse("garbage")
+		require.Error(t, err)
+		assert.False(t, errors.Is(err, jwt.ErrTokenExpired))
+	})
+}
