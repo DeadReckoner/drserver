@@ -158,9 +158,12 @@ func TestMinScheduledDay(t *testing.T) {
 			want: 0,
 		},
 		{
-			name: "task earlier than its milestone wins",
-			rm:   roadmapWithDays(5, 2, 6),
-			want: 2,
+			// Tasks below their milestone's day are legacy milestone-relative
+			// days; they are dated from the milestone, so they must not drag
+			// the roadmap's day zero below it.
+			name: "milestone-relative task days don't lower day zero",
+			rm:   roadmapWithDays(5, 0, 2, 6),
+			want: 5,
 		},
 		{
 			name: "negative days clamp to 0",
@@ -217,5 +220,65 @@ func TestScheduleOffset_NeverNegative(t *testing.T) {
 	}
 	if got := types.ScheduleOffset(5, 5); got != 0 {
 		t.Errorf("day at day zero: got %d, want 0", got)
+	}
+}
+
+// --- TaskScheduleOffset ------------------------------------------------------
+
+func TestTaskScheduleOffset(t *testing.T) {
+	tests := []struct {
+		name                              string
+		taskDay, minTaskDay, milestoneDay int
+		want                              int
+	}{
+		// Global days (what import and SaveNextMilestone write): the offset is
+		// the distance from the milestone's day.
+		{"global, on milestone day", 14, 14, 14, 0},
+		{"global, later in milestone", 17, 14, 14, 3},
+		{"global, first task after milestone day", 16, 16, 14, 2},
+		// Legacy milestone-relative days: the minimum is below the milestone's
+		// day, so they rebase onto their own minimum.
+		{"relative from 0, first task", 0, 0, 14, 0},
+		{"relative from 0, later task", 5, 0, 14, 5},
+		{"relative from 1", 4, 1, 14, 3},
+		// A milestone on day 0 can't tell the two apart, and doesn't need to.
+		{"milestone on day 0", 3, 0, 0, 3},
+		{"never negative", -2, 0, 0, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := types.TaskScheduleOffset(tc.taskDay, tc.minTaskDay, tc.milestoneDay); got != tc.want {
+				t.Errorf("got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// The restart regression: a later milestone whose tasks were stored relative
+// to it must stay with that milestone, not collapse onto the roadmap's start.
+func TestTaskScheduleOffset_LegacyRelativeTasksFollowTheirMilestone(t *testing.T) {
+	rm := types.Roadmap{Milestones: []types.Milestone{
+		{Day: 0, Tasks: []types.Task{{Day: 0}, {Day: 2}}},
+		{Day: 14, Tasks: []types.Task{{Day: 0}, {Day: 3}}},   // legacy relative
+		{Day: 28, Tasks: []types.Task{{Day: 28}, {Day: 30}}}, // global
+	}}
+	dayZero := rm.MinScheduledDay()
+
+	var got []int
+	for _, m := range rm.Milestones {
+		minTask := m.Tasks[0].Day
+		for _, task := range m.Tasks {
+			minTask = min(minTask, task.Day)
+		}
+		for _, task := range m.Tasks {
+			got = append(got, types.ScheduleOffset(m.Day, dayZero)+types.TaskScheduleOffset(task.Day, minTask, m.Day))
+		}
+	}
+
+	want := []int{0, 2, 14, 17, 28, 30}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("days from start: got %v, want %v", got, want)
+		}
 	}
 }

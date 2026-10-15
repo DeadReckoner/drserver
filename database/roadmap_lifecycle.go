@@ -15,28 +15,45 @@ import (
 	"gorm.io/gorm"
 )
 
-// scheduleDateExpr is the SQL that places a milestone or task on
-// startDay + (day - dayZero) calendar days, at ScheduleAnchorHour local time.
-// It takes three placeholders, in order: the start day as YYYY-MM-DD, dayZero,
-// and the owner's IANA timezone.
+// scheduleDateExpr is the SQL that places a row on startDay + offset calendar
+// days, at ScheduleAnchorHour local time. offsetSQL is the day offset as a SQL
+// integer expression. The result takes placeholders, in order: the start day as
+// YYYY-MM-DD, then whatever offsetSQL needs, then the owner's IANA timezone.
 //
 // The arithmetic runs on a local `timestamp` and only converts to timestamptz
 // at the very end. That is what keeps a DST transition inside the roadmap's
 // span from dragging dates onto a neighbouring day, and it is the same reason
 // RealignRoadmapDates builds its shift the same way — adding INTERVAL '1 day'
 // to a timestamptz instead would add exactly 24h and drift the local hour.
-//
-// GREATEST("day" - dayZero, 0) is types.ScheduleOffset expressed in SQL: a
-// stray low day can't schedule work before the roadmap starts.
-func scheduleDateExpr() string {
+func scheduleDateExpr(offsetSQL string) string {
 	return fmt.Sprintf(
-		`(?::date + GREATEST("day" - ?, 0) * INTERVAL '1 day' + INTERVAL '%d hours') AT TIME ZONE ?`,
-		types.ScheduleAnchorHour,
+		`(?::date + (%s) * INTERVAL '1 day' + INTERVAL '%d hours') AT TIME ZONE ?`,
+		offsetSQL, types.ScheduleAnchorHour,
 	)
 }
 
+// milestoneOffsetSQL is types.ScheduleOffset(m.day, dayZero) in SQL, taking
+// dayZero as its one placeholder: a stray low day can't schedule work before
+// the roadmap starts.
+const milestoneOffsetSQL = `GREATEST(m.day - ?, 0)`
+
+// taskOffsetSQL is types.TaskScheduleOffset in SQL: a task's distance from its
+// milestone, telling legacy milestone-relative task days (min below the
+// milestone's day) from roadmap-global ones. s.min_day is the minimum task day
+// of the task's milestone.
+const taskOffsetSQL = `CASE WHEN s.min_day < m.day THEN GREATEST(t.day - s.min_day, 0) ELSE GREATEST(t.day - m.day, 0) END`
+
 // scheduleRoadmapDates writes `date` onto every milestone and task of a roadmap
 // from its stored Day offset, as two set-based UPDATEs.
+//
+// Milestones land on startDay + (day - dayZero). Each task lands on its own
+// milestone's date plus its offset within that milestone (see
+// types.TaskScheduleOffset), rather than on startDay + its own day. Task days
+// written by the AI next-milestone flow used to be stored relative to their
+// milestone, so dating them from the roadmap start put every milestone's
+// first task on the start day — a restart flooded today with work from the
+// whole plan. Anchoring to the milestone gives the same answer for global days
+// and the right one for the legacy rows still in the table.
 //
 // Both callers used to load every row and issue one UPDATE per row, which made
 // starting or restarting a 90-task roadmap cost hundreds of sequential round
@@ -51,17 +68,21 @@ func scheduleRoadmapDates(tx *gorm.DB, roadmapID string, startDate time.Time, da
 	}
 	startDay := startDate.In(loc).Format("2006-01-02")
 	tz := loc.String()
-	expr := scheduleDateExpr()
 
 	if err := tx.Exec(
-		"UPDATE milestones SET date = "+expr+" WHERE roadmap_id = ?",
+		"UPDATE milestones AS m SET date = "+scheduleDateExpr(milestoneOffsetSQL)+
+			" WHERE m.roadmap_id = ?",
 		startDay, dayZero, tz, roadmapID,
 	).Error; err != nil {
 		return err
 	}
 	return tx.Exec(
-		"UPDATE tasks SET date = "+expr+" WHERE roadmap_id = ?",
-		startDay, dayZero, tz, roadmapID,
+		"UPDATE tasks AS t SET date = "+
+			scheduleDateExpr(milestoneOffsetSQL+" + "+taskOffsetSQL)+
+			" FROM milestones AS m,"+
+			" (SELECT milestone_id, MIN(day) AS min_day FROM tasks WHERE roadmap_id = ? GROUP BY milestone_id) AS s"+
+			" WHERE t.roadmap_id = ? AND m.milestone_id = t.milestone_id AND s.milestone_id = t.milestone_id",
+		startDay, dayZero, tz, roadmapID, roadmapID,
 	).Error
 }
 
