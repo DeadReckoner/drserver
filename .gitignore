@@ -1,6 +1,6 @@
-.env
 logfile
-.vscode
 .DS_Store
 /docs
 .claude/
+config.bat
+node_modules

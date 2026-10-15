@@ -240,8 +240,8 @@ type Roadmap struct {
 	Milestones []Milestone `gorm:"foreignKey:RoadmapID;constraint:OnDelete:CASCADE;" json:"milestones,omitempty"`
 }
 
-// MinScheduledDay returns the smallest Day across every milestone and task in
-// the roadmap, or 0 when it carries neither.
+// MinScheduledDay returns the smallest milestone Day in the roadmap, or 0 when
+// it carries no milestones.
 //
 // Day is an offset from the start day, so the earliest item is meant to sit on
 // day 0. Generated plans routinely number from 1 instead (and the AI can ignore
@@ -251,23 +251,23 @@ type Roadmap struct {
 // plans that already start at 0 — which is what the document-import path
 // normalizes them to.
 //
-// Requires milestones and tasks to be loaded; an unpopulated roadmap yields 0,
-// which leaves scheduling unshifted.
+// Only milestones are considered. Tasks are scheduled relative to their own
+// milestone (see TaskScheduleOffset), so a task can never land before its
+// milestone and therefore can't lower the minimum. Counting raw task days used
+// to be actively harmful: older AI-generated tasks were stored with days
+// relative to their milestone (starting at 0), and letting those pull dayZero
+// down shifted every milestone of a plan numbered from 1 a day late.
+//
+// Requires milestones to be loaded; an unpopulated roadmap yields 0, which
+// leaves scheduling unshifted.
 func (r *Roadmap) MinScheduledDay() int {
 	minDay := 0
 	found := false
-	consider := func(day int) {
-		if !found || day < minDay {
-			minDay = day
-			found = true
-		}
-	}
-
 	visit := func(milestones []Milestone) {
 		for i := range milestones {
-			consider(milestones[i].Day)
-			for j := range milestones[i].Tasks {
-				consider(milestones[i].Tasks[j].Day)
+			if day := milestones[i].Day; !found || day < minDay {
+				minDay = day
+				found = true
 			}
 		}
 	}
@@ -280,6 +280,27 @@ func (r *Roadmap) MinScheduledDay() int {
 		return 0
 	}
 	return minDay
+}
+
+// TaskScheduleOffset returns how many days after its milestone's scheduled date
+// a task falls. minTaskDay is the smallest Day among that milestone's tasks.
+//
+// Task Day is meant to be roadmap-global, like milestone Day — that is what
+// plan import writes and what SaveNextMilestone writes now. AI-generated tasks
+// were previously stored relative to their milestone instead (day 0 = the
+// milestone's first day), and those rows still exist. The two are told apart
+// per milestone: a global task can't sit before its milestone, so tasks whose
+// minimum is below the milestone's Day must be milestone-relative, and are
+// rebased onto their own minimum. Otherwise the task's distance from the
+// milestone's Day is the offset. Never negative.
+//
+// scheduleRoadmapDates in the database package implements the same rule in SQL;
+// keep the two in step.
+func TaskScheduleOffset(taskDay, minTaskDay, milestoneDay int) int {
+	if minTaskDay < milestoneDay {
+		return ScheduleOffset(taskDay, minTaskDay)
+	}
+	return ScheduleOffset(taskDay, milestoneDay)
 }
 
 // ScheduleOffset rebases a Day onto the start day, given the plan's earliest

@@ -175,10 +175,12 @@ func TestStartRoadmapSchedule_MatchesGoScheduleOffset(t *testing.T) {
 			userID := createUser(t, tc.tz)
 			f := seedSchedulable(t, userID, tc.milestoneDays, tc.taskDays)
 
-			// dayZero is the plan's earliest Day across milestones AND tasks,
-			// matching types.Roadmap.MinScheduledDay.
+			// dayZero is the plan's earliest milestone Day, matching
+			// types.Roadmap.MinScheduledDay. Every task here sits under the
+			// first milestone at or after its day, so tasks are global and
+			// their offset from the start is just day - dayZero.
 			dayZero := tc.milestoneDays[0]
-			for _, d := range append(append([]int{}, tc.milestoneDays...), tc.taskDays...) {
+			for _, d := range tc.milestoneDays {
 				if d < dayZero {
 					dayZero = d
 				}
