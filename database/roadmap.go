@@ -940,6 +940,12 @@ func SaveNextMilestone(
 		// Days are rebased onto the lowest one the model returned, which puts the
 		// first task on the anchor whether it numbered from 0, from 1, or from the
 		// milestone's global day.
+		//
+		// The stored Day is roadmap-global (milestone Day + offset), the same as
+		// plan import writes it. Storing the model's milestone-relative day as-is
+		// is what made a restart pile every milestone's tasks onto the first
+		// couple of weeks: scheduleRoadmapDates re-dates tasks from Day, and a
+		// relative day 0 read as "the roadmap's first day".
 		dayZero := minTaskDay(tasks)
 		var earliestTaskDate *time.Time
 		if len(tasks) > 0 {
@@ -952,7 +958,9 @@ func SaveNextMilestone(
 					tasks[i].Status = string(types.StatusNotStarted)
 				}
 
-				taskDate := anchor.AddDate(0, 0, types.ScheduleOffset(tasks[i].Day, dayZero))
+				offset := types.ScheduleOffset(tasks[i].Day, dayZero)
+				tasks[i].Day = existing.Day + offset
+				taskDate := anchor.AddDate(0, 0, offset)
 				tasks[i].Date = &taskDate
 				if earliestTaskDate == nil || taskDate.Before(*earliestTaskDate) {
 					td := taskDate

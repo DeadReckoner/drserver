@@ -129,6 +129,9 @@ type HabitService interface {
 	Delete(c *gin.Context, habitID string) error
 	Archive(c *gin.Context, habitID string) error
 
+	// Location is the calling user's timezone, used to decide which calendar
+	// day "today" is for them.
+	Location(c *gin.Context) *time.Location
 	ForDate(c *gin.Context, date time.Time) ([]types.HabitWithStatus, error)
 	ForDateRange(c *gin.Context, start, end time.Time) (map[string][]types.HabitWithStatus, error)
 
@@ -161,6 +164,9 @@ func (DBHabitService) Delete(c *gin.Context, id string) error {
 }
 func (DBHabitService) Archive(c *gin.Context, id string) error {
 	return database.ArchiveHabit(c, id)
+}
+func (DBHabitService) Location(c *gin.Context) *time.Location {
+	return database.UserLocation(c.GetString("user_id"))
 }
 func (DBHabitService) ForDate(c *gin.Context, date time.Time) ([]types.HabitWithStatus, error) {
 	return database.GetHabitsForDate(c, date)

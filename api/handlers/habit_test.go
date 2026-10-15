@@ -200,6 +200,59 @@ func TestHabit_Today_PassesUTCMidnight(t *testing.T) {
 	}
 }
 
+// /habits/today must follow the user's calendar day. 01:30 UTC on Oct 15 is
+// still 21:30 on Oct 14 in New York, so a New York user must get Oct 14's
+// habits — handing them the 15th's is the "monthly habit shows up a day early"
+// bug. Older app builds still call this endpoint.
+func TestHabit_Today_UsesTheUsersCalendarDay(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+
+	restore := types.Now
+	t.Cleanup(func() { types.Now = restore })
+	types.Now = func() time.Time { return time.Date(2026, 10, 15, 1, 30, 0, 0, time.UTC) }
+
+	cases := []struct {
+		name string
+		loc  *time.Location
+		want string
+	}{
+		{"west of UTC, evening", ny, "2026-10-14"},
+		{"UTC", time.UTC, "2026-10-15"},
+		{"east of UTC", tokyo, "2026-10-15"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var received time.Time
+			svc := &testutil.FakeHabitService{
+				LocationFunc: func(c *gin.Context) *time.Location { return tc.loc },
+				ForDateFunc: func(c *gin.Context, date time.Time) ([]types.HabitWithStatus, error) {
+					received = date
+					return []types.HabitWithStatus{}, nil
+				},
+			}
+			w := testutil.Do(t, newHabitRouter(svc), http.MethodGet, "/api/v1/habits/today", testUser, nil)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status: got %d; body=%s", w.Code, w.Body.String())
+			}
+			if got := dayOf(received); got != tc.want {
+				t.Errorf("service got date %s, want %s", got, tc.want)
+			}
+			// Same shape /habits/date/:date passes: midnight UTC.
+			if received.Location() != time.UTC || received.Hour() != 0 {
+				t.Errorf("service got %v, want UTC midnight", received)
+			}
+		})
+	}
+}
+
 func TestHabit_ForDate_ValidDatePlumbed(t *testing.T) {
 	var received time.Time
 	svc := &testutil.FakeHabitService{
