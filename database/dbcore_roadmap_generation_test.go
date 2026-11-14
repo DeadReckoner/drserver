@@ -94,12 +94,18 @@ func TestUpdateRoadmapWithGeneration_WiresEntitiesAndReturnsSaveError(t *testing
 // timezone, the same normalization RestartRoadmap and RealignRoadmapDates use;
 // dbcoreScheduleAnchor recomputes it for the mock's UTC user.
 
-// dbcoreExpectNextMilestoneFetch stubs the opening milestone load.
+// dbcoreExpectNextMilestoneFetch stubs the opening milestone load at Day 0.
 func dbcoreExpectNextMilestoneFetch(mock sqlmock.Sqlmock, date any) {
+	dbcoreExpectNextMilestoneFetchAtDay(mock, date, 0)
+}
+
+// dbcoreExpectNextMilestoneFetchAtDay stubs the opening milestone load for a
+// milestone whose roadmap-global Day is day.
+func dbcoreExpectNextMilestoneFetchAtDay(mock sqlmock.Sqlmock, date any, day int) {
 	mock.ExpectQuery(`SELECT \* FROM "milestones" WHERE milestone_id = \$1`).
 		WithArgs(dbcoreMilestoneID, 1).
-		WillReturnRows(sqlmock.NewRows([]string{"milestone_id", "roadmap_id", "user_id", "sub_goal", "date"}).
-			AddRow(dbcoreMilestoneID, dbcoreRoadmapID, dbcoreUserID, "sg", date))
+		WillReturnRows(sqlmock.NewRows([]string{"milestone_id", "roadmap_id", "user_id", "sub_goal", "day", "date"}).
+			AddRow(dbcoreMilestoneID, dbcoreRoadmapID, dbcoreUserID, "sg", day, date))
 }
 
 // dbcoreTaskInsertArgs returns the 14 WithArgs values for one inserted task
@@ -127,7 +133,7 @@ func TestSaveNextMilestone_PastMilestone_AnchorsTasksAtToday(t *testing.T) {
 	mock := withMockDB(t)
 	today := dbcoreScheduleAnchor()
 	// Milestone planned 5 days ago -> anchor snaps forward to today.
-	dbcoreExpectNextMilestoneFetch(mock, today.AddDate(0, 0, -5))
+	dbcoreExpectNextMilestoneFetchAtDay(mock, today.AddDate(0, 0, -5), 14)
 	dbcoreExpectUserTimezone(mock)
 
 	mock.ExpectBegin()
@@ -135,8 +141,10 @@ func TestSaveNextMilestone_PastMilestone_AnchorsTasksAtToday(t *testing.T) {
 		WithArgs(dbcoreMilestoneID).
 		WillReturnResult(sqlmock.NewResult(0, 2))
 	// Days rebase onto the lowest one returned (1), so Day=1 -> today and
-	// Day=3 -> today+2d. Batch insert: 14 args per row.
-	args := append(dbcoreTaskInsertArgs("first", 1, today), dbcoreTaskInsertArgs("second", 3, today.AddDate(0, 0, 2))...)
+	// Day=3 -> today+2d. The stored Day is roadmap-global: the milestone's
+	// Day=14 plus the offset, so 14 and 16 rather than the model's 1 and 3.
+	// Batch insert: 14 args per row.
+	args := append(dbcoreTaskInsertArgs("first", 14, today), dbcoreTaskInsertArgs("second", 16, today.AddDate(0, 0, 2))...)
 	mock.ExpectQuery(`INSERT INTO "tasks"`).
 		WithArgs(args...).
 		WillReturnRows(sqlmock.NewRows([]string{"task_id"}).AddRow(dbcoreTaskID).AddRow(dbcoreTaskID2))

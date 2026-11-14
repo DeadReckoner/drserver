@@ -147,9 +147,16 @@ func (h *HabitHandler) GetTodaysHabits(c *gin.Context) {
 
 	log.Info(ctx, "GetTodaysHabits: retrieving habits for today")
 
-	// Normalize to UTC at start of day to ensure consistent date matching
-	now := time.Now().UTC()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	// "Today" is the user's calendar day, not the server's UTC one: a user in
+	// New York at 9pm is still on today, while UTC has already rolled over and
+	// would hand them tomorrow's habits (a monthly "15th" habit showed up on
+	// the 14th). The mobile client now asks /habits/date/:date with its local
+	// date; this keeps older builds that still call /today correct.
+	//
+	// ForDate takes the day as a UTC-midnight value, the same shape
+	// GetHabitsForDate parses its YYYY-MM-DD param into.
+	y, m, d := types.Now().In(h.service.Location(c)).Date()
+	todayStart := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 
 	habits, err := h.service.ForDate(c, todayStart)
 	if err != nil {

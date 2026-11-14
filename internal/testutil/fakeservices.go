@@ -175,6 +175,7 @@ type FakeHabitService struct {
 	UpdateFunc           func(c *gin.Context, habitID string, h types.Habit) (types.Habit, error)
 	DeleteFunc           func(c *gin.Context, habitID string) error
 	ArchiveFunc          func(c *gin.Context, habitID string) error
+	LocationFunc         func(c *gin.Context) *time.Location
 	ForDateFunc          func(c *gin.Context, date time.Time) ([]types.HabitWithStatus, error)
 	ForDateRangeFunc     func(c *gin.Context, start, end time.Time) (map[string][]types.HabitWithStatus, error)
 	CompleteFunc         func(c *gin.Context, habitID string, date time.Time, notes string) (*types.HabitCompletion, error)
@@ -222,6 +223,15 @@ func (f *FakeHabitService) Archive(c *gin.Context, id string) error {
 		panic("FakeHabitService.ArchiveFunc not set")
 	}
 	return f.ArchiveFunc(c, id)
+}
+
+// Location defaults to UTC so tests that don't care about timezones needn't
+// set LocationFunc.
+func (f *FakeHabitService) Location(c *gin.Context) *time.Location {
+	if f.LocationFunc == nil {
+		return time.UTC
+	}
+	return f.LocationFunc(c)
 }
 func (f *FakeHabitService) ForDate(c *gin.Context, date time.Time) ([]types.HabitWithStatus, error) {
 	if f.ForDateFunc == nil {
