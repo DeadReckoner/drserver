@@ -179,16 +179,36 @@ func supabaseJWTSecret() string {
 // parseToken resolves an access token to a user id, or "" if the token isn't
 // valid.
 //
-// Supabase signs access tokens with HS256 using the project's JWT secret, so
-// when that secret is configured we verify the signature in-process and skip
-// the network entirely. Without it we fall back to asking Supabase to validate
-// the token — which is a full HTTPS round trip on *every* authenticated
-// request, and was previously the only path.
+// There are three ways to verify a token, tried in this order:
 //
-// The fallback is what makes this safe to deploy before the secret is set:
-// nothing changes until SUPABASE_JWT_SECRET lands in the environment.
+//  1. Asymmetric (ES256/RS256): a project using Supabase's JWT signing keys
+//     signs with a private key and publishes the public half as a JWKS. We
+//     verify in-process against those keys; see jwks.go. No configuration is
+//     needed beyond API_URL.
+//  2. HS256 with the project's legacy JWT secret, when SUPABASE_JWT_SECRET is
+//     configured. Also in-process.
+//  3. Asking Supabase to validate the token — a full HTTPS round trip on
+//     *every* authenticated request. This is the fallback for anything the
+//     first two cannot decide.
+//
+// The token's own "alg" header picks between 1 and 2. That header is
+// attacker-controlled, which is fine: it only selects a path, and each path
+// pins the algorithms it accepts. A project mid-migration issues both kinds
+// of token, so both paths have to work side by side.
+//
+// The fallback is what makes every step of that migration safe to deploy in
+// any order: a token no local path can decide is still validated by Supabase.
 func parseToken(accessToken string) string {
 	envOnce.Do(func() { _ = godotenv.Load(".env") })
+
+	if isAsymmetricAlg(tokenAlg(accessToken)) {
+		if subject, decided := verifyTokenWithJWKS(accessToken); decided {
+			return subject
+		}
+		// The signing key could not be obtained (JWKS unreachable, or a kid
+		// we cannot find). Supabase can still give a verdict.
+		return verifyTokenWithSupabase(accessToken)
+	}
 
 	if secret := supabaseJWTSecret(); secret != "" {
 		return verifyTokenLocally(accessToken, secret)
@@ -211,6 +231,16 @@ func verifyTokenLocally(accessToken, secret string) string {
 		func(*jwt.Token) (interface{}, error) { return []byte(secret), nil },
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 	)
+	return subjectFromVerifiedClaims(claims, err)
+}
+
+// subjectFromVerifiedClaims turns the outcome of a signature check into a
+// user id. err is the parser's error; claims are only trusted when it is nil.
+// Shared by the HS256 and JWKS paths so both apply the same rules.
+//
+// The role check is load-bearing on both: the anon key is a JWT signed by the
+// project, and it must never authenticate anyone.
+func subjectFromVerifiedClaims(claims supabaseClaims, err error) string {
 	if err != nil {
 		// Expired and malformed tokens are routine — clients retry with a
 		// refreshed token — so this is a warning, not an error.
@@ -225,7 +255,7 @@ func verifyTokenLocally(accessToken, secret string) string {
 		// Only when the token is *expired*, never merely unparseable: the
 		// parser returns at ErrTokenSignatureInvalid before it validates
 		// claims, so reaching ErrTokenExpired proves these claims were
-		// signed with our secret. Logging a subject from an unverified token
+		// signed with our key. Logging a subject from an unverified token
 		// would let anyone write an arbitrary user_id into the logs.
 		if errors.Is(err, jwt.ErrTokenExpired) && claims.Subject != "" {
 			attrs = append(attrs, slog.String("user_id", claims.Subject))
@@ -248,8 +278,8 @@ func verifyTokenLocally(accessToken, secret string) string {
 }
 
 // verifyTokenWithSupabase asks the Supabase auth API to validate the token and
-// returns the user id from the response. Used when no JWT secret is
-// configured; see parseToken.
+// returns the user id from the response. Used when a token cannot be decided
+// in-process; see parseToken.
 func verifyTokenWithSupabase(accessToken string) string {
 	supabaseKey := os.Getenv("anon_key")
 	supabaseApi := os.Getenv("API_URL")
